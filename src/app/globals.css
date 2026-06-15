@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 800px at 50% -10%, rgba(56, 232, 255, 0.10), transparent 60%),
+    radial-gradient(900px 700px at 100% 110%, rgba(99, 102, 241, 0.10), transparent 55%),
+    #05070d;
+  color: #e6edf6;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* Scrollbar discreta */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Nucleo ORION
+   ────────────────────────────────────────────────────────────────────────── */
+
+.orion-core {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.orion-core .ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 1px solid rgba(56, 232, 255, 0.35);
+}
+
+.orion-core .nucleus {
+  position: absolute;
+  inset: 22%;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 35% 30%, #9af4ff, #38e8ff 35%, #0b7d92 75%, #053842);
+  box-shadow:
+    0 0 30px rgba(56, 232, 255, 0.55),
+    0 0 80px rgba(56, 232, 255, 0.25),
+    inset 0 0 24px rgba(255, 255, 255, 0.35);
+  transition: inset 0.4s ease, box-shadow 0.4s ease;
+}
+
+.orion-core .halo {
+  position: absolute;
+  inset: -12%;
+  border-radius: 9999px;
+  background: radial-gradient(circle, rgba(56, 232, 255, 0.18), transparent 65%);
+  opacity: 0.6;
+}
+
+/* Idle: respiro lento */
+.orion-core[data-state="idle"] .nucleus {
+  animation: breathe 4.5s ease-in-out infinite;
+}
+.orion-core[data-state="idle"] .ring {
+  animation: spin 28s linear infinite;
+}
+
+/* In ascolto: anelli reattivi */
+.orion-core[data-state="listening"] .ring {
+  border-color: rgba(56, 232, 255, 0.6);
+  animation: listen 1.4s ease-out infinite;
+}
+.orion-core[data-state="listening"] .nucleus {
+  inset: 18%;
+  box-shadow:
+    0 0 45px rgba(56, 232, 255, 0.8),
+    0 0 110px rgba(56, 232, 255, 0.35);
+}
+
+/* Pensa: rotazione veloce + colore indaco */
+.orion-core[data-state="thinking"] .ring {
+  border-color: rgba(129, 140, 248, 0.6);
+  border-top-color: rgba(196, 181, 253, 0.95);
+  animation: spin 1.1s linear infinite;
+}
+.orion-core[data-state="thinking"] .nucleus {
+  background: radial-gradient(circle at 35% 30%, #c7d2fe, #818cf8 38%, #4338ca 78%);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+/* Parla: pulsazione viva */
+.orion-core[data-state="speaking"] .nucleus {
+  animation: talk 0.7s ease-in-out infinite;
+}
+.orion-core[data-state="speaking"] .ring {
+  animation: listen 1s ease-out infinite;
+}
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes talk {
+  0%, 100% { transform: scale(1); }
+  25% { transform: scale(1.12); }
+  60% { transform: scale(0.97); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes listen {
+  0% { transform: scale(0.92); opacity: 0.9; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+/* Pannelli (chrome vetro) */
+.glass {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(14px);
+}
+
+.panel-enter {
+  animation: panelIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes panelIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.fade-in {
+  animation: fadeIn 0.4s ease both;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
