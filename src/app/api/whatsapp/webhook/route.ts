@@ -9,9 +9,12 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const mode = p.get("hub.mode");
-  const token = p.get("hub.verify_token");
+  const token = (p.get("hub.verify_token") ?? "").trim();
   const challenge = p.get("hub.challenge");
-  if (mode === "subscribe" && token && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+  // Verify token fisso (parola d'ordine dell'handshake, non un segreto critico):
+  // così la verifica non dipende da caratteri invisibili in una variabile.
+  const atteso = "orion2026";
+  if (mode === "subscribe" && token && token === atteso) {
     return new NextResponse(challenge ?? "", { status: 200 });
   }
   return new NextResponse("forbidden", { status: 403 });
