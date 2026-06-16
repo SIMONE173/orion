@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
+import { Notifiche } from "@/components/Notifiche";
 import { useSpeech } from "@/components/useSpeech";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat } from "@/components/icons";
 import type { Vista } from "@/lib/orion/views";
@@ -170,6 +171,7 @@ export default function Home() {
           <span className="text-sm font-semibold tracking-[0.35em] text-slate-200">ORION</span>
         </div>
         <div className="flex items-center gap-2">
+          <Notifiche />
           <button
             onClick={() => setVoiceOn(!voiceOn)}
             className="grid size-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"

@@ -145,11 +145,24 @@ function migrate(d: Database.Database) {
       priorita TEXT NOT NULL DEFAULT 'normale',
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrazione idempotente: aggiunge colonne nuove a DB già esistenti.
   try {
     d.exec("ALTER TABLE comunicazioni ADD COLUMN allegato_url TEXT");
+  } catch {
+    /* colonna già presente */
+  }
+  try {
+    d.exec("ALTER TABLE promemoria ADD COLUMN notificato INTEGER NOT NULL DEFAULT 0");
   } catch {
     /* colonna già presente */
   }

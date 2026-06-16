@@ -651,6 +651,51 @@ export function rimuoviAttesa(id: number): boolean {
   return db().prepare("DELETE FROM lista_attesa WHERE id = ?").run(id).changes > 0;
 }
 
+// ── Notifiche push ──────────────────────────────────────────────────────────
+
+export type PushSub = { endpoint: string; p256dh: string; auth: string };
+
+export function salvaSubscription(s: PushSub) {
+  db()
+    .prepare(
+      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`
+    )
+    .run(s.endpoint, s.p256dh, s.auth, nowISO());
+}
+
+export function listSubscriptions(): PushSub[] {
+  return db()
+    .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")
+    .all() as PushSub[];
+}
+
+export function rimuoviSubscription(endpoint: string) {
+  db().prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+}
+
+export function contaSubscriptions(): number {
+  return (db().prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get() as { n: number }).n;
+}
+
+// Promemoria scaduti/per oggi non ancora notificati (per le notifiche automatiche).
+export function promemoriaDaNotificare(): Promemoria[] {
+  const oggi = new Date().toISOString().slice(0, 10);
+  return db()
+    .prepare(
+      `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id
+       WHERE pr.completato = 0 AND pr.notificato = 0 AND pr.scadenza IS NOT NULL AND pr.scadenza <= ?`
+    )
+    .all(oggi) as Promemoria[];
+}
+
+export function segnaPromemoriaNotificati(ids: number[]) {
+  if (!ids.length) return;
+  const stmt = db().prepare("UPDATE promemoria SET notificato = 1 WHERE id = ?");
+  const tx = db().transaction((lista: number[]) => lista.forEach((id) => stmt.run(id)));
+  tx(ids);
+}
+
 // ── Analisi proattiva ─────────────────────────────────────────────────────
 
 export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
