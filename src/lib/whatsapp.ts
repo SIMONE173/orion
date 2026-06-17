@@ -1,5 +1,3 @@
-import { listSubscriptions, rimuoviSubscription } from "./data";
-
 // ──────────────────────────────────────────────────────────────────────────
 // Adapter WhatsApp. Se le variabili d'ambiente sono presenti usa la
 // WhatsApp Business Cloud API (Meta); altrimenti resta in modalità SIMULATA.

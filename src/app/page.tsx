@@ -5,8 +5,9 @@ import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
 import { Notifiche } from "@/components/Notifiche";
+import { AuthScreen } from "@/components/AuthScreen";
 import { useSpeech } from "@/components/useSpeech";
-import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat } from "@/components/icons";
+import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista } from "@/lib/orion/views";
 
 type Msg = { role: "user" | "assistant"; content: string };
@@ -22,8 +23,10 @@ export default function Home() {
   const [mostraCamera, setMostraCamera] = useState(false);
   const [avviso, setAvviso] = useState<string | null>(null);
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
+  const [autenticato, setAutenticato] = useState<boolean | null>(null);
 
   const avviato = useRef(false);
+  const salutato = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const ultimoCheck = useRef<string>(new Date().toISOString());
   const messaggiVisti = useRef<Set<number>>(new Set());
@@ -87,7 +90,7 @@ export default function Home() {
   const cancelSpeakRef = useRef(cancelSpeak);
   cancelSpeakRef.current = cancelSpeak;
 
-  // Avvio: stato + prima battuta di ORION (briefing oppure Chiamata 0).
+  // Avvio: capisci se l'utente è già loggato (cookie di sessione).
   useEffect(() => {
     if (avviato.current) return;
     avviato.current = true;
@@ -96,12 +99,34 @@ export default function Home() {
         const r = await fetch("/api/state");
         const s = await r.json();
         setHasKey(Boolean(s.hasKey));
+        setAutenticato(Boolean(s.autenticato));
       } catch {
-        /* noop */
+        setAutenticato(false);
       }
-      inviaAOrion(undefined, true);
     })();
-  }, [inviaAOrion]);
+  }, []);
+
+  // Prima battuta di ORION (briefing o Chiamata 0), solo dopo l'accesso.
+  useEffect(() => {
+    if (autenticato && !salutato.current) {
+      salutato.current = true;
+      inviaAOrion(undefined, true);
+    }
+  }, [autenticato, inviaAOrion]);
+
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* noop */
+    }
+    cancelSpeakRef.current?.();
+    salutato.current = false;
+    setMessages([]);
+    setViste([]);
+    setAvviso(null);
+    setAutenticato(false);
+  }, []);
 
   const coreState: CoreState = loading
     ? "thinking"
@@ -162,6 +187,18 @@ export default function Home() {
 
   const haPannelli = viste.length > 0;
 
+  // Gate d'accesso: in attesa → splash; non loggato → schermata accesso.
+  if (autenticato === null) {
+    return (
+      <main className="grid h-screen place-items-center">
+        <OrionCore state="thinking" size={120} />
+      </main>
+    );
+  }
+  if (!autenticato) {
+    return <AuthScreen onAuth={() => setAutenticato(true)} />;
+  }
+
   return (
     <main className="flex h-screen flex-col">
       {/* Header */}
@@ -185,6 +222,13 @@ export default function Home() {
             title="Conversazione"
           >
             <IconChat className="h-4 w-4" />
+          </button>
+          <button
+            onClick={logout}
+            className="grid size-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+            title="Esci"
+          >
+            <IconLogout className="h-4 w-4" />
           </button>
         </div>
       </header>

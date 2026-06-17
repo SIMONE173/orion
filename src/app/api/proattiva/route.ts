@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analisiProattiva, messaggiInArrivoDopo } from "@/lib/data";
+import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,14 +10,18 @@ export const dynamic = "force-dynamic";
 // È pura lettura del DB → NON consuma crediti dell'API.
 export async function GET(req: NextRequest) {
   const dopo = req.nextUrl.searchParams.get("dopo");
-  const { segnalazioni } = analisiProattiva();
-  const nuoviMessaggi = dopo
-    ? messaggiInArrivoDopo(dopo).map((m) => ({
-        id: m.id,
-        cliente: m.cliente_nome ?? "Sconosciuto",
-        tipo: m.tipo,
-        anteprima: m.contenuto ?? `[${m.tipo}]`,
-      }))
-    : [];
-  return NextResponse.json({ segnalazioni, nuoviMessaggi });
+  const r = await conTenant(() => {
+    const { segnalazioni } = analisiProattiva();
+    const nuoviMessaggi = dopo
+      ? messaggiInArrivoDopo(dopo).map((m) => ({
+          id: m.id,
+          cliente: m.cliente_nome ?? "Sconosciuto",
+          tipo: m.tipo,
+          anteprima: m.contenuto ?? `[${m.tipo}]`,
+        }))
+      : [];
+    return { segnalazioni, nuoviMessaggi };
+  });
+  if (!r.ok) return NextResponse.json({ segnalazioni: [], nuoviMessaggi: [] });
+  return NextResponse.json(r.data);
 }

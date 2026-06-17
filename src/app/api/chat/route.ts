@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runConversation, type MessaggioStorico } from "@/lib/orion/client";
+import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,8 +13,14 @@ export async function POST(req: NextRequest) {
     const allegato =
       typeof body?.allegato?.dataUrl === "string" ? { dataUrl: body.allegato.dataUrl } : undefined;
 
-    const risultato = await runConversation(storico, avvio, allegato);
-    return NextResponse.json(risultato);
+    const r = await conTenant(() => runConversation(storico, avvio, allegato));
+    if (!r.ok) {
+      return NextResponse.json(
+        { testo: "Sessione scaduta. Accedi di nuovo.", viste: [], errore: "auth_sessione" },
+        { status: 401 }
+      );
+    }
+    return NextResponse.json(r.data);
   } catch (e) {
     console.error("[/api/chat]", e);
     return NextResponse.json(

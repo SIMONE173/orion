@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClienteByTelefono, logCommunication } from "@/lib/data";
 import { scaricaMediaWhatsApp } from "@/lib/whatsapp";
+import { primoTenant } from "@/lib/auth";
+import { runWithTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,33 +38,40 @@ export async function POST(req: NextRequest) {
     const messaggi = body?.entry?.[0]?.changes?.[0]?.value?.messages;
     if (!Array.isArray(messaggi)) return NextResponse.json({ ok: true });
 
-    for (const m of messaggi) {
-      const telefono: string = m.from ?? "";
-      const cliente = telefono ? getClienteByTelefono(telefono) : undefined;
-      const tipo = TIPO_MEDIA[m.type] ?? "testo";
+    // Fase 1: numero Meta condiviso → l'inbound è attribuito al primo account.
+    // Fase 2 (Embedded Signup): routing per phone_number_id verso il tenant proprietario.
+    const tenantId = primoTenant();
+    if (!tenantId) return NextResponse.json({ ok: true });
 
-      let contenuto: string | null = m.text?.body ?? null;
-      let allegato_url: string | null = null;
-      let allegato_nome: string | null = null;
+    await runWithTenant(tenantId, async () => {
+      for (const m of messaggi) {
+        const telefono: string = m.from ?? "";
+        const cliente = telefono ? getClienteByTelefono(telefono) : undefined;
+        const tipo = TIPO_MEDIA[m.type] ?? "testo";
 
-      const media = m.image ?? m.document ?? m.audio ?? m.voice ?? m.video ?? m.sticker;
-      if (media?.id) {
-        allegato_nome = media.filename ?? `${tipo}`;
-        if (media.caption) contenuto = media.caption;
-        const scaricato = await scaricaMediaWhatsApp(media.id);
-        if (scaricato) allegato_url = scaricato.dataUrl;
+        let contenuto: string | null = m.text?.body ?? null;
+        let allegato_url: string | null = null;
+        let allegato_nome: string | null = null;
+
+        const media = m.image ?? m.document ?? m.audio ?? m.voice ?? m.video ?? m.sticker;
+        if (media?.id) {
+          allegato_nome = media.filename ?? `${tipo}`;
+          if (media.caption) contenuto = media.caption;
+          const scaricato = await scaricaMediaWhatsApp(media.id);
+          if (scaricato) allegato_url = scaricato.dataUrl;
+        }
+
+        logCommunication({
+          cliente_id: cliente?.id ?? null,
+          direzione: "in",
+          tipo,
+          contenuto: contenuto ?? (tipo !== "testo" ? `[${tipo}]` : null),
+          allegato_nome,
+          allegato_url,
+          stato: "ricevuto",
+        });
       }
-
-      logCommunication({
-        cliente_id: cliente?.id ?? null,
-        direzione: "in",
-        tipo,
-        contenuto: contenuto ?? (tipo !== "testo" ? `[${tipo}]` : null),
-        allegato_nome,
-        allegato_url,
-        stato: "ricevuto",
-      });
-    }
+    });
 
     return NextResponse.json({ ok: true });
   } catch (e) {

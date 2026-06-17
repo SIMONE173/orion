@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { salvaSubscription } from "@/lib/data";
+import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,8 @@ export async function POST(req: NextRequest) {
     if (!endpoint || !p256dh || !auth) {
       return NextResponse.json({ ok: false, errore: "Iscrizione incompleta" }, { status: 400 });
     }
-    salvaSubscription({ endpoint, p256dh, auth });
+    const r = await conTenant(() => salvaSubscription({ endpoint, p256dh, auth }));
+    if (!r.ok) return NextResponse.json({ ok: false, errore: "Non autenticato" }, { status: 401 });
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

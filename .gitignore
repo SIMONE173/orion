@@ -25,3 +25,6 @@ next-env.d.ts
 *.pem
 *.log
 npm-debug.log*
+
+# backup locali del DB (mai versionare)
+/data/*.bak*

@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { getProfilo } from "@/lib/data";
+import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const profilo = getProfilo();
-  return NextResponse.json({
-    onboardingCompleto: profilo.onboarding_completo === 1,
-    nome: profilo.nome,
-    hasKey: Boolean(process.env.ANTHROPIC_API_KEY),
+  const r = await conTenant((u) => {
+    const profilo = getProfilo();
+    return {
+      autenticato: true,
+      utente: { email: u.email, nome: u.nome },
+      onboardingCompleto: profilo.onboarding_completo === 1,
+      nome: profilo.nome,
+    };
   });
+  const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  if (!r.ok) return NextResponse.json({ autenticato: false, hasKey });
+  return NextResponse.json({ ...r.data, hasKey });
 }

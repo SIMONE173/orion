@@ -1,12 +1,15 @@
 import { db } from "./db";
+import { tenantIdCorrente } from "./tenant";
 
 // ──────────────────────────────────────────────────────────────────────────
-// Accesso ai dati. Tutte le operazioni di ORION passano da qui.
-// Punto di integrazione futura (WhatsApp Business API reale): `inviaWhatsapp`.
+// Accesso ai dati, MULTI-TENANT: ogni query è filtrata per tenant_id, preso
+// dal contesto della richiesta (tenant.ts). Le funzioni vanno chiamate dentro
+// runWithTenant(...) — lo fanno le route dopo aver verificato la sessione.
+// Punto d'integrazione WhatsApp reale: `logCommunication`.
 // ──────────────────────────────────────────────────────────────────────────
 
 export type Profilo = {
-  id: number;
+  tenant_id: number;
   nome: string | null;
   professione: string | null;
   durata_visita_min: number | null;
@@ -115,36 +118,22 @@ export type VoceAttesa = {
   created_at: string;
 };
 
-export type Segnalazione = {
-  categoria: string;
-  titolo: string;
-  dettaglio: string;
-  azione: string;
-};
+export type Segnalazione = { categoria: string; titolo: string; dettaglio: string; azione: string };
+export type PushSub = { endpoint: string; p256dh: string; auth: string };
 
 const nowISO = () => new Date().toISOString();
+const T = () => tenantIdCorrente();
 
 // ── Profilo / memoria operativa ───────────────────────────────────────────
 
 export function getProfilo(): Profilo {
-  return db().prepare("SELECT * FROM profilo WHERE id = 1").get() as Profilo;
+  return db().prepare("SELECT * FROM profili WHERE tenant_id = ?").get(T()) as Profilo;
 }
 
 const CAMPI_PROFILO = [
-  "nome",
-  "professione",
-  "durata_visita_min",
-  "gestione_cancellazioni",
-  "canale_comunicazione",
-  "problemi_tempo",
-  "abitudini",
-  "piva",
-  "codice_fiscale",
-  "indirizzo",
-  "regime_fiscale",
-  "pec",
-  "sdi",
-  "onboarding_completo",
+  "nome", "professione", "durata_visita_min", "gestione_cancellazioni",
+  "canale_comunicazione", "problemi_tempo", "abitudini", "piva", "codice_fiscale",
+  "indirizzo", "regime_fiscale", "pec", "sdi", "onboarding_completo",
 ] as const;
 
 export function aggiornaProfilo(fields: Record<string, unknown>): Profilo {
@@ -159,9 +148,8 @@ export function aggiornaProfilo(fields: Record<string, unknown>): Profilo {
   if (updates.length) {
     updates.push("updated_at = ?");
     values.push(nowISO());
-    db()
-      .prepare(`UPDATE profilo SET ${updates.join(", ")} WHERE id = 1`)
-      .run(...values);
+    values.push(T());
+    db().prepare(`UPDATE profili SET ${updates.join(", ")} WHERE tenant_id = ?`).run(...values);
   }
   return getProfilo();
 }
@@ -170,12 +158,12 @@ export function aggiornaProfilo(fields: Record<string, unknown>): Profilo {
 
 export function listClienti(): Cliente[] {
   return db()
-    .prepare("SELECT * FROM clienti ORDER BY nome COLLATE NOCASE")
-    .all() as Cliente[];
+    .prepare("SELECT * FROM clienti WHERE tenant_id = ? ORDER BY nome COLLATE NOCASE")
+    .all(T()) as Cliente[];
 }
 
 export function getCliente(id: number): Cliente | undefined {
-  return db().prepare("SELECT * FROM clienti WHERE id = ?").get(id) as
+  return db().prepare("SELECT * FROM clienti WHERE id = ? AND tenant_id = ?").get(id, T()) as
     | Cliente
     | undefined;
 }
@@ -183,26 +171,29 @@ export function getCliente(id: number): Cliente | undefined {
 export function cercaCliente(q: string): Cliente[] {
   return db()
     .prepare(
-      "SELECT * FROM clienti WHERE nome LIKE ? OR telefono LIKE ? ORDER BY nome COLLATE NOCASE LIMIT 10"
+      "SELECT * FROM clienti WHERE tenant_id = ? AND (nome LIKE ? OR telefono LIKE ?) ORDER BY nome COLLATE NOCASE LIMIT 10"
     )
-    .all(`%${q}%`, `%${q}%`) as Cliente[];
+    .all(T(), `%${q}%`, `%${q}%`) as Cliente[];
+}
+
+export function getClienteByTelefono(telefono: string): Cliente | undefined {
+  const ultime = telefono.replace(/\D/g, "").slice(-9);
+  if (!ultime) return undefined;
+  const tutti = db()
+    .prepare("SELECT * FROM clienti WHERE tenant_id = ? AND telefono IS NOT NULL")
+    .all(T()) as Cliente[];
+  return tutti.find((c) => (c.telefono ?? "").replace(/\D/g, "").endsWith(ultime));
 }
 
 export function creaCliente(c: Partial<Cliente> & { nome: string }): Cliente {
   const r = db()
     .prepare(
-      `INSERT INTO clienti (nome, telefono, email, note, piva, codice_fiscale, indirizzo, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clienti (tenant_id, nome, telefono, email, note, piva, codice_fiscale, indirizzo, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      c.nome,
-      c.telefono ?? null,
-      c.email ?? null,
-      c.note ?? null,
-      c.piva ?? null,
-      c.codice_fiscale ?? null,
-      c.indirizzo ?? null,
-      nowISO()
+      T(), c.nome, c.telefono ?? null, c.email ?? null, c.note ?? null,
+      c.piva ?? null, c.codice_fiscale ?? null, c.indirizzo ?? null, nowISO()
     );
   return getCliente(Number(r.lastInsertRowid))!;
 }
@@ -218,8 +209,8 @@ export function aggiornaCliente(id: number, c: Partial<Cliente>): Cliente | unde
     }
   }
   if (updates.length) {
-    values.push(id);
-    db().prepare(`UPDATE clienti SET ${updates.join(", ")} WHERE id = ?`).run(...values);
+    values.push(id, T());
+    db().prepare(`UPDATE clienti SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
   }
   return getCliente(id);
 }
@@ -227,18 +218,19 @@ export function aggiornaCliente(id: number, c: Partial<Cliente>): Cliente | unde
 export function schedaCliente(id: number) {
   const cliente = getCliente(id);
   if (!cliente) return null;
+  const t = T();
   const appuntamenti = db()
-    .prepare("SELECT * FROM appuntamenti WHERE cliente_id = ? ORDER BY inizio DESC LIMIT 10")
-    .all(id) as Appuntamento[];
+    .prepare("SELECT * FROM appuntamenti WHERE cliente_id = ? AND tenant_id = ? ORDER BY inizio DESC LIMIT 10")
+    .all(id, t) as Appuntamento[];
   const pagamenti = db()
-    .prepare("SELECT * FROM pagamenti WHERE cliente_id = ? ORDER BY data DESC LIMIT 10")
-    .all(id) as Pagamento[];
+    .prepare("SELECT * FROM pagamenti WHERE cliente_id = ? AND tenant_id = ? ORDER BY data DESC LIMIT 10")
+    .all(id, t) as Pagamento[];
   const comunicazioni = db()
-    .prepare("SELECT * FROM comunicazioni WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 10")
-    .all(id) as Comunicazione[];
+    .prepare("SELECT * FROM comunicazioni WHERE cliente_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 10")
+    .all(id, t) as Comunicazione[];
   const note = db()
-    .prepare("SELECT * FROM note WHERE cliente_id = ? ORDER BY created_at DESC LIMIT 10")
-    .all(id) as Nota[];
+    .prepare("SELECT * FROM note WHERE cliente_id = ? AND tenant_id = ? ORDER BY created_at DESC LIMIT 10")
+    .all(id, t) as Nota[];
   const totaleIncassato = pagamenti
     .filter((p) => p.stato === "incassato")
     .reduce((s, p) => s + p.importo, 0);
@@ -249,32 +241,32 @@ export function schedaCliente(id: number) {
 
 const APP_JOIN = `
   SELECT a.*, c.nome AS cliente_nome
-  FROM appuntamenti a
-  LEFT JOIN clienti c ON c.id = a.cliente_id
+  FROM appuntamenti a LEFT JOIN clienti c ON c.id = a.cliente_id
 `;
 
 export function listAppuntamenti(dataDa: string, dataA: string): Appuntamento[] {
-  // dataDa/dataA: "YYYY-MM-DD". Confronto su prefisso ISO.
   return db()
     .prepare(
-      `${APP_JOIN} WHERE substr(a.inizio,1,10) >= ? AND substr(a.inizio,1,10) <= ? AND a.stato != 'cancellato' ORDER BY a.inizio`
+      `${APP_JOIN} WHERE a.tenant_id = ? AND substr(a.inizio,1,10) >= ? AND substr(a.inizio,1,10) <= ? AND a.stato != 'cancellato' ORDER BY a.inizio`
     )
-    .all(dataDa, dataA) as Appuntamento[];
+    .all(T(), dataDa, dataA) as Appuntamento[];
 }
 
 export function getAppuntamento(id: number): Appuntamento | undefined {
-  return db().prepare(`${APP_JOIN} WHERE a.id = ?`).get(id) as Appuntamento | undefined;
+  return db().prepare(`${APP_JOIN} WHERE a.id = ? AND a.tenant_id = ?`).get(id, T()) as
+    | Appuntamento
+    | undefined;
 }
 
 export function trovaConflitti(inizio: string, fine: string, escludiId?: number): Appuntamento[] {
-  // Sovrapposizione: inizio < fine_esistente AND fine > inizio_esistente
+  const t = T();
   return db()
     .prepare(
-      `${APP_JOIN} WHERE a.stato != 'cancellato' AND a.inizio < ? AND a.fine > ? ${
+      `${APP_JOIN} WHERE a.tenant_id = ? AND a.stato != 'cancellato' AND a.inizio < ? AND a.fine > ? ${
         escludiId ? "AND a.id != ?" : ""
       }`
     )
-    .all(...(escludiId ? [fine, inizio, escludiId] : [fine, inizio])) as Appuntamento[];
+    .all(...(escludiId ? [t, fine, inizio, escludiId] : [t, fine, inizio])) as Appuntamento[];
 }
 
 export function creaAppuntamento(a: {
@@ -287,51 +279,45 @@ export function creaAppuntamento(a: {
 }): Appuntamento {
   const r = db()
     .prepare(
-      `INSERT INTO appuntamenti (cliente_id, titolo, inizio, fine, stato, note, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(
-      a.cliente_id ?? null,
-      a.titolo,
-      a.inizio,
-      a.fine,
-      a.stato ?? "da_confermare",
-      a.note ?? null,
-      nowISO()
-    );
+    .run(T(), a.cliente_id ?? null, a.titolo, a.inizio, a.fine, a.stato ?? "da_confermare", a.note ?? null, nowISO());
   return getAppuntamento(Number(r.lastInsertRowid))!;
 }
 
 export function spostaAppuntamento(id: number, inizio: string, fine: string): Appuntamento | undefined {
-  db().prepare("UPDATE appuntamenti SET inizio = ?, fine = ? WHERE id = ?").run(inizio, fine, id);
+  db().prepare("UPDATE appuntamenti SET inizio = ?, fine = ? WHERE id = ? AND tenant_id = ?").run(inizio, fine, id, T());
   return getAppuntamento(id);
 }
 
 export function aggiornaStatoAppuntamento(id: number, stato: string): Appuntamento | undefined {
-  db().prepare("UPDATE appuntamenti SET stato = ? WHERE id = ?").run(stato, id);
+  db().prepare("UPDATE appuntamenti SET stato = ? WHERE id = ? AND tenant_id = ?").run(stato, id, T());
   return getAppuntamento(id);
 }
 
 export function eliminaAppuntamento(id: number): boolean {
-  const r = db().prepare("UPDATE appuntamenti SET stato = 'cancellato' WHERE id = ?").run(id);
-  return r.changes > 0;
+  return (
+    db().prepare("UPDATE appuntamenti SET stato = 'cancellato' WHERE id = ? AND tenant_id = ?").run(id, T())
+      .changes > 0
+  );
 }
 
 // ── Note ──────────────────────────────────────────────────────────────────
 
 export function creaNota(n: { cliente_id?: number | null; titolo?: string | null; contenuto: string }): Nota {
   const r = db()
-    .prepare(`INSERT INTO note (cliente_id, titolo, contenuto, created_at) VALUES (?, ?, ?, ?)`)
-    .run(n.cliente_id ?? null, n.titolo ?? null, n.contenuto, nowISO());
+    .prepare(`INSERT INTO note (tenant_id, cliente_id, titolo, contenuto, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(T(), n.cliente_id ?? null, n.titolo ?? null, n.contenuto, nowISO());
   return db().prepare("SELECT * FROM note WHERE id = ?").get(Number(r.lastInsertRowid)) as Nota;
 }
 
 export function listNote(): Nota[] {
   return db()
     .prepare(
-      `SELECT n.*, c.nome AS cliente_nome FROM note n LEFT JOIN clienti c ON c.id = n.cliente_id ORDER BY n.created_at DESC LIMIT 30`
+      `SELECT n.*, c.nome AS cliente_nome FROM note n LEFT JOIN clienti c ON c.id = n.cliente_id WHERE n.tenant_id = ? ORDER BY n.created_at DESC LIMIT 30`
     )
-    .all() as Nota[];
+    .all(T()) as Nota[];
 }
 
 // ── Pagamenti / analisi economica ───────────────────────────────────────────
@@ -347,18 +333,10 @@ export function registraPagamento(p: {
   const data = p.data ?? new Date().toISOString().slice(0, 10);
   const r = db()
     .prepare(
-      `INSERT INTO pagamenti (cliente_id, importo, metodo, stato, data, descrizione, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO pagamenti (tenant_id, cliente_id, importo, metodo, stato, data, descrizione, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(
-      p.cliente_id ?? null,
-      p.importo,
-      p.metodo,
-      p.stato ?? "incassato",
-      data,
-      p.descrizione ?? null,
-      nowISO()
-    );
+    .run(T(), p.cliente_id ?? null, p.importo, p.metodo, p.stato ?? "incassato", data, p.descrizione ?? null, nowISO());
   return db()
     .prepare(
       `SELECT p.*, c.nome AS cliente_nome FROM pagamenti p LEFT JOIN clienti c ON c.id = p.cliente_id WHERE p.id = ?`
@@ -370,36 +348,28 @@ export function listPagamenti(dataDa: string, dataA: string): Pagamento[] {
   return db()
     .prepare(
       `SELECT p.*, c.nome AS cliente_nome FROM pagamenti p LEFT JOIN clienti c ON c.id = p.cliente_id
-       WHERE p.data >= ? AND p.data <= ? ORDER BY p.data DESC`
+       WHERE p.tenant_id = ? AND p.data >= ? AND p.data <= ? ORDER BY p.data DESC`
     )
-    .all(dataDa, dataA) as Pagamento[];
+    .all(T(), dataDa, dataA) as Pagamento[];
 }
 
 export function analisiEconomica(dataDa: string, dataA: string) {
   const pagamenti = listPagamenti(dataDa, dataA);
   const incassato = pagamenti.filter((p) => p.stato === "incassato");
   const daIncassare = pagamenti.filter((p) => p.stato === "da_incassare");
-
   const totaleIncassato = incassato.reduce((s, p) => s + p.importo, 0);
   const totaleDaIncassare = daIncassare.reduce((s, p) => s + p.importo, 0);
-
   const perMetodo: Record<string, number> = {};
   for (const p of incassato) perMetodo[p.metodo] = (perMetodo[p.metodo] ?? 0) + p.importo;
-
   const perCliente: Record<string, number> = {};
   for (const p of incassato) {
     const k = p.cliente_nome ?? "Senza cliente";
     perCliente[k] = (perCliente[k] ?? 0) + p.importo;
   }
-  const topClienti = Object.entries(perCliente)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([nome, totale]) => ({ nome, totale }));
-
+  const topClienti = Object.entries(perCliente).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([nome, totale]) => ({ nome, totale }));
   const perGiorno: Record<string, number> = {};
   for (const p of incassato) perGiorno[p.data] = (perGiorno[p.data] ?? 0) + p.importo;
   const giornoTop = Object.entries(perGiorno).sort((a, b) => b[1] - a[1])[0];
-
   return {
     periodo: { da: dataDa, a: dataA },
     totaleIncassato,
@@ -408,21 +378,12 @@ export function analisiEconomica(dataDa: string, dataA: string) {
     perMetodo,
     topClienti,
     giornoPiuRedditizio: giornoTop ? { data: giornoTop[0], totale: giornoTop[1] } : null,
-    daIncassare: daIncassare.map((p) => ({
-      cliente: p.cliente_nome ?? null,
-      importo: p.importo,
-      descrizione: p.descrizione,
-      data: p.data,
-    })),
+    daIncassare: daIncassare.map((p) => ({ cliente: p.cliente_nome ?? null, importo: p.importo, descrizione: p.descrizione, data: p.data })),
   };
 }
 
-// ── Comunicazioni (WhatsApp simulato) ───────────────────────────────────────
+// ── Comunicazioni (WhatsApp) ────────────────────────────────────────────────
 
-/**
- * Punto di integrazione: oggi registra solo la comunicazione nel DB (simulato).
- * Per il WhatsApp reale, qui andrebbe la chiamata alla WhatsApp Business API.
- */
 export function logCommunication(c: {
   cliente_id?: number | null;
   direzione: "in" | "out";
@@ -434,18 +395,13 @@ export function logCommunication(c: {
 }): Comunicazione {
   const r = db()
     .prepare(
-      `INSERT INTO comunicazioni (cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, created_at)
-       VALUES (?, ?, 'whatsapp', ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO comunicazioni (tenant_id, cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, created_at)
+       VALUES (?, ?, ?, 'whatsapp', ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      c.cliente_id ?? null,
-      c.direzione,
-      c.tipo ?? "testo",
-      c.contenuto ?? null,
-      c.allegato_nome ?? null,
-      c.allegato_url ?? null,
-      c.stato ?? (c.direzione === "out" ? "inviato" : "ricevuto"),
-      nowISO()
+      T(), c.cliente_id ?? null, c.direzione, c.tipo ?? "testo", c.contenuto ?? null,
+      c.allegato_nome ?? null, c.allegato_url ?? null,
+      c.stato ?? (c.direzione === "out" ? "inviato" : "ricevuto"), nowISO()
     );
   return db()
     .prepare(
@@ -454,33 +410,23 @@ export function logCommunication(c: {
     .get(Number(r.lastInsertRowid)) as Comunicazione;
 }
 
-// Trova un cliente dal numero di telefono (per associare i messaggi WhatsApp in arrivo).
-export function getClienteByTelefono(telefono: string): Cliente | undefined {
-  const norm = telefono.replace(/\D/g, "");
-  const ultime = norm.slice(-9); // confronto sulle ultime 9 cifre (ignora prefisso/spazi)
-  if (!ultime) return undefined;
-  const tutti = db().prepare("SELECT * FROM clienti WHERE telefono IS NOT NULL").all() as Cliente[];
-  return tutti.find((c) => (c.telefono ?? "").replace(/\D/g, "").endsWith(ultime));
-}
-
-// Messaggi in arrivo ricevuti dopo un certo istante (per la notifica "ha risposto").
-export function messaggiInArrivoDopo(iso: string): Comunicazione[] {
-  return db()
-    .prepare(
-      `SELECT cm.*, c.nome AS cliente_nome FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id
-       WHERE cm.direzione = 'in' AND cm.created_at > ? ORDER BY cm.created_at`
-    )
-    .all(iso) as Comunicazione[];
-}
-
 export function listComunicazioni(clienteId?: number): Comunicazione[] {
   const base = `SELECT cm.*, c.nome AS cliente_nome FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id`;
   if (clienteId) {
     return db()
-      .prepare(`${base} WHERE cm.cliente_id = ? ORDER BY cm.created_at`)
-      .all(clienteId) as Comunicazione[];
+      .prepare(`${base} WHERE cm.tenant_id = ? AND cm.cliente_id = ? ORDER BY cm.created_at`)
+      .all(T(), clienteId) as Comunicazione[];
   }
-  return db().prepare(`${base} ORDER BY cm.created_at DESC LIMIT 30`).all() as Comunicazione[];
+  return db().prepare(`${base} WHERE cm.tenant_id = ? ORDER BY cm.created_at DESC LIMIT 30`).all(T()) as Comunicazione[];
+}
+
+export function messaggiInArrivoDopo(iso: string): Comunicazione[] {
+  return db()
+    .prepare(
+      `SELECT cm.*, c.nome AS cliente_nome FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id
+       WHERE cm.tenant_id = ? AND cm.direzione = 'in' AND cm.created_at > ? ORDER BY cm.created_at`
+    )
+    .all(T(), iso) as Comunicazione[];
 }
 
 // ── Fatture ─────────────────────────────────────────────────────────────────
@@ -488,129 +434,73 @@ export function listComunicazioni(clienteId?: number): Comunicazione[] {
 export function prossimoNumeroFattura(): string {
   const anno = new Date().getFullYear();
   const row = db()
-    .prepare("SELECT COUNT(*) AS n FROM fatture WHERE substr(data,1,4) = ?")
-    .get(String(anno)) as { n: number };
+    .prepare("SELECT COUNT(*) AS n FROM fatture WHERE tenant_id = ? AND substr(data,1,4) = ?")
+    .get(T(), String(anno)) as { n: number };
   return `${row.n + 1}/${anno}`;
 }
 
-export function creaFattura(f: {
-  cliente_id: number;
-  importo: number;
-  descrizione?: string | null;
-  stato?: string;
-}) {
+export function creaFattura(f: { cliente_id: number; importo: number; descrizione?: string | null; stato?: string }) {
   const numero = prossimoNumeroFattura();
   const data = new Date().toISOString().slice(0, 10);
   const r = db()
     .prepare(
-      `INSERT INTO fatture (cliente_id, numero, importo, descrizione, stato, data, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO fatture (tenant_id, cliente_id, numero, importo, descrizione, stato, data, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(f.cliente_id, numero, f.importo, f.descrizione ?? null, f.stato ?? "emessa", data, nowISO());
+    .run(T(), f.cliente_id, numero, f.importo, f.descrizione ?? null, f.stato ?? "emessa", data, nowISO());
   return db().prepare("SELECT * FROM fatture WHERE id = ?").get(Number(r.lastInsertRowid));
-}
-
-// ── Briefing mattutino ──────────────────────────────────────────────────────
-
-export function briefingOggi() {
-  const oggi = new Date().toISOString().slice(0, 10);
-  const appuntamenti = listAppuntamenti(oggi, oggi);
-  const daConfermare = appuntamenti.filter((a) => a.stato === "da_confermare");
-  const comunicazioniNonViste = db()
-    .prepare(
-      "SELECT COUNT(*) AS n FROM comunicazioni WHERE direzione = 'in' AND substr(created_at,1,10) = ?"
-    )
-    .get(oggi) as { n: number };
-  const pagamentiInSospeso = db()
-    .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(importo),0) AS tot FROM pagamenti WHERE stato = 'da_incassare'")
-    .get() as { n: number; tot: number };
-
-  // Clienti inattivi: ultima visita oltre 30 giorni fa
-  const limite = new Date();
-  limite.setDate(limite.getDate() - 30);
-  const clientiInattivi = db()
-    .prepare(
-      "SELECT COUNT(*) AS n FROM clienti WHERE ultima_visita IS NOT NULL AND ultima_visita < ?"
-    )
-    .get(limite.toISOString().slice(0, 10)) as { n: number };
-
-  const promemoria = db()
-    .prepare(
-      "SELECT COUNT(*) AS n FROM promemoria WHERE completato = 0 AND (scadenza IS NULL OR scadenza <= ?)"
-    )
-    .get(oggi) as { n: number };
-
-  const inAttesa = db().prepare("SELECT COUNT(*) AS n FROM lista_attesa").get() as { n: number };
-
-  return {
-    data: oggi,
-    appuntamenti,
-    totaleAppuntamenti: appuntamenti.length,
-    daConfermare: daConfermare.length,
-    messaggiRicevutiOggi: comunicazioniNonViste.n,
-    pagamentiInSospeso: pagamentiInSospeso.n,
-    importoInSospeso: pagamentiInSospeso.tot,
-    clientiInattivi: clientiInattivi.n,
-    promemoriaAttivi: promemoria.n,
-    inAttesa: inAttesa.n,
-  };
 }
 
 // ── Promemoria ──────────────────────────────────────────────────────────────
 
-export function creaPromemoria(p: {
-  cliente_id?: number | null;
-  testo: string;
-  categoria?: string;
-  scadenza?: string | null;
-}): Promemoria {
+export function creaPromemoria(p: { cliente_id?: number | null; testo: string; categoria?: string; scadenza?: string | null }): Promemoria {
   const r = db()
-    .prepare(
-      `INSERT INTO promemoria (cliente_id, testo, categoria, scadenza, created_at)
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(p.cliente_id ?? null, p.testo, p.categoria ?? "attivita", p.scadenza ?? null, nowISO());
+    .prepare(`INSERT INTO promemoria (tenant_id, cliente_id, testo, categoria, scadenza, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(T(), p.cliente_id ?? null, p.testo, p.categoria ?? "attivita", p.scadenza ?? null, nowISO());
   return db()
-    .prepare(
-      `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id WHERE pr.id = ?`
-    )
+    .prepare(`SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id WHERE pr.id = ?`)
     .get(Number(r.lastInsertRowid)) as Promemoria;
 }
 
 export function listPromemoria(includiCompletati = false): Promemoria[] {
-  const where = includiCompletati ? "" : "WHERE pr.completato = 0";
   return db()
     .prepare(
       `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id
-       ${where} ORDER BY (pr.scadenza IS NULL), pr.scadenza, pr.created_at`
+       WHERE pr.tenant_id = ? ${includiCompletati ? "" : "AND pr.completato = 0"} ORDER BY (pr.scadenza IS NULL), pr.scadenza, pr.created_at`
     )
-    .all() as Promemoria[];
+    .all(T()) as Promemoria[];
 }
 
 export function completaPromemoria(id: number): boolean {
-  const r = db().prepare("UPDATE promemoria SET completato = 1 WHERE id = ?").run(id);
-  return r.changes > 0;
+  return db().prepare("UPDATE promemoria SET completato = 1 WHERE id = ? AND tenant_id = ?").run(id, T()).changes > 0;
+}
+
+export function promemoriaDaNotificare(): Promemoria[] {
+  const oggi = new Date().toISOString().slice(0, 10);
+  return db()
+    .prepare(
+      `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id
+       WHERE pr.tenant_id = ? AND pr.completato = 0 AND pr.notificato = 0 AND pr.scadenza IS NOT NULL AND pr.scadenza <= ?`
+    )
+    .all(T(), oggi) as Promemoria[];
+}
+
+export function segnaPromemoriaNotificati(ids: number[]) {
+  if (!ids.length) return;
+  const t = T();
+  const stmt = db().prepare("UPDATE promemoria SET notificato = 1 WHERE id = ? AND tenant_id = ?");
+  const tx = db().transaction((lista: number[]) => lista.forEach((id) => stmt.run(id, t)));
+  tx(ids);
 }
 
 // ── Documenti ─────────────────────────────────────────────────────────────
 
-export function creaDocumento(d: {
-  cliente_id?: number | null;
-  titolo: string;
-  tipo?: string;
-  testo?: string | null;
-  immagine?: string | null;
-}): Documento {
+export function creaDocumento(d: { cliente_id?: number | null; titolo: string; tipo?: string; testo?: string | null; immagine?: string | null }): Documento {
   const r = db()
-    .prepare(
-      `INSERT INTO documenti (cliente_id, titolo, tipo, testo, immagine, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(d.cliente_id ?? null, d.titolo, d.tipo ?? "documento", d.testo ?? null, d.immagine ?? null, nowISO());
+    .prepare(`INSERT INTO documenti (tenant_id, cliente_id, titolo, tipo, testo, immagine, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(T(), d.cliente_id ?? null, d.titolo, d.tipo ?? "documento", d.testo ?? null, d.immagine ?? null, nowISO());
   return db()
-    .prepare(
-      `SELECT dc.*, c.nome AS cliente_nome FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id WHERE dc.id = ?`
-    )
+    .prepare(`SELECT dc.*, c.nome AS cliente_nome FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id WHERE dc.id = ?`)
     .get(Number(r.lastInsertRowid)) as Documento;
 }
 
@@ -618,117 +508,111 @@ export function listDocumenti(): Documento[] {
   return db()
     .prepare(
       `SELECT dc.id, dc.cliente_id, dc.titolo, dc.tipo, dc.testo, dc.created_at, c.nome AS cliente_nome
-       FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id ORDER BY dc.created_at DESC LIMIT 30`
+       FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id WHERE dc.tenant_id = ? ORDER BY dc.created_at DESC LIMIT 30`
     )
-    .all() as Documento[];
+    .all(T()) as Documento[];
 }
 
 // ── Lista d'attesa ──────────────────────────────────────────────────────────
 
-export function aggiungiAttesa(v: {
-  cliente_id?: number | null;
-  nome: string;
-  motivo?: string | null;
-  priorita?: string;
-}): VoceAttesa {
+export function aggiungiAttesa(v: { cliente_id?: number | null; nome: string; motivo?: string | null; priorita?: string }): VoceAttesa {
   const r = db()
-    .prepare(
-      `INSERT INTO lista_attesa (cliente_id, nome, motivo, priorita, created_at) VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(v.cliente_id ?? null, v.nome, v.motivo ?? null, v.priorita ?? "normale", nowISO());
+    .prepare(`INSERT INTO lista_attesa (tenant_id, cliente_id, nome, motivo, priorita, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(T(), v.cliente_id ?? null, v.nome, v.motivo ?? null, v.priorita ?? "normale", nowISO());
   return db().prepare("SELECT * FROM lista_attesa WHERE id = ?").get(Number(r.lastInsertRowid)) as VoceAttesa;
 }
 
 export function listAttesa(): VoceAttesa[] {
   return db()
-    .prepare(
-      "SELECT * FROM lista_attesa ORDER BY CASE priorita WHEN 'alta' THEN 0 ELSE 1 END, created_at"
-    )
-    .all() as VoceAttesa[];
+    .prepare("SELECT * FROM lista_attesa WHERE tenant_id = ? ORDER BY CASE priorita WHEN 'alta' THEN 0 ELSE 1 END, created_at")
+    .all(T()) as VoceAttesa[];
 }
 
 export function rimuoviAttesa(id: number): boolean {
-  return db().prepare("DELETE FROM lista_attesa WHERE id = ?").run(id).changes > 0;
+  return db().prepare("DELETE FROM lista_attesa WHERE id = ? AND tenant_id = ?").run(id, T()).changes > 0;
 }
 
 // ── Notifiche push ──────────────────────────────────────────────────────────
 
-export type PushSub = { endpoint: string; p256dh: string; auth: string };
-
 export function salvaSubscription(s: PushSub) {
   db()
     .prepare(
-      `INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?)
-       ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth`
+      `INSERT INTO push_subscriptions (tenant_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET tenant_id = excluded.tenant_id, p256dh = excluded.p256dh, auth = excluded.auth`
     )
-    .run(s.endpoint, s.p256dh, s.auth, nowISO());
+    .run(T(), s.endpoint, s.p256dh, s.auth, nowISO());
 }
 
 export function listSubscriptions(): PushSub[] {
-  return db()
-    .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions")
-    .all() as PushSub[];
+  return db().prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id = ?").all(T()) as PushSub[];
 }
 
 export function rimuoviSubscription(endpoint: string) {
   db().prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
 }
 
-export function contaSubscriptions(): number {
-  return (db().prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get() as { n: number }).n;
-}
+// ── Briefing + analisi proattiva ────────────────────────────────────────────
 
-// Promemoria scaduti/per oggi non ancora notificati (per le notifiche automatiche).
-export function promemoriaDaNotificare(): Promemoria[] {
+export function briefingOggi() {
+  const t = T();
   const oggi = new Date().toISOString().slice(0, 10);
-  return db()
-    .prepare(
-      `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id
-       WHERE pr.completato = 0 AND pr.notificato = 0 AND pr.scadenza IS NOT NULL AND pr.scadenza <= ?`
-    )
-    .all(oggi) as Promemoria[];
+  const appuntamenti = listAppuntamenti(oggi, oggi);
+  const daConfermare = appuntamenti.filter((a) => a.stato === "da_confermare");
+  const msg = db()
+    .prepare("SELECT COUNT(*) AS n FROM comunicazioni WHERE tenant_id = ? AND direzione = 'in' AND substr(created_at,1,10) = ?")
+    .get(t, oggi) as { n: number };
+  const pag = db()
+    .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(importo),0) AS tot FROM pagamenti WHERE tenant_id = ? AND stato = 'da_incassare'")
+    .get(t) as { n: number; tot: number };
+  const limite = new Date();
+  limite.setDate(limite.getDate() - 30);
+  const inattivi = db()
+    .prepare("SELECT COUNT(*) AS n FROM clienti WHERE tenant_id = ? AND ultima_visita IS NOT NULL AND ultima_visita < ?")
+    .get(t, limite.toISOString().slice(0, 10)) as { n: number };
+  const prom = db()
+    .prepare("SELECT COUNT(*) AS n FROM promemoria WHERE tenant_id = ? AND completato = 0 AND (scadenza IS NULL OR scadenza <= ?)")
+    .get(t, oggi) as { n: number };
+  const attesa = db().prepare("SELECT COUNT(*) AS n FROM lista_attesa WHERE tenant_id = ?").get(t) as { n: number };
+  return {
+    data: oggi,
+    appuntamenti,
+    totaleAppuntamenti: appuntamenti.length,
+    daConfermare: daConfermare.length,
+    messaggiRicevutiOggi: msg.n,
+    pagamentiInSospeso: pag.n,
+    importoInSospeso: pag.tot,
+    clientiInattivi: inattivi.n,
+    promemoriaAttivi: prom.n,
+    inAttesa: attesa.n,
+  };
 }
-
-export function segnaPromemoriaNotificati(ids: number[]) {
-  if (!ids.length) return;
-  const stmt = db().prepare("UPDATE promemoria SET notificato = 1 WHERE id = ?");
-  const tx = db().transaction((lista: number[]) => lista.forEach((id) => stmt.run(id)));
-  tx(ids);
-}
-
-// ── Analisi proattiva ─────────────────────────────────────────────────────
 
 export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
+  const t = T();
   const segnalazioni: Segnalazione[] = [];
   const oggi = new Date().toISOString().slice(0, 10);
   const tra7 = new Date();
   tra7.setDate(tra7.getDate() + 7);
   const a7 = tra7.toISOString().slice(0, 10);
 
-  // Appuntamenti non confermati nei prossimi 7 giorni
   const nonConfermati = db()
     .prepare(
       `SELECT a.*, c.nome AS cliente_nome FROM appuntamenti a LEFT JOIN clienti c ON c.id = a.cliente_id
-       WHERE a.stato = 'da_confermare' AND substr(a.inizio,1,10) >= ? AND substr(a.inizio,1,10) <= ?`
+       WHERE a.tenant_id = ? AND a.stato = 'da_confermare' AND substr(a.inizio,1,10) >= ? AND substr(a.inizio,1,10) <= ?`
     )
-    .all(oggi, a7) as Appuntamento[];
+    .all(t, oggi, a7) as Appuntamento[];
   if (nonConfermati.length) {
     segnalazioni.push({
       categoria: "non_confermati",
       titolo: `${nonConfermati.length} appuntament${nonConfermati.length === 1 ? "o" : "i"} da confermare`,
-      dettaglio: nonConfermati
-        .map((a) => `${a.cliente_nome ?? a.titolo} (${a.inizio.slice(0, 10)})`)
-        .join(", "),
+      dettaglio: nonConfermati.map((a) => `${a.cliente_nome ?? a.titolo} (${a.inizio.slice(0, 10)})`).join(", "),
       azione: "Inviare un promemoria di conferma via WhatsApp.",
     });
   }
 
-  // Pagamenti da incassare
   const dovuti = db()
-    .prepare(
-      "SELECT COUNT(*) AS n, COALESCE(SUM(importo),0) AS tot FROM pagamenti WHERE stato = 'da_incassare'"
-    )
-    .get() as { n: number; tot: number };
+    .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(importo),0) AS tot FROM pagamenti WHERE tenant_id = ? AND stato = 'da_incassare'")
+    .get(t) as { n: number; tot: number };
   if (dovuti.n > 0) {
     segnalazioni.push({
       categoria: "pagamenti",
@@ -738,32 +622,23 @@ export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
     });
   }
 
-  // Clienti inattivi (oltre 45 giorni)
   const limite = new Date();
   limite.setDate(limite.getDate() - 45);
   const inattivi = db()
-    .prepare(
-      "SELECT nome, ultima_visita FROM clienti WHERE ultima_visita IS NOT NULL AND ultima_visita < ? ORDER BY ultima_visita"
-    )
-    .all(limite.toISOString().slice(0, 10)) as { nome: string; ultima_visita: string }[];
+    .prepare("SELECT nome, ultima_visita FROM clienti WHERE tenant_id = ? AND ultima_visita IS NOT NULL AND ultima_visita < ? ORDER BY ultima_visita")
+    .all(t, limite.toISOString().slice(0, 10)) as { nome: string; ultima_visita: string }[];
   if (inattivi.length) {
     segnalazioni.push({
       categoria: "inattivi",
       titolo: `${inattivi.length} client${inattivi.length === 1 ? "e" : "i"} inattiv${inattivi.length === 1 ? "o" : "i"}`,
-      dettaglio: inattivi
-        .slice(0, 5)
-        .map((c) => `${c.nome} (dal ${c.ultima_visita})`)
-        .join(", "),
+      dettaglio: inattivi.slice(0, 5).map((c) => `${c.nome} (dal ${c.ultima_visita})`).join(", "),
       azione: "Proporre un controllo di richiamo.",
     });
   }
 
-  // Promemoria scaduti o per oggi
   const promScaduti = db()
-    .prepare(
-      "SELECT testo, scadenza FROM promemoria WHERE completato = 0 AND scadenza IS NOT NULL AND scadenza <= ?"
-    )
-    .all(oggi) as { testo: string; scadenza: string }[];
+    .prepare("SELECT testo FROM promemoria WHERE tenant_id = ? AND completato = 0 AND scadenza IS NOT NULL AND scadenza <= ?")
+    .all(t, oggi) as { testo: string }[];
   if (promScaduti.length) {
     segnalazioni.push({
       categoria: "promemoria",
@@ -773,13 +648,10 @@ export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
     });
   }
 
-  // Buchi in agenda oggi + lista d'attesa
   const appOggi = (
     db()
-      .prepare(
-        `SELECT * FROM appuntamenti WHERE substr(inizio,1,10) = ? AND stato != 'cancellato' ORDER BY inizio`
-      )
-      .all(oggi) as Appuntamento[]
+      .prepare(`SELECT inizio, fine FROM appuntamenti WHERE tenant_id = ? AND substr(inizio,1,10) = ? AND stato != 'cancellato' ORDER BY inizio`)
+      .all(t, oggi) as { inizio: string; fine: string }[]
   ).sort((a, b) => a.inizio.localeCompare(b.inizio));
   let buchi = 0;
   let cursore = new Date(`${oggi}T09:00`);
