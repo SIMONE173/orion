@@ -172,6 +172,22 @@ function migrate(d: Database.Database) {
       created_at TEXT NOT NULL
     );
 
+    -- Numero WhatsApp collegato dal professionista via Embedded Signup (Fase 2).
+    -- Un account per tenant. Il token è il business token Meta scoped alla sua WABA.
+    CREATE TABLE IF NOT EXISTS whatsapp_accounts (
+      tenant_id INTEGER PRIMARY KEY,
+      waba_id TEXT,
+      phone_number_id TEXT,
+      display_phone_number TEXT,
+      verified_name TEXT,
+      token TEXT,
+      stato TEXT NOT NULL DEFAULT 'collegato',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_wa_phone ON whatsapp_accounts(phone_number_id);
+
     CREATE INDEX IF NOT EXISTS idx_clienti_tenant ON clienti(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_appuntamenti_tenant ON appuntamenti(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_pagamenti_tenant ON pagamenti(tenant_id);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClienteByTelefono, logCommunication } from "@/lib/data";
+import { getClienteByTelefono, logCommunication, tenantDaPhoneNumberId } from "@/lib/data";
 import { scaricaMediaWhatsApp } from "@/lib/whatsapp";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
@@ -35,12 +35,16 @@ const TIPO_MEDIA: Record<string, string> = {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const messaggi = body?.entry?.[0]?.changes?.[0]?.value?.messages;
+    const change = body?.entry?.[0]?.changes?.[0]?.value;
+    const messaggi = change?.messages;
     if (!Array.isArray(messaggi)) return NextResponse.json({ ok: true });
 
-    // Fase 1: numero Meta condiviso → l'inbound è attribuito al primo account.
-    // Fase 2 (Embedded Signup): routing per phone_number_id verso il tenant proprietario.
-    const tenantId = primoTenant();
+    // Routing: dal numero che ha ricevuto il messaggio risali al tenant proprietario
+    // (numero collegato via Embedded Signup). Se non trovato, ripiega sul numero
+    // condiviso → primo tenant (sviluppo / numero di prova).
+    const phoneNumberId: string | undefined = change?.metadata?.phone_number_id;
+    const tenantId =
+      (phoneNumberId ? tenantDaPhoneNumberId(phoneNumberId) : null) ?? primoTenant();
     if (!tenantId) return NextResponse.json({ ok: true });
 
     await runWithTenant(tenantId, async () => {

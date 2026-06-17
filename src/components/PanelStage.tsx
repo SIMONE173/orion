@@ -7,6 +7,7 @@ import { ClientiPanel } from "./panels/ClientiPanel";
 import { NotePanel } from "./panels/NotePanel";
 import { PagamentiPanel } from "./panels/PagamentiPanel";
 import { WhatsAppPanel } from "./panels/WhatsAppPanel";
+import { WhatsAppConnectPanel } from "./panels/WhatsAppConnectPanel";
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { FatturaPanel } from "./panels/FatturaPanel";
 import { PromemoriaPanel } from "./panels/PromemoriaPanel";
@@ -31,6 +32,8 @@ function renderPanel(v: Vista) {
       return <PagamentiPanel titolo={v.titolo} dati={v.dati} />;
     case "whatsapp":
       return <WhatsAppPanel dati={v.dati} />;
+    case "whatsapp_connect":
+      return <WhatsAppConnectPanel />;
     case "briefing":
       return <BriefingPanel dati={v.dati} />;
     case "fattura":

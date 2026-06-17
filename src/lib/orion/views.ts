@@ -95,6 +95,7 @@ export type Vista =
   | { tipo: "attesa"; dati: { voci: VoceAttesa[] } }
   | { tipo: "proattiva"; dati: { segnalazioni: Segnalazione[] } }
   | { tipo: "chiamata"; dati: { nome: string; numero: string | null } }
+  | { tipo: "whatsapp_connect"; dati: Record<string, never> }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 export type RisultatoConversazione = {

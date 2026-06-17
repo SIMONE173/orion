@@ -121,6 +121,18 @@ export type VoceAttesa = {
 export type Segnalazione = { categoria: string; titolo: string; dettaglio: string; azione: string };
 export type PushSub = { endpoint: string; p256dh: string; auth: string };
 
+export type WhatsappAccount = {
+  tenant_id: number;
+  waba_id: string | null;
+  phone_number_id: string | null;
+  display_phone_number: string | null;
+  verified_name: string | null;
+  token: string | null;
+  stato: string;
+  created_at: string;
+  updated_at: string;
+};
+
 const nowISO = () => new Date().toISOString();
 const T = () => tenantIdCorrente();
 
@@ -549,6 +561,65 @@ export function listSubscriptions(): PushSub[] {
 
 export function rimuoviSubscription(endpoint: string) {
   db().prepare("DELETE FROM push_subscriptions WHERE endpoint = ?").run(endpoint);
+}
+
+// ── Account WhatsApp del professionista (Embedded Signup, Fase 2) ────────────
+
+export function getWhatsappAccount(): WhatsappAccount | undefined {
+  return db().prepare("SELECT * FROM whatsapp_accounts WHERE tenant_id = ?").get(T()) as
+    | WhatsappAccount
+    | undefined;
+}
+
+// Variante esplicita (senza contesto tenant): la usa l'adapter whatsapp.ts per
+// scegliere le credenziali del mittente, e il webhook per il routing.
+export function getWhatsappAccountByTenant(tenantId: number): WhatsappAccount | undefined {
+  return db().prepare("SELECT * FROM whatsapp_accounts WHERE tenant_id = ?").get(tenantId) as
+    | WhatsappAccount
+    | undefined;
+}
+
+export function salvaWhatsappAccount(a: {
+  waba_id: string | null;
+  phone_number_id: string | null;
+  display_phone_number?: string | null;
+  verified_name?: string | null;
+  token: string | null;
+  stato?: string;
+}): WhatsappAccount {
+  const t = T();
+  const now = nowISO();
+  db()
+    .prepare(
+      `INSERT INTO whatsapp_accounts (tenant_id, waba_id, phone_number_id, display_phone_number, verified_name, token, stato, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         waba_id = excluded.waba_id,
+         phone_number_id = excluded.phone_number_id,
+         display_phone_number = excluded.display_phone_number,
+         verified_name = excluded.verified_name,
+         token = excluded.token,
+         stato = excluded.stato,
+         updated_at = excluded.updated_at`
+    )
+    .run(
+      t, a.waba_id, a.phone_number_id, a.display_phone_number ?? null, a.verified_name ?? null,
+      a.token, a.stato ?? "collegato", now, now
+    );
+  return getWhatsappAccount()!;
+}
+
+export function rimuoviWhatsappAccount(): boolean {
+  return db().prepare("DELETE FROM whatsapp_accounts WHERE tenant_id = ?").run(T()).changes > 0;
+}
+
+// Routing del webhook: dal phone_number_id del numero che ha ricevuto il
+// messaggio, trova il tenant proprietario. Lookup globale (non tenant-scoped).
+export function tenantDaPhoneNumberId(phoneNumberId: string): number | null {
+  const r = db()
+    .prepare("SELECT tenant_id FROM whatsapp_accounts WHERE phone_number_id = ?")
+    .get(phoneNumberId) as { tenant_id: number } | undefined;
+  return r?.tenant_id ?? null;
 }
 
 // ── Briefing + analisi proattiva ────────────────────────────────────────────

@@ -516,6 +516,12 @@ export const TOOLS: Anthropic.Tool[] = [
       "Mostra la memoria operativa: cosa ORION sa del professionista (nome, professione, abitudini) e i dati fiscali. Usalo per 'cosa sai di me', 'mostra il mio profilo', 'aggiorna i miei dati'.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "collega_whatsapp",
+    description:
+      "Avvia il collegamento del numero WhatsApp del professionista (Embedded Signup di Meta). Usalo quando l'utente vuole usare il proprio WhatsApp con te: 'collega WhatsApp', 'connetti il mio numero', 'voglio rispondere ai pazienti da qui', 'attiva WhatsApp'. Mostra a schermo il pannello con il pulsante di collegamento. Login e consenso su Meta li fa l'utente (non automatizzabili): tu apri la schermata e lo guidi a voce, con calma, un passo alla volta.",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -951,6 +957,14 @@ const handlers: Record<string, Handler> = {
     const profilo = getProfilo();
     return { result: { profilo }, vista: { tipo: "profilo", dati: { profilo } } };
   },
+
+  collega_whatsapp: () => ({
+    result: {
+      ok: true,
+      azione: "Mostro il pannello di collegamento WhatsApp. L'utente farà login e darà il consenso su Meta; tu guidalo a voce.",
+    },
+    vista: { tipo: "whatsapp_connect", dati: {} },
+  }),
 };
 
 export async function dispatch(
