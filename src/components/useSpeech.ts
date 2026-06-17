@@ -56,7 +56,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
     if (!continuoRef.current) return;
     restartTimer.current = setTimeout(() => {
       if (continuoRef.current && !busyRef.current && !speakingRef.current) startRec();
-    }, 300);
+    }, 500);
   }, [startRec]);
 
   useEffect(() => {
@@ -144,8 +144,19 @@ export function useSpeech(onFinal: (testo: string) => void) {
     (testo: string) => {
       if (!voiceOn || !testo) return;
       if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-      // Stiamo per parlare: annulla un eventuale riarmo del mic (evita l'eco).
+      // Stiamo per parlare: BLOCCA SUBITO il microfono per evitare l'eco.
+      // Segna speaking=true prima di tutto, ferma il riconoscimento se era attivo,
+      // e annulla un eventuale riarmo programmato.
+      speakingRef.current = true;
+      setSpeaking(true);
       if (restartTimer.current) clearTimeout(restartTimer.current);
+      try {
+        recRef.current?.abort?.();
+      } catch {
+        /* noop */
+      }
+      setListening(false);
+      setInterim("");
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(testo);
       u.lang = "it-IT";
