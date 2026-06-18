@@ -9,8 +9,10 @@ export const dynamic = "force-dynamic";
 // migrazione multi-tenant. Protetto dallo stesso segreto del cron.
 // DA RIMUOVERE dopo l'uso.
 export async function POST(req: NextRequest) {
-  const segreto = process.env.VAPID_PRIVATE_KEY || "";
-  if (!segreto || req.headers.get("x-orion-cron") !== segreto) {
+  // Accetta il segreto del cron O quello dell'app Meta (entrambi noti e su Railway).
+  const ammessi = [process.env.VAPID_PRIVATE_KEY, process.env.META_APP_SECRET].filter(Boolean);
+  const dato = req.headers.get("x-orion-cron") || "";
+  if (!ammessi.length || !ammessi.includes(dato)) {
     return NextResponse.json({ ok: false, errore: "non autorizzato" }, { status: 403 });
   }
 
