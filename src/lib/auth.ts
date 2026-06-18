@@ -31,16 +31,23 @@ export function trovaUtenteByEmail(email: string): (Utente & { password_hash: st
 
 export function creaUtente(email: string, password: string, nome?: string): Utente {
   const now = new Date().toISOString();
-  const r = db()
-    .prepare("INSERT INTO utenti (email, password_hash, nome, created_at) VALUES (?, ?, ?, ?)")
-    .run(email.toLowerCase().trim(), hashPassword(password), nome ?? null, now);
-  const id = Number(r.lastInsertRowid);
-  // Crea il profilo (memoria operativa) vuoto per questo tenant → fa partire la Chiamata 0.
-  db()
-    .prepare("INSERT INTO profili (tenant_id, onboarding_completo, updated_at) VALUES (?, 0, ?)")
-    .run(id, now);
-  // Dati demo iniziali (pannelli vivi da subito).
-  seedDemoPerTenant(id);
+  const emailNorm = email.toLowerCase().trim();
+  const hash = hashPassword(password);
+  // Tutto in transazione: se il seed fallisse, niente account "a metà" (orfano).
+  const crea = db().transaction(() => {
+    const r = db()
+      .prepare("INSERT INTO utenti (email, password_hash, nome, created_at) VALUES (?, ?, ?, ?)")
+      .run(emailNorm, hash, nome ?? null, now);
+    const id = Number(r.lastInsertRowid);
+    // Profilo (memoria operativa) vuoto per questo tenant → fa partire la Chiamata 0.
+    db()
+      .prepare("INSERT INTO profili (tenant_id, onboarding_completo, updated_at) VALUES (?, 0, ?)")
+      .run(id, now);
+    // Dati demo iniziali (pannelli vivi da subito).
+    seedDemoPerTenant(id);
+    return id;
+  });
+  const id = crea();
   return db().prepare("SELECT id, email, nome, created_at FROM utenti WHERE id = ?").get(id) as Utente;
 }
 

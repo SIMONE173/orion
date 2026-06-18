@@ -187,15 +187,12 @@ function migrate(d: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_wa_phone ON whatsapp_accounts(phone_number_id);
-
-    CREATE INDEX IF NOT EXISTS idx_clienti_tenant ON clienti(tenant_id);
-    CREATE INDEX IF NOT EXISTS idx_appuntamenti_tenant ON appuntamenti(tenant_id);
-    CREATE INDEX IF NOT EXISTS idx_pagamenti_tenant ON pagamenti(tenant_id);
-    CREATE INDEX IF NOT EXISTS idx_comunicazioni_tenant ON comunicazioni(tenant_id);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
   // aggiunge le colonne nuove (ignora l'errore se già presenti).
+  // IMPORTANTE: questi ALTER devono girare PRIMA di creare gli indici su
+  // tenant_id — su un DB vecchio (single-tenant) la colonna non esiste ancora.
   const alters = [
     "ALTER TABLE comunicazioni ADD COLUMN allegato_url TEXT",
     "ALTER TABLE promemoria ADD COLUMN notificato INTEGER NOT NULL DEFAULT 0",
@@ -217,6 +214,15 @@ function migrate(d: Database.Database) {
       /* colonna già presente */
     }
   }
+
+  // Indici sulle colonne tenant_id: creati ORA, dopo che gli ALTER le hanno
+  // garantite anche sui DB migrati dal vecchio schema single-tenant.
+  d.exec(`
+    CREATE INDEX IF NOT EXISTS idx_clienti_tenant ON clienti(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_appuntamenti_tenant ON appuntamenti(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_pagamenti_tenant ON pagamenti(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_comunicazioni_tenant ON comunicazioni(tenant_id);
+  `);
 }
 
 // Formattazione date locali "YYYY-MM-DDTHH:MM".

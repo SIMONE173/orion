@@ -35,9 +35,6 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (e) {
     console.error("[/api/auth/signup]", e);
-    return NextResponse.json(
-      { ok: false, errore: "Errore interno.", diag: e instanceof Error ? e.message : String(e) },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, errore: "Errore interno." }, { status: 500 });
   }
 }
