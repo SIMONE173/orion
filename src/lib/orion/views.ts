@@ -100,8 +100,19 @@ export type Vista =
   | { tipo: "abbonamento"; dati: { stato: StatoAbbonamento } }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
+// Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
+// siti, entrare in modalità appunti, aprire/zoomare un documento, ecc.
+export type Azione =
+  | { tipo: "apri_url"; url: string; etichetta?: string }
+  | { tipo: "modalita_appunti"; titolo?: string; cliente_id?: number | null }
+  | { tipo: "apri_documento"; documento_id: number; cerca?: string }
+  | { tipo: "zoom_documento"; verso: "avvicina" | "allontana" | "reset" }
+  | { tipo: "cerca_documento"; testo: string }
+  | { tipo: "riposo" };
+
 export type RisultatoConversazione = {
   testo: string;
   viste: Vista[];
+  azioni?: Azione[];
   errore?: "no_key" | "auth" | "credito" | "rate_limit" | "api_error";
 };

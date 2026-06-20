@@ -103,6 +103,34 @@ export async function scaricaDocumentoPdf(doc: Extract<Vista, { tipo: "documento
   scarica(await pdf.save(), `${doc.titolo.replace(/\s+/g, "_")}.pdf`);
 }
 
+// PDF generico da testo libero (usato dalla "modalità appunti").
+export async function scaricaTestoPdf(titolo: string, testo: string) {
+  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  let page = pdf.addPage([A4.w, A4.h]);
+  let y = A4.h - MARGIN;
+
+  page.drawText(titolo || "Appunti", { x: MARGIN, y, size: 18, font: bold, color: rgb(0.1, 0.1, 0.12) });
+  y -= 22;
+  page.drawText(new Date().toLocaleString("it-IT"), { x: MARGIN, y, size: 10, font, color: rgb(0.45, 0.45, 0.5) });
+  y -= 28;
+
+  const size = 11;
+  const lineH = 16;
+  for (const riga of wrap(testo, font, size, A4.w - MARGIN * 2)) {
+    if (y < MARGIN) {
+      page = pdf.addPage([A4.w, A4.h]);
+      y = A4.h - MARGIN;
+    }
+    page.drawText(riga, { x: MARGIN, y, size, font, color: rgb(0.15, 0.15, 0.18) });
+    y -= lineH;
+  }
+
+  scarica(await pdf.save(), `${(titolo || "Appunti").replace(/\s+/g, "_")}.pdf`);
+}
+
 export async function scaricaFatturaPdf(f: Extract<Vista, { tipo: "fattura" }>["dati"]) {
   const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const pdf = await PDFDocument.create();

@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import type { Vista } from "./views";
+import type { Vista, Azione } from "./views";
 import type { Cliente } from "../data";
 import {
   getProfilo,
@@ -30,6 +30,11 @@ import {
   completaPromemoria,
   creaDocumento,
   listDocumenti,
+  getDocumento,
+  cercaDocumenti,
+  eliminaDocumento,
+  eliminaNota,
+  eliminaCliente,
   aggiungiAttesa,
   listAttesa,
   rimuoviAttesa,
@@ -47,7 +52,7 @@ export type TurnoContext = { allegato?: { dataUrl: string } };
 //   vista? → pannello da mostrare a schermo (focus totale / split)
 // ──────────────────────────────────────────────────────────────────────────
 
-type Esito = { result: unknown; vista?: Vista };
+type Esito = { result: unknown; vista?: Vista; azione?: Azione };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (input: any, ctx: TurnoContext) => Esito | Promise<Esito>;
 
@@ -529,6 +534,96 @@ export const TOOLS: Anthropic.Tool[] = [
       "Mostra il pannello dell'abbonamento (piano, prova gratuita, stato pagamento). Usalo per 'il mio abbonamento', 'quanto manca alla prova', 'voglio abbonarmi', 'gestisci pagamento', 'disdici'. Il pannello contiene i pulsanti per abbonarsi o gestire il pagamento.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "apri",
+    description:
+      "Apre un sito o un'app web sullo schermo dell'utente, in una nuova scheda (come Jarvis). Usalo per: 'apri Gmail', 'apri YouTube e metti un video di X', 'metti musica di X', 'cerca X su Google', 'apri Maps e cerca Y', 'apri il calendario', 'apri Drive', 'apri il sito Z'. Scegli 'app' fra: gmail, youtube, musica, google, maps, calendario, drive, sito. Per un sito qualsiasi usa app='sito' e metti l'indirizzo in 'url'. In 'query' metti cosa cercare o riprodurre. NON apre file locali del computer (non è possibile da browser): se l'utente chiede un file del PC, spiega con garbo che serve la versione desktop di ORION.",
+    input_schema: {
+      type: "object",
+      properties: {
+        app: {
+          type: "string",
+          enum: ["gmail", "youtube", "musica", "google", "maps", "calendario", "drive", "sito"],
+        },
+        query: { type: "string", description: "Cosa cercare o riprodurre" },
+        url: { type: "string", description: "Indirizzo completo, solo per app='sito'" },
+      },
+      required: ["app"],
+    },
+  },
+  {
+    name: "apri_appunti",
+    description:
+      "Apre la MODALITÀ APPUNTI: una lavagna a schermo dove l'utente DETTA e ORION scrive in tempo reale. Usalo per 'prendimi appunti', 'apri un foglio note', 'scrivi quello che dico', 'appuntati una cosa'. Opzionali: 'titolo' degli appunti e 'cliente_nome' a cui collegarli. Dopo l'apertura l'utente detta liberamente; per salvarli dirà 'salva come PDF' o 'salva su ORION' (o userà i pulsanti). Tu apri e basta, con una frase breve ('Ti ascolto, detta pure').",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string" },
+        cliente_nome: { type: "string" },
+        cliente_id: { type: "integer" },
+      },
+    },
+  },
+  {
+    name: "elimina_documento",
+    description:
+      "Elimina un documento archiviato. Usalo per 'elimina il documento X', 'cestina il file Y'. Identificalo con 'id' (se lo conosci) o con 'titolo' (cerco io). CHIEDI SEMPRE CONFERMA all'utente prima di chiamarlo. Se più documenti corrispondono, ti restituisco i candidati: chiedi quale.",
+    input_schema: {
+      type: "object",
+      properties: { id: { type: "integer" }, titolo: { type: "string" } },
+    },
+  },
+  {
+    name: "elimina_cliente",
+    description:
+      "Elimina un cliente e lo scollega dai suoi dati. Usalo per 'elimina il cliente X'. CHIEDI SEMPRE CONFERMA prima. Gli omonimi vengono gestiti: se più clienti corrispondono, chiedi quale.",
+    input_schema: {
+      type: "object",
+      properties: { cliente_nome: { type: "string" }, cliente_id: { type: "integer" } },
+    },
+  },
+  {
+    name: "elimina_nota",
+    description:
+      "Elimina una nota dato il suo 'id'. CHIEDI SEMPRE CONFERMA prima di chiamarlo.",
+    input_schema: { type: "object", properties: { id: { type: "integer" } }, required: ["id"] },
+  },
+  {
+    name: "apri_documento",
+    description:
+      "Apre il VISORE di un documento/foto a schermo intero (immagine + testo digitalizzato). Usalo per 'apri la foto di X', 'apri il documento di Rossi', 'fammi vedere il referto di Y'. Identifica con 'id' oppure con 'titolo'/'cliente_nome' (cerco io). Opzionale 'cerca': una parola da evidenziare subito nel testo. Se più documenti corrispondono, ti do i candidati: chiedi quale.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "integer" },
+        titolo: { type: "string" },
+        cliente_nome: { type: "string" },
+        cerca: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "zoom_documento",
+    description:
+      "Mentre un documento/foto è aperto nel visore, ne regola lo zoom. 'verso': 'avvicina' (zoom in), 'allontana' (zoom out), 'reset'. Usalo per 'zooma', 'ingrandisci', 'dezooma', 'rimpicciolisci', 'torna normale'.",
+    input_schema: {
+      type: "object",
+      properties: { verso: { type: "string", enum: ["avvicina", "allontana", "reset"] } },
+      required: ["verso"],
+    },
+  },
+  {
+    name: "cerca_documento",
+    description:
+      "Mentre un documento è aperto nel visore, cerca ed evidenzia una parola/frase nel suo testo. Usalo per 'trovami la riga dove si parla di X', 'cerca X nel documento', 'dove dice Y'.",
+    input_schema: { type: "object", properties: { testo: { type: "string" } }, required: ["testo"] },
+  },
+  {
+    name: "vai_in_pausa",
+    description:
+      "Mette ORION in modalità RIPOSO/standby. Usalo per 'riposati', 'vai in pausa', 'mettiti in standby', 'a dopo', 'ci sentiamo dopo'. Saluta brevemente; l'utente ti risveglierà battendo le mani due volte o toccando lo schermo.",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -977,6 +1072,144 @@ const handlers: Record<string, Handler> = {
     const stato = statoAbbonamento();
     return { result: { abbonamento: stato }, vista: { tipo: "abbonamento", dati: { stato } } };
   },
+
+  apri: (input) => {
+    const q = encodeURIComponent((input.query ?? "").trim());
+    let url = "";
+    let etichetta = "";
+    switch (input.app) {
+      case "gmail":
+        url = q ? `https://mail.google.com/mail/u/0/#search/${q}` : "https://mail.google.com";
+        etichetta = "Gmail";
+        break;
+      case "youtube":
+        url = q ? `https://www.youtube.com/results?search_query=${q}` : "https://www.youtube.com";
+        etichetta = q ? `YouTube: ${input.query}` : "YouTube";
+        break;
+      case "musica":
+        url = q ? `https://music.youtube.com/search?q=${q}` : "https://music.youtube.com";
+        etichetta = q ? `Musica: ${input.query}` : "Musica";
+        break;
+      case "google":
+        url = q ? `https://www.google.com/search?q=${q}` : "https://www.google.com";
+        etichetta = q ? `Google: ${input.query}` : "Google";
+        break;
+      case "maps":
+        url = q ? `https://www.google.com/maps/search/${q}` : "https://www.google.com/maps";
+        etichetta = "Maps";
+        break;
+      case "calendario":
+        url = "https://calendar.google.com";
+        etichetta = "Calendario";
+        break;
+      case "drive":
+        url = q ? `https://drive.google.com/drive/search?q=${q}` : "https://drive.google.com";
+        etichetta = "Drive";
+        break;
+      case "sito": {
+        let u = (input.url ?? input.query ?? "").trim();
+        if (u && !/^https?:\/\//i.test(u)) u = `https://${u}`;
+        url = u;
+        etichetta = u;
+        break;
+      }
+    }
+    if (!url) return { result: { ok: false, errore: "Non ho capito cosa aprire." } };
+    return {
+      result: { ok: true, aperto: etichetta, url },
+      azione: { tipo: "apri_url", url, etichetta },
+    };
+  },
+
+  apri_appunti: (input) => {
+    let cliente_id: number | null = input.cliente_id ?? null;
+    if (!cliente_id && input.cliente_nome) {
+      const found = cercaCliente(String(input.cliente_nome));
+      if (found.length === 1) cliente_id = found[0].id;
+    }
+    return {
+      result: { ok: true, modalita: "appunti" },
+      azione: { tipo: "modalita_appunti", titolo: input.titolo ?? null, cliente_id },
+    };
+  },
+
+  elimina_documento: (input) => {
+    let id: number | null = input.id ?? null;
+    if (!id && input.titolo) {
+      const found = cercaDocumenti(String(input.titolo));
+      if (found.length === 0) return { result: { ok: false, errore: "Nessun documento trovato con quel nome." } };
+      if (found.length > 1) {
+        return {
+          result: {
+            ok: false,
+            chiedi: "quale",
+            candidati: found.map((d) => ({ id: d.id, titolo: d.titolo, cliente: d.cliente_nome })),
+          },
+          vista: { tipo: "documenti", dati: { documenti: found } },
+        };
+      }
+      id = found[0].id;
+    }
+    if (!id) return { result: { ok: false, errore: "Quale documento devo eliminare?" } };
+    const ok = eliminaDocumento(id);
+    return { result: { ok, eliminato: ok }, vista: { tipo: "documenti", dati: { documenti: listDocumenti() } } };
+  },
+
+  elimina_cliente: (input) => {
+    const ris = risolvi(input);
+    if ("chiedi" in ris) return ris.chiedi;
+    const cliente = ris.cliente;
+    if (!cliente) return { result: { ok: false, errore: "Quale cliente devo eliminare?" } };
+    const ok = eliminaCliente(cliente.id);
+    return {
+      result: { ok, eliminato: cliente.nome },
+      vista: { tipo: "clienti", titolo: "Clienti", dati: { clienti: listClienti() } },
+    };
+  },
+
+  elimina_nota: (input) => {
+    const ok = eliminaNota(input.id);
+    return { result: { ok }, vista: { tipo: "note", dati: { note: listNote() } } };
+  },
+
+  apri_documento: (input) => {
+    let id: number | null = input.id ?? null;
+    if (id && !getDocumento(id)) id = null;
+    if (!id) {
+      const q = String(input.titolo ?? input.cliente_nome ?? "").trim();
+      if (!q) return { result: { ok: false, errore: "Quale documento devo aprire?" } };
+      const found = cercaDocumenti(q);
+      if (found.length === 0) return { result: { ok: false, errore: "Nessun documento trovato." } };
+      if (found.length > 1) {
+        return {
+          result: {
+            ok: false,
+            chiedi: "quale",
+            candidati: found.map((d) => ({ id: d.id, titolo: d.titolo, cliente: d.cliente_nome })),
+          },
+          vista: { tipo: "documenti", dati: { documenti: found } },
+        };
+      }
+      id = found[0].id;
+    }
+    const doc = getDocumento(id)!;
+    return {
+      result: { ok: true, documento: { id: doc.id, titolo: doc.titolo, ha_immagine: Boolean(doc.immagine) } },
+      azione: { tipo: "apri_documento", documento_id: id, cerca: input.cerca ?? undefined },
+    };
+  },
+
+  zoom_documento: (input) => ({
+    result: { ok: true, verso: input.verso },
+    azione: { tipo: "zoom_documento", verso: input.verso },
+  }),
+
+  cerca_documento: (input) => ({
+    result: { ok: true, cerca: input.testo },
+    azione: { tipo: "cerca_documento", testo: String(input.testo ?? "") },
+  }),
+
+  vai_in_pausa: () => ({ result: { ok: true, standby: true }, azione: { tipo: "riposo" } }),
 };
 
 export async function dispatch(

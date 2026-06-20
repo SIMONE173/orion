@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, dispatch, type TurnoContext } from "./tools";
 import { buildSystem, DIRETTIVA_AVVIO } from "./system";
-import type { Vista, RisultatoConversazione } from "./views";
+import type { Vista, Azione, RisultatoConversazione } from "./views";
 
 const MODEL = "claude-opus-4-8";
 const MAX_GIRI = 8;
@@ -72,6 +72,7 @@ export async function runConversation(
   }
 
   const viste: Vista[] = [];
+  const azioni: Azione[] = [];
   let testo = "";
 
   try {
@@ -92,8 +93,9 @@ export async function runConversation(
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
         for (const block of resp.content) {
           if (block.type === "tool_use") {
-            const { result, vista } = await dispatch(block.name, block.input, ctx);
+            const { result, vista, azione } = await dispatch(block.name, block.input, ctx);
             if (vista) viste.push(vista);
+            if (azione) azioni.push(azione);
             toolResults.push({
               type: "tool_result",
               tool_use_id: block.id,
@@ -146,5 +148,5 @@ export async function runConversation(
   const perTipo = new Map<string, Vista>();
   for (const v of viste) perTipo.set(v.tipo, v);
 
-  return { testo, viste: Array.from(perTipo.values()) };
+  return { testo, viste: Array.from(perTipo.values()), azioni };
 }

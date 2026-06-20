@@ -6,9 +6,13 @@ import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
 import { Notifiche } from "@/components/Notifiche";
 import { AuthScreen } from "@/components/AuthScreen";
+import { AppuntiPanel } from "@/components/AppuntiPanel";
+import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
+import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
+import { useClapWake } from "@/components/useClapWake";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
-import type { Vista } from "@/lib/orion/views";
+import type { Vista, Azione } from "@/lib/orion/views";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
@@ -35,6 +39,12 @@ export default function Home() {
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
   const [abbonamento, setAbbonamento] = useState<StatoAbb | null>(null);
+  const [appunti, setAppunti] = useState<{ titolo: string; cliente_id: number | null; testo: string } | null>(null);
+  const [appuntiStato, setAppuntiStato] = useState<"idle" | "salvando" | "salvato">("idle");
+  const [docView, setDocView] = useState<{ doc: DocVisore; zoom: number; cerca: string } | null>(null);
+  const [standby, setStandby] = useState(false);
+  const standbyDa = useRef<string>(new Date().toISOString());
+  const ultimaAttivita = useRef<number>(Date.now());
 
   const avviato = useRef(false);
   const salutato = useRef(false);
@@ -62,7 +72,8 @@ export default function Home() {
             allegato: allegato ? { dataUrl: allegato } : undefined,
           }),
         });
-        const data: { testo: string; viste: Vista[]; errore?: string } = await res.json();
+        const data: { testo: string; viste: Vista[]; azioni?: Azione[]; errore?: string } =
+          await res.json();
 
         if (data.errore === "no_key") {
           setHasKey(false);
@@ -77,6 +88,7 @@ export default function Home() {
           speakRef.current?.(data.testo);
         }
         if (Array.isArray(data.viste) && data.viste.length) setViste(data.viste);
+        if (Array.isArray(data.azioni)) data.azioni.forEach((a) => eseguiAzioneRef.current?.(a));
       } catch {
         setMessages((m) => [
           ...m,
@@ -92,14 +104,185 @@ export default function Home() {
   // Tieni i riferimenti aggiornati per evitare closure stantie nel callback vocale.
   const messagesRef = useRef<Msg[]>(messages);
   messagesRef.current = messages;
+  const appuntiRef = useRef(appunti);
+  appuntiRef.current = appunti;
+  // Router della voce: in modalità appunti la dettatura va agli appunti, altrimenti a ORION.
+  const gestisciVoceRef = useRef<(t: string) => void>(() => {});
 
   const { supported, listening, speaking, interim, voiceOn, setVoiceOn, speak, cancelSpeak, micAttivo, toggleMic, setBusy } =
-    useSpeech((t) => inviaAOrion(t));
+    useSpeech((t) => gestisciVoceRef.current(t));
 
   const speakRef = useRef(speak);
   speakRef.current = speak;
   const cancelSpeakRef = useRef(cancelSpeak);
   cancelSpeakRef.current = cancelSpeak;
+  const micAttivoRef = useRef(micAttivo);
+  micAttivoRef.current = micAttivo;
+  const standbyRef = useRef(standby);
+  standbyRef.current = standby;
+  const occupatoRef = useRef(false);
+  occupatoRef.current = loading || speaking;
+  const docViewRef = useRef(docView);
+  docViewRef.current = docView;
+  const nomeUtenteRef = useRef<string | null>(null);
+
+  // Entrando in modalità appunti, accendo il microfono (così si detta subito).
+  const appuntiAperti = !!appunti;
+  useEffect(() => {
+    if (appuntiAperti && supported && !micAttivoRef.current) toggleMic();
+  }, [appuntiAperti, supported, toggleMic]);
+
+  // Esegue le azioni che ORION comanda sullo schermo (apri sito, appunti, foto…).
+  const eseguiAzione = useCallback((a: Azione) => {
+    switch (a.tipo) {
+      case "apri_url":
+        if (a.url) window.open(a.url, "_blank", "noopener,noreferrer");
+        break;
+      case "modalita_appunti":
+        setAppuntiStato("idle");
+        setAppunti({ titolo: a.titolo ?? "Appunti", cliente_id: a.cliente_id ?? null, testo: "" });
+        break;
+      case "apri_documento":
+        fetch(`/api/documento?id=${a.documento_id}`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d?.ok) setDocView({ doc: d.documento as DocVisore, zoom: 1, cerca: a.cerca ?? "" });
+          })
+          .catch(() => {});
+        break;
+      case "zoom_documento":
+        setDocView((v) =>
+          v
+            ? {
+                ...v,
+                zoom:
+                  a.verso === "reset"
+                    ? 1
+                    : Math.min(4, Math.max(0.5, +(v.zoom + (a.verso === "avvicina" ? 0.4 : -0.4)).toFixed(2))),
+              }
+            : v
+        );
+        break;
+      case "cerca_documento":
+        setDocView((v) => (v ? { ...v, cerca: a.testo } : v));
+        break;
+      case "riposo":
+        entraStandbyRef.current?.();
+        break;
+      default:
+        break;
+    }
+  }, []);
+  const eseguiAzioneRef = useRef(eseguiAzione);
+  eseguiAzioneRef.current = eseguiAzione;
+  const entraStandbyRef = useRef<() => void>(() => {});
+
+  // ── Modalità appunti: dettatura, salvataggi, comandi vocali ────────────────
+  const salvaAppuntiPdf = useCallback(() => {
+    const a = appuntiRef.current;
+    if (!a?.testo.trim()) return;
+    scaricaTestoPdf(a.titolo || "Appunti", a.testo);
+    speakRef.current?.("Fatto, ho salvato gli appunti in PDF.");
+  }, []);
+
+  const salvaAppuntiOrion = useCallback(async () => {
+    const a = appuntiRef.current;
+    if (!a?.testo.trim()) return;
+    setAppuntiStato("salvando");
+    try {
+      const r = await fetch("/api/appunti", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ titolo: a.titolo, testo: a.testo, cliente_id: a.cliente_id }),
+      });
+      const d = await r.json();
+      setAppuntiStato(d?.ok ? "salvato" : "idle");
+      if (d?.ok) speakRef.current?.("Ho salvato gli appunti su ORION.");
+    } catch {
+      setAppuntiStato("idle");
+    }
+  }, []);
+
+  const chiudiAppunti = useCallback(() => setAppunti(null), []);
+
+  // ── Standby (riposo) + risveglio col doppio clap ───────────────────────────
+  const entraStandby = useCallback(() => {
+    if (standbyRef.current) return;
+    standbyDa.current = new Date().toISOString();
+    cancelSpeakRef.current?.();
+    if (micAttivoRef.current) toggleMic();
+    setStandby(true);
+  }, [toggleMic]);
+  entraStandbyRef.current = entraStandby;
+
+  const risveglia = useCallback(async () => {
+    if (!standbyRef.current) return;
+    setStandby(false);
+    ultimaAttivita.current = Date.now();
+    const nome = nomeUtenteRef.current ? `, ${nomeUtenteRef.current}` : "";
+    let saluto = `Bentornato${nome}.`;
+    try {
+      const r = await fetch(`/api/proattiva?dopo=${encodeURIComponent(standbyDa.current)}`);
+      const d = await r.json();
+      const nuovi: { cliente: string }[] = Array.isArray(d?.nuoviMessaggi) ? d.nuoviMessaggi : [];
+      const segn: { titolo: string }[] = Array.isArray(d?.segnalazioni) ? d.segnalazioni : [];
+      if (nuovi.length === 1) saluto = `Bentornato${nome}. Mentre eri via ti ha scritto ${nuovi[0].cliente}.`;
+      else if (nuovi.length > 1) saluto = `Bentornato${nome}. Mentre eri via sono arrivati ${nuovi.length} nuovi messaggi.`;
+      else if (segn.length) saluto = `Bentornato${nome}. C'è una cosa da gestire: ${segn[0].titolo}.`;
+    } catch {
+      /* offline: saluto semplice */
+    }
+    speakRef.current?.(saluto);
+  }, []);
+
+  useClapWake(standby, risveglia);
+
+  // Standby automatico dopo qualche minuto d'inattività (non durante voce/elaborazione/pannelli aperti).
+  useEffect(() => {
+    if (!autenticato) return;
+    const bump = () => {
+      ultimaAttivita.current = Date.now();
+    };
+    const eventi = ["mousemove", "mousedown", "keydown", "touchstart", "wheel"];
+    eventi.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const INATTIVITA = 3 * 60 * 1000;
+    const id = setInterval(() => {
+      if (standbyRef.current || occupatoRef.current || micAttivoRef.current) return;
+      if (appuntiRef.current || docViewRef.current) return;
+      if (Date.now() - ultimaAttivita.current > INATTIVITA) entraStandby();
+    }, 15000);
+    return () => {
+      clearInterval(id);
+      eventi.forEach((e) => window.removeEventListener(e, bump));
+    };
+  }, [autenticato, entraStandby]);
+
+  // Quando il mic è attivo in modalità appunti, la voce o detta o comanda.
+  gestisciVoceRef.current = (t: string) => {
+    if (!appuntiRef.current) {
+      inviaAOrion(t);
+      return;
+    }
+    const frase = t.trim();
+    const low = frase.toLowerCase().replace(/[.!?]+$/, "");
+    const comando = ["orion", "hey orion"].some((p) => low.startsWith(p)) ? low.replace(/^(hey )?orion[,\s]+/, "") : low;
+
+    if (/(^|\b)(chiudi|esci|basta|fine)\b.*appunti|^(chiudi|esci|basta|fine)$/.test(comando)) {
+      chiudiAppunti();
+      speakRef.current?.("Chiudo gli appunti.");
+      return;
+    }
+    if (/\bsalva\b/.test(comando) && /\bpdf\b/.test(comando)) {
+      salvaAppuntiPdf();
+      return;
+    }
+    if (/\bsalva\b/.test(comando) && /(orion|documento|client)/.test(comando)) {
+      salvaAppuntiOrion();
+      return;
+    }
+    // Altrimenti è dettatura: la aggiungo agli appunti.
+    setAppunti((a) => (a ? { ...a, testo: a.testo ? `${a.testo} ${frase}` : frase } : a));
+  };
 
   // Avvio: capisci se l'utente è già loggato (cookie di sessione).
   useEffect(() => {
@@ -111,6 +294,7 @@ export default function Home() {
         const s = await r.json();
         setHasKey(Boolean(s.hasKey));
         setAutenticato(Boolean(s.autenticato));
+        nomeUtenteRef.current = s.nome || s.utente?.nome || null;
         if (s.abbonamento) setAbbonamento(s.abbonamento as StatoAbb);
       } catch {
         setAutenticato(false);
@@ -489,6 +673,60 @@ export default function Home() {
 
       {mostraCamera && (
         <CameraCapture onCapture={catturaDocumento} onClose={() => setMostraCamera(false)} />
+      )}
+
+      {appunti && (
+        <AppuntiPanel
+          titolo={appunti.titolo}
+          testo={appunti.testo}
+          interim={interim}
+          ascolto={micAttivo}
+          stato={appuntiStato}
+          onChange={(t) => setAppunti((a) => (a ? { ...a, testo: t } : a))}
+          onPdf={salvaAppuntiPdf}
+          onSalva={salvaAppuntiOrion}
+          onChiudi={chiudiAppunti}
+        />
+      )}
+
+      {docView && (
+        <DocumentoViewer
+          documento={docView.doc}
+          zoom={docView.zoom}
+          cerca={docView.cerca}
+          onZoom={(verso) =>
+            setDocView((v) =>
+              v
+                ? {
+                    ...v,
+                    zoom:
+                      verso === "reset"
+                        ? 1
+                        : Math.min(4, Math.max(0.5, +(v.zoom + (verso === "avvicina" ? 0.4 : -0.4)).toFixed(2))),
+                  }
+                : v
+            )
+          }
+          onCerca={(t) => setDocView((v) => (v ? { ...v, cerca: t } : v))}
+          onClose={() => setDocView(null)}
+        />
+      )}
+
+      {standby && (
+        <div
+          onClick={risveglia}
+          className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center gap-7 bg-black/85 backdrop-blur-md"
+        >
+          <div className="opacity-70">
+            <OrionCore state="idle" size={150} />
+          </div>
+          <div className="text-center">
+            <p className="text-lg text-slate-300">ORION è in pausa</p>
+            <p className="mt-1.5 text-sm text-slate-500">
+              Batti le mani due volte 👏 👏 — o tocca lo schermo — per riprendere
+            </p>
+          </div>
+        </div>
       )}
     </main>
   );

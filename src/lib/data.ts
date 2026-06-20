@@ -545,6 +545,41 @@ export function listDocumenti(): Documento[] {
     .all(T()) as Documento[];
 }
 
+// Documento singolo COMPLETO (inclusa l'immagine) — per il visore foto.
+export function getDocumento(id: number): Documento | undefined {
+  return db()
+    .prepare(
+      `SELECT dc.*, c.nome AS cliente_nome FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id
+       WHERE dc.id = ? AND dc.tenant_id = ?`
+    )
+    .get(id, T()) as Documento | undefined;
+}
+
+// Cerca documenti per titolo o per nome del cliente collegato.
+export function cercaDocumenti(q: string): Documento[] {
+  return db()
+    .prepare(
+      `SELECT dc.id, dc.cliente_id, dc.titolo, dc.tipo, dc.created_at, c.nome AS cliente_nome
+       FROM documenti dc LEFT JOIN clienti c ON c.id = dc.cliente_id
+       WHERE dc.tenant_id = ? AND (dc.titolo LIKE ? OR c.nome LIKE ?) ORDER BY dc.created_at DESC LIMIT 10`
+    )
+    .all(T(), `%${q}%`, `%${q}%`) as Documento[];
+}
+
+// ── Eliminazioni (dentro ORION) ──────────────────────────────────────────────
+
+export function eliminaDocumento(id: number): boolean {
+  return db().prepare("DELETE FROM documenti WHERE id = ? AND tenant_id = ?").run(id, T()).changes > 0;
+}
+
+export function eliminaNota(id: number): boolean {
+  return db().prepare("DELETE FROM note WHERE id = ? AND tenant_id = ?").run(id, T()).changes > 0;
+}
+
+export function eliminaCliente(id: number): boolean {
+  return db().prepare("DELETE FROM clienti WHERE id = ? AND tenant_id = ?").run(id, T()).changes > 0;
+}
+
 // ── Lista d'attesa ──────────────────────────────────────────────────────────
 
 export function aggiungiAttesa(v: { cliente_id?: number | null; nome: string; motivo?: string | null; priorita?: string }): VoceAttesa {
