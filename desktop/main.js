@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 const { spawn } = require("node:child_process");
+const whisper = require("./whisper");
 
 // ORION live: l'app desktop carica lo stesso ORION del web (stessi dati/account)
 // e aggiunge il "ponte" verso il sistema operativo. Si può sovrascrivere con
@@ -100,6 +101,28 @@ ipcMain.handle("os:cestina", async (_e, query) => {
   try {
     await shell.trashItem(trovato);
     return { ok: true, percorso: trovato, nome: path.basename(trovato) };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Riconoscimento vocale offline: prepara il modello (scarica la prima volta).
+ipcMain.handle("os:sttPronto", async () => {
+  try {
+    await whisper.getTranscriber();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Trascrive audio PCM (Float32 mono 16kHz) → testo.
+ipcMain.handle("os:trascrivi", async (_e, pcm) => {
+  try {
+    const float32 = pcm instanceof Float32Array ? pcm : new Float32Array(pcm);
+    if (!float32.length) return { ok: false, errore: "audio vuoto" };
+    const testo = await whisper.trascrivi(float32);
+    return { ok: true, testo };
   } catch (err) {
     return { ok: false, errore: String(err) };
   }

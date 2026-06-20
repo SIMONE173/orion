@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  sttDesktopDisponibile,
+  iniziaDettatura,
+  fermaETrascrivi,
+  annullaDettatura,
+  preparaStt,
+} from "./desktopStt";
 
 // Web Speech API: riconoscimento (STT) it-IT + sintesi (TTS).
 // Microfono "a interruttore": una volta attivato resta in ascolto continuo tra
@@ -40,6 +47,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
   const startedAt = useRef(0); // quando è partito l'ultimo ascolto
   const gotResult = useRef(false); // l'ascolto corrente ha prodotto qualcosa?
   const failCount = useRef(0); // fallimenti rapidi consecutivi (es. Electron senza STT)
+  const usaDesktopRef = useRef(false); // dettatura offline (ORION Desktop)
 
   const startRec = useCallback(() => {
     const rec = recRef.current;
@@ -73,7 +81,11 @@ export function useSpeech(onFinal: (testo: string) => void) {
       ? null
       : (window as AnyRec).SpeechRecognition || (window as AnyRec).webkitSpeechRecognition;
     const hasTTS = "speechSynthesis" in window;
-    setSupported(Boolean(SR));
+    // Sul desktop l'STT del browser non c'è: usiamo la dettatura offline (Whisper).
+    const sttDesktop = isDesktop && sttDesktopDisponibile();
+    usaDesktopRef.current = sttDesktop;
+    setSupported(Boolean(SR) || sttDesktop);
+    if (sttDesktop) preparaStt(); // scalda il modello in anticipo
 
     if (SR) {
       const rec: AnyRec = new SR();
@@ -157,6 +169,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
         recRef.current?.abort?.();
         window.speechSynthesis?.cancel();
         if (restartTimer.current) clearTimeout(restartTimer.current);
+        annullaDettatura();
       } catch {
         /* noop */
       }
@@ -223,6 +236,17 @@ export function useSpeech(onFinal: (testo: string) => void) {
   );
 
   const attivaMic = useCallback(() => {
+    // Desktop (offline): registra finché non si tocca di nuovo (push-to-talk).
+    if (usaDesktopRef.current) {
+      continuoRef.current = true;
+      setMicAttivo(true);
+      setListening(true);
+      iniziaDettatura().catch(() => {
+        setMicAttivo(false);
+        setListening(false);
+      });
+      return;
+    }
     continuoRef.current = true;
     setMicAttivo(true);
     // NON interrompe ORION: se sta parlando o elaborando, il microfono parte da
@@ -231,6 +255,20 @@ export function useSpeech(onFinal: (testo: string) => void) {
   }, [startRec]);
 
   const disattivaMic = useCallback(() => {
+    // Desktop: ferma la registrazione, trascrive offline e invia il testo.
+    if (usaDesktopRef.current) {
+      continuoRef.current = false;
+      setMicAttivo(false);
+      setListening(false);
+      setInterim("Trascrivo…");
+      fermaETrascrivi()
+        .then((testo) => {
+          setInterim("");
+          if (testo) onFinalRef.current(testo);
+        })
+        .catch(() => setInterim(""));
+      return;
+    }
     continuoRef.current = false;
     setMicAttivo(false);
     if (restartTimer.current) clearTimeout(restartTimer.current);

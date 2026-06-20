@@ -8,4 +8,7 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   apriFile: (query) => ipcRenderer.invoke("os:apriFile", query),
   cestina: (query) => ipcRenderer.invoke("os:cestina", query),
   apriApp: (nome) => ipcRenderer.invoke("os:apriApp", nome),
+  // Riconoscimento vocale offline:
+  sttPronto: () => ipcRenderer.invoke("os:sttPronto"),
+  trascrivi: (pcm) => ipcRenderer.invoke("os:trascrivi", pcm),
 });
