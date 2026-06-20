@@ -37,11 +37,16 @@ export function useSpeech(onFinal: (testo: string) => void) {
   const speakingRef = useRef(false); // ORION sta parlando (non ascoltare: niente eco)
   const busyRef = useRef(false); // ORION sta elaborando (loading)
   const restartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startedAt = useRef(0); // quando è partito l'ultimo ascolto
+  const gotResult = useRef(false); // l'ascolto corrente ha prodotto qualcosa?
+  const failCount = useRef(0); // fallimenti rapidi consecutivi (es. Electron senza STT)
 
   const startRec = useCallback(() => {
     const rec = recRef.current;
     if (!rec) return;
     try {
+      startedAt.current = Date.now();
+      gotResult.current = false;
       rec.start();
       setListening(true);
     } catch {
@@ -74,6 +79,8 @@ export function useSpeech(onFinal: (testo: string) => void) {
       rec.maxAlternatives = 1;
 
       rec.onresult = (e: AnyRec) => {
+        gotResult.current = true; // l'STT funziona davvero
+        failCount.current = 0;
         let finale = "";
         let parziale = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -99,6 +106,22 @@ export function useSpeech(onFinal: (testo: string) => void) {
       rec.onend = () => {
         setListening(false);
         setInterim("");
+        // Se l'ascolto è finito SUBITO senza produrre nulla, è un fallimento
+        // (tipico di Electron: nessun servizio vocale). Dopo alcuni tentativi
+        // rapidi a vuoto, smetti di riprovare e passa al testo (niente sfarfallio).
+        const rapido = Date.now() - startedAt.current < 1200 && !gotResult.current;
+        if (rapido) {
+          failCount.current += 1;
+          if (failCount.current >= 3) {
+            continuoRef.current = false;
+            setMicAttivo(false);
+            setSupported(false);
+            if (restartTimer.current) clearTimeout(restartTimer.current);
+            return;
+          }
+        } else {
+          failCount.current = 0;
+        }
         maybeRestart();
       };
       recRef.current = rec;
