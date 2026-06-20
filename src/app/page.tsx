@@ -26,6 +26,23 @@ type StatoAbb = {
   periodoFine: string | null;
 };
 
+type EsitoOS = { ok: boolean; nome?: string; app?: string; errore?: string };
+type OrionDesktop = {
+  versione: string;
+  piattaforma: string;
+  apriFile: (q: string) => Promise<EsitoOS>;
+  cestina: (q: string) => Promise<EsitoOS>;
+  apriApp: (n: string) => Promise<EsitoOS>;
+};
+declare global {
+  interface Window {
+    orionDesktop?: OrionDesktop;
+  }
+}
+
+const desktopBridge = (): OrionDesktop | null =>
+  typeof window !== "undefined" && window.orionDesktop ? window.orionDesktop : null;
+
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [viste, setViste] = useState<Vista[]>([]);
@@ -70,6 +87,7 @@ export default function Home() {
             messages: storico,
             avvio,
             allegato: allegato ? { dataUrl: allegato } : undefined,
+            desktop: !!desktopBridge(),
           }),
         });
         const data: { testo: string; viste: Vista[]; azioni?: Azione[]; errore?: string } =
@@ -169,6 +187,39 @@ export default function Home() {
       case "riposo":
         entraStandbyRef.current?.();
         break;
+      case "apri_file": {
+        const d = desktopBridge();
+        if (!d) {
+          speakRef.current?.("Aprire i file del tuo computer è una cosa che posso fare con ORION Desktop, l'app da scaricare.");
+          break;
+        }
+        d.apriFile(a.query).then((r) => {
+          if (!r.ok) speakRef.current?.(`Non ho trovato un file chiamato ${a.query}.`);
+        });
+        break;
+      }
+      case "cestina_file": {
+        const d = desktopBridge();
+        if (!d) {
+          speakRef.current?.("Cestinare i file del computer è possibile con ORION Desktop.");
+          break;
+        }
+        d.cestina(a.query).then((r) => {
+          speakRef.current?.(r.ok ? `Fatto, ho spostato ${r.nome} nel cestino.` : `Non ho trovato ${a.query}.`);
+        });
+        break;
+      }
+      case "apri_app": {
+        const d = desktopBridge();
+        if (!d) {
+          speakRef.current?.("Aprire le app del computer è possibile con ORION Desktop.");
+          break;
+        }
+        d.apriApp(a.nome).then((r) => {
+          if (!r.ok) speakRef.current?.(`Non sono riuscito ad aprire ${a.nome}.`);
+        });
+        break;
+      }
       default:
         break;
     }

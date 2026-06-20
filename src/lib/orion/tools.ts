@@ -624,6 +624,24 @@ export const TOOLS: Anthropic.Tool[] = [
       "Mette ORION in modalità RIPOSO/standby. Usalo per 'riposati', 'vai in pausa', 'mettiti in standby', 'a dopo', 'ci sentiamo dopo'. Saluta brevemente; l'utente ti risveglierà battendo le mani due volte o toccando lo schermo.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "apri_file_locale",
+    description:
+      "SOLO versione DESKTOP: trova e apre un FILE o cartella sul computer dell'utente, cercandolo per nome nelle cartelle principali (Scrivania, Documenti, Download…). Usalo per 'apri il file X', 'trovami e apri il documento Y'. Passa il nome (anche parziale) in 'nome'.",
+    input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
+  },
+  {
+    name: "apri_app",
+    description:
+      "SOLO versione DESKTOP: lancia un'applicazione INSTALLATA sul computer. Usalo per 'apri Spotify', 'apri Word', 'apri Calcolatrice'. Passa il nome dell'app in 'nome'. (Per siti web usa invece lo strumento 'apri'.)",
+    input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
+  },
+  {
+    name: "elimina_file_locale",
+    description:
+      "SOLO versione DESKTOP: sposta nel CESTINO un file del computer, trovandolo per nome. Usalo per 'elimina/cestina il file X'. CHIEDI SEMPRE CONFERMA prima. Passa il nome in 'nome'.",
+    input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -1210,6 +1228,21 @@ const handlers: Record<string, Handler> = {
   }),
 
   vai_in_pausa: () => ({ result: { ok: true, standby: true }, azione: { tipo: "riposo" } }),
+
+  apri_file_locale: (input) => ({
+    result: { ok: true, richiesto: input.nome },
+    azione: { tipo: "apri_file", query: String(input.nome ?? "") },
+  }),
+
+  apri_app: (input) => ({
+    result: { ok: true, app: input.nome },
+    azione: { tipo: "apri_app", nome: String(input.nome ?? "") },
+  }),
+
+  elimina_file_locale: (input) => ({
+    result: { ok: true, richiesto: input.nome },
+    azione: { tipo: "cestina_file", query: String(input.nome ?? "") },
+  }),
 };
 
 export async function dispatch(

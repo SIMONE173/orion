@@ -28,3 +28,7 @@ npm-debug.log*
 
 # backup locali del DB (mai versionare)
 /data/*.bak*
+
+# ORION Desktop (Electron)
+/desktop/node_modules
+/desktop/dist

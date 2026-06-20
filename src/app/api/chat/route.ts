@@ -12,8 +12,9 @@ export async function POST(req: NextRequest) {
     const avvio: boolean = body?.avvio === true;
     const allegato =
       typeof body?.allegato?.dataUrl === "string" ? { dataUrl: body.allegato.dataUrl } : undefined;
+    const desktop = body?.desktop === true;
 
-    const r = await conTenant(() => runConversation(storico, avvio, allegato));
+    const r = await conTenant(() => runConversation(storico, avvio, allegato, desktop));
     if (!r.ok) {
       return NextResponse.json(
         { testo: "Sessione scaduta. Accedi di nuovo.", viste: [], errore: "auth_sessione" },

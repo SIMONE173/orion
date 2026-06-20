@@ -12,7 +12,8 @@ export type Allegato = { dataUrl: string };
 export async function runConversation(
   storico: MessaggioStorico[],
   avvio = false,
-  allegato?: Allegato
+  allegato?: Allegato,
+  desktop = false
 ): Promise<RisultatoConversazione> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -25,7 +26,7 @@ export async function runConversation(
   }
 
   const client = new Anthropic({ apiKey });
-  const system = buildSystem();
+  const system = buildSystem(desktop);
 
   const messages: Anthropic.MessageParam[] = storico.map((m) => ({
     role: m.role,
