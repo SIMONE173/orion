@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   sttDesktopDisponibile,
-  iniziaDettatura,
-  fermaETrascrivi,
-  annullaDettatura,
+  avviaAscoltoContinuo,
+  fermaAscoltoContinuo,
   preparaStt,
 } from "./desktopStt";
 
@@ -169,7 +168,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
         recRef.current?.abort?.();
         window.speechSynthesis?.cancel();
         if (restartTimer.current) clearTimeout(restartTimer.current);
-        annullaDettatura();
+        fermaAscoltoContinuo();
       } catch {
         /* noop */
       }
@@ -236,12 +235,16 @@ export function useSpeech(onFinal: (testo: string) => void) {
   );
 
   const attivaMic = useCallback(() => {
-    // Desktop (offline): registra finché non si tocca di nuovo (push-to-talk).
+    // Desktop (offline): ascolto CONTINUO come il web — si attiva una volta e
+    // ogni pausa chiude e invia la frase da sola. In pausa mentre ORION parla.
     if (usaDesktopRef.current) {
       continuoRef.current = true;
       setMicAttivo(true);
       setListening(true);
-      iniziaDettatura().catch(() => {
+      avviaAscoltoContinuo({
+        onTesto: (t) => onFinalRef.current(t),
+        puoAscoltare: () => !speakingRef.current && !busyRef.current,
+      }).catch(() => {
         setMicAttivo(false);
         setListening(false);
       });
@@ -255,18 +258,13 @@ export function useSpeech(onFinal: (testo: string) => void) {
   }, [startRec]);
 
   const disattivaMic = useCallback(() => {
-    // Desktop: ferma la registrazione, trascrive offline e invia il testo.
+    // Desktop: ferma l'ascolto continuo (mute).
     if (usaDesktopRef.current) {
       continuoRef.current = false;
+      fermaAscoltoContinuo();
       setMicAttivo(false);
       setListening(false);
-      setInterim("Trascrivo…");
-      fermaETrascrivi()
-        .then((testo) => {
-          setInterim("");
-          if (testo) onFinalRef.current(testo);
-        })
-        .catch(() => setInterim(""));
+      setInterim("");
       return;
     }
     continuoRef.current = false;

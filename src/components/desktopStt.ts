@@ -1,8 +1,9 @@
 "use client";
 
-// Dettatura per ORION Desktop: cattura l'audio del microfono, lo converte a
-// PCM mono 16kHz e lo invia al motore vocale offline (Whisper) esposto dal
-// preload come window.orionDesktop.trascrivi. Solo nel desktop (Electron).
+// Dettatura per ORION Desktop, in ASCOLTO CONTINUO come il web: si attiva una
+// volta sola e poi, ogni volta che l'utente fa una pausa, la frase viene
+// trascritta (offline, Whisper) e inviata a ORION da sola. Mentre ORION parla o
+// elabora, l'ascolto si mette in pausa (niente eco). Solo nel desktop (Electron).
 
 type Bridge = {
   sttPronto: () => Promise<{ ok: boolean; errore?: string }>;
@@ -19,14 +20,36 @@ export function sttDesktopDisponibile(): boolean {
   return bridge() !== null;
 }
 
+export function preparaStt() {
+  bridge()?.sttPronto().catch(() => {});
+}
+
+// Soglie del rilevamento voce/pausa (tarabili).
+const SOGLIA_VOCE = 0.04; // sopra = sta parlando
+const SILENZIO_MS = 1000; // pausa che chiude la frase
+const MIN_MS = 350; // frase più corta di così = ignorata (rumore)
+const MAX_MS = 15000; // taglio di sicurezza
+
 let ctx: AudioContext | null = null;
 let stream: MediaStream | null = null;
 let processor: ScriptProcessorNode | null = null;
-let chunks: Float32Array[] = [];
+let source: MediaStreamAudioSourceNode | null = null;
 let srcRate = 48000;
 let attivo = false;
 
-// Riduce la frequenza a 16kHz facendo la media dei campioni (sufficiente per la voce).
+let seg: Float32Array[] = [];
+let segLen = 0;
+let parlando = false;
+let ultimaVoce = 0;
+let coda: Promise<void> = Promise.resolve();
+let cfg: { onTesto: (t: string) => void; puoAscoltare: () => boolean } | null = null;
+
+function rms(buf: Float32Array): number {
+  let s = 0;
+  for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+  return Math.sqrt(s / buf.length);
+}
+
 function a16k(input: Float32Array, fromRate: number): Float32Array {
   if (fromRate === 16000) return input;
   const ratio = fromRate / 16000;
@@ -42,65 +65,90 @@ function a16k(input: Float32Array, fromRate: number): Float32Array {
   return out;
 }
 
-export async function iniziaDettatura(): Promise<void> {
-  if (attivo) return;
-  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-  ctx = new AC();
-  srcRate = ctx.sampleRate;
-  const source = ctx.createMediaStreamSource(stream);
-  processor = ctx.createScriptProcessor(4096, 1, 1);
-  chunks = [];
-  processor.onaudioprocess = (e) => {
-    chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  };
-  source.connect(processor);
-  processor.connect(ctx.destination);
-  attivo = true;
+function reset() {
+  seg = [];
+  segLen = 0;
+  parlando = false;
 }
 
-function pulisci() {
-  try {
-    processor?.disconnect();
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    ctx?.close();
-  } catch {
-    /* noop */
-  }
-  processor = null;
-  stream = null;
-  ctx = null;
-  attivo = false;
-}
-
-// Ferma la registrazione, trascrive e restituisce il testo (o "").
-export async function fermaETrascrivi(): Promise<string> {
-  if (!attivo) return "";
-  const pezzi = chunks;
-  chunks = [];
-  pulisci();
-
-  const totale = pezzi.reduce((n, c) => n + c.length, 0);
-  if (totale < 1600) return ""; // meno di ~0.1s: niente
-  const pcm = new Float32Array(totale);
+// Chiude la frase corrente, la trascrive (in coda) e la consegna a ORION.
+function finalizza() {
+  const pezzi = seg;
+  const campioni = segLen;
+  reset();
+  if (!cfg || campioni < srcRate * (MIN_MS / 1000)) return;
+  const pcm = new Float32Array(campioni);
   let off = 0;
   for (const c of pezzi) {
     pcm.set(c, off);
     off += c.length;
   }
   const pcm16 = a16k(pcm, srcRate);
-
-  const b = bridge();
-  if (!b) return "";
-  const r = await b.trascrivi(pcm16);
-  return r.ok && r.testo ? r.testo : "";
+  const onTesto = cfg.onTesto;
+  coda = coda.then(async () => {
+    const b = bridge();
+    if (!b) return;
+    const r = await b.trascrivi(pcm16).catch(() => ({ ok: false }) as const);
+    if (r.ok && r.testo) {
+      const t = r.testo.trim();
+      if (t) onTesto(t);
+    }
+  });
 }
 
-export function annullaDettatura() {
-  chunks = [];
-  pulisci();
+export async function avviaAscoltoContinuo(opts: {
+  onTesto: (t: string) => void;
+  puoAscoltare: () => boolean;
+}): Promise<void> {
+  if (attivo) return;
+  cfg = opts;
+  stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  ctx = new AC();
+  srcRate = ctx.sampleRate;
+  source = ctx.createMediaStreamSource(stream);
+  processor = ctx.createScriptProcessor(4096, 1, 1);
+  reset();
+  processor.onaudioprocess = (e) => {
+    if (!cfg) return;
+    const frame = e.inputBuffer.getChannelData(0);
+    // Mentre ORION parla o elabora: non ascoltare (niente eco), scarta la frase in corso.
+    if (!cfg.puoAscoltare()) {
+      if (parlando) reset();
+      return;
+    }
+    const livello = rms(frame);
+    const ora = performance.now();
+    if (livello > SOGLIA_VOCE) {
+      parlando = true;
+      ultimaVoce = ora;
+      seg.push(new Float32Array(frame));
+      segLen += frame.length;
+    } else if (parlando) {
+      seg.push(new Float32Array(frame));
+      segLen += frame.length;
+      if (ora - ultimaVoce > SILENZIO_MS || segLen > srcRate * (MAX_MS / 1000)) finalizza();
+    }
+  };
+  source.connect(processor);
+  processor.connect(ctx.destination);
+  attivo = true;
 }
 
-export function preparaStt() {
-  bridge()?.sttPronto().catch(() => {});
+export function fermaAscoltoContinuo() {
+  cfg = null;
+  try {
+    processor?.disconnect();
+    source?.disconnect();
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    ctx?.close();
+  } catch {
+    /* noop */
+  }
+  processor = null;
+  source = null;
+  stream = null;
+  ctx = null;
+  attivo = false;
+  reset();
 }
