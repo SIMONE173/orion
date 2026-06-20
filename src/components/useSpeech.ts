@@ -66,8 +66,12 @@ export function useSpeech(onFinal: (testo: string) => void) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const SR =
-      (window as AnyRec).SpeechRecognition || (window as AnyRec).webkitSpeechRecognition;
+    // In ORION Desktop (Electron) il riconoscimento vocale del browser non esiste:
+    // non lo attiviamo nemmeno → niente sfarfallio, si parte già in modalità testo.
+    const isDesktop = Boolean((window as AnyRec).orionDesktop);
+    const SR = isDesktop
+      ? null
+      : (window as AnyRec).SpeechRecognition || (window as AnyRec).webkitSpeechRecognition;
     const hasTTS = "speechSynthesis" in window;
     setSupported(Boolean(SR));
 
