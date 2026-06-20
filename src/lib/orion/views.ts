@@ -11,6 +11,7 @@ import type {
   VoceAttesa,
   Segnalazione,
   Profilo,
+  StatoAbbonamento,
 } from "../data";
 
 export type Vista =
@@ -96,6 +97,7 @@ export type Vista =
   | { tipo: "proattiva"; dati: { segnalazioni: Segnalazione[] } }
   | { tipo: "chiamata"; dati: { nome: string; numero: string | null } }
   | { tipo: "whatsapp_connect"; dati: Record<string, never> }
+  | { tipo: "abbonamento"; dati: { stato: StatoAbbonamento } }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 export type RisultatoConversazione = {

@@ -34,6 +34,7 @@ import {
   listAttesa,
   rimuoviAttesa,
   analisiProattiva,
+  statoAbbonamento,
 } from "../data";
 import { inviaMessaggioWhatsApp } from "../whatsapp";
 
@@ -522,6 +523,12 @@ export const TOOLS: Anthropic.Tool[] = [
       "Avvia il collegamento del numero WhatsApp del professionista (Embedded Signup di Meta). Usalo quando l'utente vuole usare il proprio WhatsApp con te: 'collega WhatsApp', 'connetti il mio numero', 'voglio rispondere ai pazienti da qui', 'attiva WhatsApp'. Mostra a schermo il pannello con il pulsante di collegamento. Login e consenso su Meta li fa l'utente (non automatizzabili): tu apri la schermata e lo guidi a voce, con calma, un passo alla volta.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "mostra_abbonamento",
+    description:
+      "Mostra il pannello dell'abbonamento (piano, prova gratuita, stato pagamento). Usalo per 'il mio abbonamento', 'quanto manca alla prova', 'voglio abbonarmi', 'gestisci pagamento', 'disdici'. Il pannello contiene i pulsanti per abbonarsi o gestire il pagamento.",
+    input_schema: { type: "object", properties: {} },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -965,6 +972,11 @@ const handlers: Record<string, Handler> = {
     },
     vista: { tipo: "whatsapp_connect", dati: {} },
   }),
+
+  mostra_abbonamento: () => {
+    const stato = statoAbbonamento();
+    return { result: { abbonamento: stato }, vista: { tipo: "abbonamento", dati: { stato } } };
+  },
 };
 
 export async function dispatch(

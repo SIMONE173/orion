@@ -187,6 +187,21 @@ function migrate(d: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_wa_phone ON whatsapp_accounts(phone_number_id);
+
+    -- Abbonamento del professionista (Stripe, Fase 3). Un record per tenant.
+    -- stato: 'prova' | 'attivo' | 'scaduto' | 'annullato'. La prova si calcola
+    -- comunque da utenti.created_at; qui teniamo lo stato Stripe.
+    CREATE TABLE IF NOT EXISTS abbonamenti (
+      tenant_id INTEGER PRIMARY KEY,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      stato TEXT NOT NULL DEFAULT 'prova',
+      periodo_fine TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_abb_customer ON abbonamenti(stripe_customer_id);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:

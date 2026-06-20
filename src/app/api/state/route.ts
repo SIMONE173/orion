@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getProfilo } from "@/lib/data";
+import { getProfilo, statoAbbonamento } from "@/lib/data";
 import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
@@ -13,6 +13,7 @@ export async function GET() {
       utente: { email: u.email, nome: u.nome },
       onboardingCompleto: profilo.onboarding_completo === 1,
       nome: profilo.nome,
+      abbonamento: statoAbbonamento(),
     };
   });
   const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);

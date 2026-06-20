@@ -12,6 +12,16 @@ import type { Vista } from "@/lib/orion/views";
 
 type Msg = { role: "user" | "assistant"; content: string };
 
+type StatoAbb = {
+  configurato: boolean;
+  stato: "demo" | "prova" | "attivo" | "scaduto" | "annullato";
+  inProva: boolean;
+  giorniProvaRimasti: number;
+  attivo: boolean;
+  accessoConsentito: boolean;
+  periodoFine: string | null;
+};
+
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [viste, setViste] = useState<Vista[]>([]);
@@ -24,6 +34,7 @@ export default function Home() {
   const [avviso, setAvviso] = useState<string | null>(null);
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
+  const [abbonamento, setAbbonamento] = useState<StatoAbb | null>(null);
 
   const avviato = useRef(false);
   const salutato = useRef(false);
@@ -100,6 +111,7 @@ export default function Home() {
         const s = await r.json();
         setHasKey(Boolean(s.hasKey));
         setAutenticato(Boolean(s.autenticato));
+        if (s.abbonamento) setAbbonamento(s.abbonamento as StatoAbb);
       } catch {
         setAutenticato(false);
       }
@@ -126,6 +138,16 @@ export default function Home() {
     setViste([]);
     setAvviso(null);
     setAutenticato(false);
+  }, []);
+
+  const avviaCheckout = useCallback(async () => {
+    try {
+      const r = await fetch("/api/stripe/checkout", { method: "POST" });
+      const d = await r.json();
+      if (d?.ok && d.url) window.location.href = d.url;
+    } catch {
+      /* noop */
+    }
   }, []);
 
   const coreState: CoreState = loading
@@ -197,6 +219,35 @@ export default function Home() {
   }
   if (!autenticato) {
     return <AuthScreen onAuth={() => setAutenticato(true)} />;
+  }
+
+  // Paywall: solo se Stripe è attivo E l'accesso non è consentito (prova scaduta,
+  // niente abbonamento). In modalità demo (Stripe spento) non blocca nulla.
+  if (abbonamento?.configurato && !abbonamento.accessoConsentito) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center px-5 py-10">
+        <div className="fade-in w-full max-w-md text-center">
+          <OrionCore state="idle" size={110} />
+          <h1 className="mt-6 text-2xl font-semibold text-slate-50">La prova è terminata</h1>
+          <p className="mt-3 text-slate-300">
+            Spero che ORION ti sia stato utile in questi giorni. Attiva l&apos;abbonamento per
+            continuare ad averlo al tuo fianco — agenda, clienti, promemoria e tutto il resto.
+          </p>
+          <button
+            onClick={avviaCheckout}
+            className="mt-7 w-full rounded-xl bg-cyan-500/90 px-6 py-3.5 font-medium text-slate-900 transition hover:bg-cyan-400"
+          >
+            Attiva l&apos;abbonamento
+          </button>
+          <button
+            onClick={logout}
+            className="mt-3 text-sm text-slate-500 hover:text-slate-300"
+          >
+            Esci
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (

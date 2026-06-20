@@ -133,6 +133,26 @@ export type WhatsappAccount = {
   updated_at: string;
 };
 
+export type Abbonamento = {
+  tenant_id: number;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  stato: string;
+  periodo_fine: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type StatoAbbonamento = {
+  configurato: boolean;
+  stato: "demo" | "prova" | "attivo" | "scaduto" | "annullato";
+  inProva: boolean;
+  giorniProvaRimasti: number;
+  attivo: boolean;
+  accessoConsentito: boolean;
+  periodoFine: string | null;
+};
+
 const nowISO = () => new Date().toISOString();
 const T = () => tenantIdCorrente();
 
@@ -620,6 +640,110 @@ export function tenantDaPhoneNumberId(phoneNumberId: string): number | null {
     .prepare("SELECT tenant_id FROM whatsapp_accounts WHERE phone_number_id = ?")
     .get(phoneNumberId) as { tenant_id: number } | undefined;
   return r?.tenant_id ?? null;
+}
+
+// ── Abbonamento (Stripe, Fase 3) ─────────────────────────────────────────────
+
+const STRIPE_CONFIG = Boolean(
+  (process.env.STRIPE_SECRET_KEY || "").trim() && (process.env.STRIPE_PRICE_ID || "").trim()
+);
+const GIORNI_PROVA = 14;
+
+export function getAbbonamento(): Abbonamento | undefined {
+  return db().prepare("SELECT * FROM abbonamenti WHERE tenant_id = ?").get(T()) as
+    | Abbonamento
+    | undefined;
+}
+
+export function salvaAbbonamento(a: {
+  stripe_customer_id?: string | null;
+  stripe_subscription_id?: string | null;
+  stato?: string;
+  periodo_fine?: string | null;
+}): Abbonamento {
+  const t = T();
+  const now = nowISO();
+  const prec = getAbbonamento();
+  db()
+    .prepare(
+      `INSERT INTO abbonamenti (tenant_id, stripe_customer_id, stripe_subscription_id, stato, periodo_fine, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         stripe_customer_id = COALESCE(excluded.stripe_customer_id, abbonamenti.stripe_customer_id),
+         stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, abbonamenti.stripe_subscription_id),
+         stato = excluded.stato,
+         periodo_fine = excluded.periodo_fine,
+         updated_at = excluded.updated_at`
+    )
+    .run(
+      t,
+      a.stripe_customer_id ?? prec?.stripe_customer_id ?? null,
+      a.stripe_subscription_id ?? prec?.stripe_subscription_id ?? null,
+      a.stato ?? prec?.stato ?? "prova",
+      a.periodo_fine ?? null,
+      now,
+      now
+    );
+  return getAbbonamento()!;
+}
+
+// Lookup globale per il webhook (gira senza contesto tenant).
+export function tenantDaStripeCustomer(customerId: string): number | null {
+  const r = db()
+    .prepare("SELECT tenant_id FROM abbonamenti WHERE stripe_customer_id = ?")
+    .get(customerId) as { tenant_id: number } | undefined;
+  return r?.tenant_id ?? null;
+}
+
+// Stato calcolato dell'abbonamento del tenant corrente (per paywall e UI).
+export function statoAbbonamento(): StatoAbbonamento {
+  if (!STRIPE_CONFIG) {
+    return {
+      configurato: false,
+      stato: "demo",
+      inProva: false,
+      giorniProvaRimasti: 0,
+      attivo: false,
+      accessoConsentito: true,
+      periodoFine: null,
+    };
+  }
+  const t = T();
+  const ab = getAbbonamento();
+  const ora = Date.now();
+
+  // Abbonamento attivo (o annullato ma ancora nel periodo pagato).
+  const periodoFine = ab?.periodo_fine ?? null;
+  const periodoValido = periodoFine ? new Date(periodoFine).getTime() > ora : false;
+  if ((ab?.stato === "attivo" || ab?.stato === "annullato") && periodoValido) {
+    return {
+      configurato: true,
+      stato: ab.stato as StatoAbbonamento["stato"],
+      inProva: false,
+      giorniProvaRimasti: 0,
+      attivo: ab.stato === "attivo",
+      accessoConsentito: true,
+      periodoFine,
+    };
+  }
+
+  // Altrimenti: prova gratuita calcolata dalla data di creazione dell'account.
+  const u = db().prepare("SELECT created_at FROM utenti WHERE id = ?").get(t) as
+    | { created_at: string }
+    | undefined;
+  const inizio = u ? new Date(u.created_at).getTime() : ora;
+  const fineProva = inizio + GIORNI_PROVA * 24 * 60 * 60 * 1000;
+  const giorniRimasti = Math.max(0, Math.ceil((fineProva - ora) / (24 * 60 * 60 * 1000)));
+  const inProva = giorniRimasti > 0;
+  return {
+    configurato: true,
+    stato: inProva ? "prova" : "scaduto",
+    inProva,
+    giorniProvaRimasti: giorniRimasti,
+    attivo: false,
+    accessoConsentito: inProva,
+    periodoFine,
+  };
 }
 
 // ── Briefing + analisi proattiva ────────────────────────────────────────────
