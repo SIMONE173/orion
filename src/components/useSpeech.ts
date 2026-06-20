@@ -139,10 +139,14 @@ export function useSpeech(onFinal: (testo: string) => void) {
           .getVoices()
           .filter((v) => v.lang === "it-IT" || (v.lang ?? "").toLowerCase().startsWith("it"));
         if (!it.length) return;
-        // Voce richiesta: "Google italiano". Ripiego sulla migliore disponibile.
-        voiceRef.current =
-          it.find((v) => v.name.toLowerCase().includes("google")) ||
-          [...it].sort((a, b) => punteggioVoce(b) - punteggioVoce(a))[0];
+        const miglioreDisponibile = [...it].sort((a, b) => punteggioVoce(b) - punteggioVoce(a))[0];
+        if (isDesktop) {
+          // Desktop (Electron): voce scelta dall'utente = "Alice"; ripiego sulla migliore.
+          voiceRef.current = it.find((v) => v.name.toLowerCase().includes("alice")) || miglioreDisponibile;
+        } else {
+          // Web (Chrome): "Google italiano"; ripiego sulla migliore disponibile.
+          voiceRef.current = it.find((v) => v.name.toLowerCase().includes("google")) || miglioreDisponibile;
+        }
       };
       applica();
       window.speechSynthesis.onvoiceschanged = applica;
