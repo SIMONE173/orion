@@ -19,14 +19,18 @@ export function useSnapToggle(attivo: boolean, onSnap: () => void) {
     let ctx: AudioContext | null = null;
     let annullato = false;
 
-    // Lo schiocco è un picco NETTO sopra il rumore di fondo. Rilevazione adattiva:
-    // teniamo una linea di base (media lenta) e scattiamo quando il picco la supera
-    // di molto ed è oltre una soglia minima. Così si adatta al microfono.
-    const SOGLIA_MIN = 0.22; // picco minimo assoluto
-    const FATTORE = 3; // quante volte sopra la base per essere uno "schiocco"
-    const COOLDOWN = 1000; // ms tra uno schiocco e l'altro (evita il doppio conteggio)
+    // Uno schiocco si distingue dalla VOCE per 3 cose insieme:
+    //  1) PICCO secco (ampiezza alta e improvvisa)
+    //  2) preceduto da un attimo di QUIETE (la voce è continua → niente quiete)
+    //  3) ricco di ALTE FREQUENZE (è un "click" acuto; la voce è grave)
+    // Devono valere tutte e tre → quasi mai falsi positivi mentre si parla.
+    const PICCO = 0.3; // ampiezza del transiente
+    const QUIETE = 0.12; // i ~150ms precedenti devono stare sotto questo
+    const ALTE = 0.35; // quota di energia nelle alte frequenze (0..1)
+    const COOLDOWN = 1000; // ms tra uno schiocco e l'altro
+    const STORIA = 9; // ~150ms di frame precedenti
     let ultimoSnap = 0;
-    let base = 0.02; // linea di base del rumore (si adatta)
+    const storia: number[] = [];
 
     (async () => {
       try {
@@ -44,24 +48,41 @@ export function useSnapToggle(attivo: boolean, onSnap: () => void) {
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 1024;
         src.connect(analyser);
-        const buf = new Uint8Array(analyser.fftSize);
+        const td = new Uint8Array(analyser.fftSize); // dominio del tempo
+        const fd = new Uint8Array(analyser.frequencyBinCount); // spettro
+        const sogliaBin = Math.floor(analyser.frequencyBinCount * 0.45); // ~oltre 5kHz = "alte"
 
         const tick = () => {
-          analyser.getByteTimeDomainData(buf);
+          // 1) Picco (ampiezza)
+          analyser.getByteTimeDomainData(td);
           let picco = 0;
-          for (let i = 0; i < buf.length; i++) {
-            const v = Math.abs(buf[i] - 128) / 128;
+          for (let i = 0; i < td.length; i++) {
+            const v = Math.abs(td[i] - 128) / 128;
             if (v > picco) picco = v;
           }
+          // 3) Quota di alte frequenze
+          analyser.getByteFrequencyData(fd);
+          let tot = 0;
+          let alti = 0;
+          for (let i = 0; i < fd.length; i++) {
+            tot += fd[i];
+            if (i >= sogliaBin) alti += fd[i];
+          }
+          const quotaAlte = tot > 0 ? alti / tot : 0;
+
           const ora = performance.now();
-          // Schiocco = picco netto: oltre la soglia minima E molto sopra la base.
-          if (picco > SOGLIA_MIN && picco > base * FATTORE && ora - ultimoSnap > COOLDOWN) {
+          const quietePrima = storia.length ? Math.max(...storia) : 0; // 2) quiete precedente
+          if (
+            picco > PICCO &&
+            quietePrima < QUIETE &&
+            quotaAlte > ALTE &&
+            ora - ultimoSnap > COOLDOWN
+          ) {
             ultimoSnap = ora;
             cbRef.current();
           }
-          // Aggiorna la linea di base solo coi suoni "normali" (non i picchi),
-          // così resta una stima del rumore di fondo.
-          if (picco < SOGLIA_MIN) base = base * 0.95 + picco * 0.05;
+          storia.push(picco);
+          if (storia.length > STORIA) storia.shift();
           raf = requestAnimationFrame(tick);
         };
         raf = requestAnimationFrame(tick);
