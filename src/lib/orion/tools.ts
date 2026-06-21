@@ -648,6 +648,29 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "crea_schema",
+    description:
+      "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string" },
+        rami: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              titolo: { type: "string" },
+              punti: { type: "array", items: { type: "string" } },
+            },
+            required: ["titolo"],
+          },
+        },
+      },
+      required: ["titolo", "rami"],
+    },
+  },
+  {
     name: "apri_file_locale",
     description:
       "SOLO versione DESKTOP: trova e apre un FILE o cartella sul computer dell'utente, cercandolo per nome nelle cartelle principali (Scrivania, Documenti, Download…). Usalo per 'apri il file X', 'trovami e apri il documento Y'. Passa il nome (anche parziale) in 'nome'.",
@@ -1251,6 +1274,14 @@ const handlers: Record<string, Handler> = {
   }),
 
   vai_in_pausa: () => ({ result: { ok: true, standby: true }, azione: { tipo: "riposo" } }),
+
+  crea_schema: (input) => {
+    const rami = Array.isArray(input.rami) ? input.rami : [];
+    return {
+      result: { ok: true, rami: rami.length },
+      vista: { tipo: "schema", dati: { titolo: String(input.titolo ?? "Schema"), rami } },
+    };
+  },
 
   risolvi_matematica: (input) => {
     const passi = Array.isArray(input.passi) ? input.passi : [];

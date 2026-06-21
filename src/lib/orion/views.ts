@@ -106,6 +106,13 @@ export type Vista =
         risultato?: string;
       };
     }
+  | {
+      tipo: "schema";
+      dati: {
+        titolo: string;
+        rami: { titolo: string; punti?: string[] }[];
+      };
+    }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
