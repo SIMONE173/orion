@@ -59,8 +59,8 @@ export function DocumentoViewer({
   let trovatoPrimo = false;
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-black/70 backdrop-blur-sm">
-      <div className="glass mx-auto mt-8 flex h-[calc(100%-4rem)] w-full max-w-5xl flex-col rounded-2xl p-5">
+    <div className="backdrop-in fixed inset-0 z-40 flex flex-col bg-black/70 backdrop-blur-sm">
+      <div className="reveal glass mx-auto mt-8 flex h-[calc(100%-4rem)] w-full max-w-5xl flex-col rounded-2xl p-5">
         {/* Barra */}
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="min-w-0">

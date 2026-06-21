@@ -26,8 +26,8 @@ export function AppuntiPanel({
   onChiudi: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-black/60 backdrop-blur-sm">
-      <div className="glass mx-auto mt-10 flex h-[calc(100%-5rem)] w-full max-w-3xl flex-col rounded-2xl p-6">
+    <div className="backdrop-in fixed inset-0 z-40 flex flex-col bg-black/60 backdrop-blur-sm">
+      <div className="reveal glass mx-auto mt-10 flex h-[calc(100%-5rem)] w-full max-w-3xl flex-col rounded-2xl p-6">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl bg-cyan-500/20 text-cyan-300">
