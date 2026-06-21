@@ -13,6 +13,7 @@ export function AppuntiPanel({
   onChange,
   onPdf,
   onSalva,
+  onSistema,
   onChiudi,
 }: {
   titolo: string;
@@ -23,6 +24,7 @@ export function AppuntiPanel({
   onChange: (t: string) => void;
   onPdf: () => void;
   onSalva: () => void;
+  onSistema: () => void;
   onChiudi: () => void;
 }) {
   return (
@@ -66,6 +68,14 @@ export function AppuntiPanel({
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <button
+            onClick={onSistema}
+            disabled={!testo.trim() || stato === "salvando"}
+            className="rounded-xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-2.5 font-medium text-cyan-100 transition hover:bg-cyan-400/20 disabled:opacity-40"
+            title="ORION mette la punteggiatura, va a capo e trasforma gli elenchi in liste"
+          >
+            ✨ Sistema
+          </button>
+          <button
             onClick={onPdf}
             disabled={!testo.trim()}
             className="rounded-xl bg-cyan-500/90 px-5 py-2.5 font-medium text-slate-900 transition hover:bg-cyan-400 disabled:opacity-40"
@@ -80,7 +90,7 @@ export function AppuntiPanel({
             {stato === "salvando" ? "Salvo…" : stato === "salvato" ? "Salvato ✓" : "Salva su ORION"}
           </button>
           <span className="ml-auto text-xs text-slate-500">
-            Puoi dire: &quot;salva come PDF&quot;, &quot;salva su ORION&quot;, &quot;chiudi appunti&quot;
+            Puoi dire: &quot;sistema&quot;, &quot;salva come PDF&quot;, &quot;salva su ORION&quot;, &quot;chiudi appunti&quot;
           </span>
         </div>
       </div>

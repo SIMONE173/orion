@@ -256,6 +256,25 @@ export default function Home() {
 
   const chiudiAppunti = useCallback(() => setAppunti(null), []);
 
+  // "Sistema": ORION mette punteggiatura, va a capo e trasforma gli elenchi in liste.
+  const sistemaAppunti = useCallback(async () => {
+    const a = appuntiRef.current;
+    if (!a?.testo.trim()) return;
+    setAppuntiStato("salvando");
+    try {
+      const r = await fetch("/api/formatta", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ testo: a.testo }),
+      });
+      const d = await r.json();
+      setAppuntiStato("idle");
+      if (d?.ok && d.testo) setAppunti((x) => (x ? { ...x, testo: d.testo } : x));
+    } catch {
+      setAppuntiStato("idle");
+    }
+  }, []);
+
   // ── Standby (riposo) + risveglio col doppio clap ───────────────────────────
   const entraStandby = useCallback(() => {
     if (standbyRef.current) return;
@@ -323,6 +342,10 @@ export default function Home() {
     if (/(^|\b)(chiudi|esci|basta|fine)\b.*appunti|^(chiudi|esci|basta|fine)$/.test(comando)) {
       chiudiAppunti();
       speakRef.current?.("Chiudo gli appunti.");
+      return;
+    }
+    if (/\b(sistema|sistemi|riordina|formatta|punteggiatura)\b/.test(comando)) {
+      sistemaAppunti();
       return;
     }
     if (/\bsalva\b/.test(comando) && /\bpdf\b/.test(comando)) {
@@ -738,6 +761,7 @@ export default function Home() {
           onChange={(t) => setAppunti((a) => (a ? { ...a, testo: t } : a))}
           onPdf={salvaAppuntiPdf}
           onSalva={salvaAppuntiOrion}
+          onSistema={sistemaAppunti}
           onChiudi={chiudiAppunti}
         />
       )}
