@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import type { Vista } from "@/lib/orion/views";
 import { AgendaPanel } from "./panels/AgendaPanel";
 import { ClientePanel } from "./panels/ClientePanel";
@@ -9,6 +10,12 @@ import { PagamentiPanel } from "./panels/PagamentiPanel";
 import { WhatsAppPanel } from "./panels/WhatsAppPanel";
 import { WhatsAppConnectPanel } from "./panels/WhatsAppConnectPanel";
 import { AbbonamentoPanel } from "./panels/AbbonamentoPanel";
+
+// La lavagna usa KaTeX (pesante): la carichiamo solo quando serve.
+const LavagnaPanel = dynamic(() => import("./panels/LavagnaPanel").then((m) => m.LavagnaPanel), {
+  ssr: false,
+  loading: () => <div className="grid h-full place-items-center text-sm text-slate-500">Preparo la lavagna…</div>,
+});
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { FatturaPanel } from "./panels/FatturaPanel";
 import { PromemoriaPanel } from "./panels/PromemoriaPanel";
@@ -37,6 +44,8 @@ function renderPanel(v: Vista) {
       return <WhatsAppConnectPanel />;
     case "abbonamento":
       return <AbbonamentoPanel dati={v.dati} />;
+    case "lavagna":
+      return <LavagnaPanel dati={v.dati} />;
     case "briefing":
       return <BriefingPanel dati={v.dati} />;
     case "fattura":

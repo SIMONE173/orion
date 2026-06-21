@@ -98,6 +98,14 @@ export type Vista =
   | { tipo: "chiamata"; dati: { nome: string; numero: string | null } }
   | { tipo: "whatsapp_connect"; dati: Record<string, never> }
   | { tipo: "abbonamento"; dati: { stato: StatoAbbonamento } }
+  | {
+      tipo: "lavagna";
+      dati: {
+        titolo: string;
+        passi: { latex?: string; spiegazione?: string }[];
+        risultato?: string;
+      };
+    }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire

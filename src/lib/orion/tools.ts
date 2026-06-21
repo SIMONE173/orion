@@ -625,6 +625,29 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "risolvi_matematica",
+    description:
+      "Apre la LAVAGNA e mostra la soluzione PASSO-PASSO di un problema matematico (operazioni complesse, espressioni, algebra, equazioni, derivate, integrali, percentuali, geometria…). Usalo quando l'utente chiede di calcolare/risolvere/spiegare il procedimento di qualcosa di matematico. RISOLVI TU il problema e passa: 'titolo' (il problema in chiaro), 'passi' (ogni passo con 'latex' = l'espressione in notazione LaTeX, SENZA simboli di dollaro, e 'spiegazione' = cosa fai a parole), e 'risultato' (in LaTeX). A voce di' solo il risultato e una frase di sintesi: i dettagli li mostra la lavagna.",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string" },
+        passi: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              latex: { type: "string", description: "Espressione in LaTeX, senza $ " },
+              spiegazione: { type: "string" },
+            },
+          },
+        },
+        risultato: { type: "string", description: "Risultato finale in LaTeX" },
+      },
+      required: ["titolo", "passi"],
+    },
+  },
+  {
     name: "apri_file_locale",
     description:
       "SOLO versione DESKTOP: trova e apre un FILE o cartella sul computer dell'utente, cercandolo per nome nelle cartelle principali (Scrivania, Documenti, Download…). Usalo per 'apri il file X', 'trovami e apri il documento Y'. Passa il nome (anche parziale) in 'nome'.",
@@ -1228,6 +1251,17 @@ const handlers: Record<string, Handler> = {
   }),
 
   vai_in_pausa: () => ({ result: { ok: true, standby: true }, azione: { tipo: "riposo" } }),
+
+  risolvi_matematica: (input) => {
+    const passi = Array.isArray(input.passi) ? input.passi : [];
+    return {
+      result: { ok: true, risultato: input.risultato ?? null },
+      vista: {
+        tipo: "lavagna",
+        dati: { titolo: String(input.titolo ?? "Problema"), passi, risultato: input.risultato },
+      },
+    };
+  },
 
   apri_file_locale: (input) => ({
     result: { ok: true, richiesto: input.nome },

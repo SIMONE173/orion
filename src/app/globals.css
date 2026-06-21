@@ -200,3 +200,15 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Passi della lavagna: compaiono uno dopo l'altro, come "scritti" a mano. */
+.lavagna-passo {
+  animation: passoIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes passoIn {
+  from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lavagna-passo { animation: fadeIn 0.3s ease both; }
+}
