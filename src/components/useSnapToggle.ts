@@ -24,7 +24,7 @@ export function useSnapToggle(attivo: boolean, onSnap: () => void) {
     // di molto ed è oltre una soglia minima. Così si adatta al microfono.
     const SOGLIA_MIN = 0.22; // picco minimo assoluto
     const FATTORE = 3; // quante volte sopra la base per essere uno "schiocco"
-    const COOLDOWN = 500; // ms tra uno schiocco e l'altro (un solo toggle)
+    const COOLDOWN = 1000; // ms tra uno schiocco e l'altro (evita il doppio conteggio)
     let ultimoSnap = 0;
     let base = 0.02; // linea di base del rumore (si adatta)
 

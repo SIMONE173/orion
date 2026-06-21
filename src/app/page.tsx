@@ -61,6 +61,7 @@ export default function Home() {
   const [appuntiStato, setAppuntiStato] = useState<"idle" | "salvando" | "salvato">("idle");
   const [docView, setDocView] = useState<{ doc: DocVisore; zoom: number; cerca: string } | null>(null);
   const [standby, setStandby] = useState(false);
+  const [snapVisto, setSnapVisto] = useState(false);
   const standbyDa = useRef<string>(new Date().toISOString());
   const ultimaAttivita = useRef<number>(Date.now());
 
@@ -290,7 +291,11 @@ export default function Home() {
   // Doppio battito di mani = risveglio dallo standby.
   useClapWake(standby, risveglia);
   // Schiocco di dita = interruttore hands-free del microfono (solo quando ORION è sveglio).
-  useSnapToggle(!!autenticato && !standby, () => toggleMic());
+  useSnapToggle(!!autenticato && !standby, () => {
+    setSnapVisto(true);
+    setTimeout(() => setSnapVisto(false), 800);
+    toggleMic();
+  });
 
   // Standby automatico dopo qualche minuto d'inattività (non durante voce/elaborazione/pannelli aperti).
   useEffect(() => {
@@ -765,6 +770,12 @@ export default function Home() {
           onCerca={(t) => setDocView((v) => (v ? { ...v, cerca: t } : v))}
           onClose={() => setDocView(null)}
         />
+      )}
+
+      {snapVisto && (
+        <div className="fade-in fixed bottom-28 left-6 z-50 flex items-center gap-2 rounded-full border border-cyan-400/40 bg-cyan-500/20 px-4 py-2 text-sm font-medium text-cyan-100 shadow-lg backdrop-blur">
+          🫰 schiocco rilevato
+        </div>
       )}
 
       {standby && (
