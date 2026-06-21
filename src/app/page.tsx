@@ -10,6 +10,7 @@ import { AppuntiPanel } from "@/components/AppuntiPanel";
 import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
 import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
+import { useSnapToggle } from "@/components/useSnapToggle";
 import { useClapWake } from "@/components/useClapWake";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista, Azione } from "@/lib/orion/views";
@@ -286,7 +287,10 @@ export default function Home() {
     speakRef.current?.(saluto);
   }, []);
 
+  // Doppio battito di mani = risveglio dallo standby.
   useClapWake(standby, risveglia);
+  // Schiocco di dita = interruttore hands-free del microfono (solo quando ORION è sveglio).
+  useSnapToggle(!!autenticato && !standby, () => toggleMic());
 
   // Standby automatico dopo qualche minuto d'inattività (non durante voce/elaborazione/pannelli aperti).
   useEffect(() => {
