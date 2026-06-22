@@ -231,9 +231,19 @@ body {
 @keyframes finFill {
   to { opacity: 1; }
 }
+/* Punto finale: compare quando la linea ha finito di disegnarsi */
+.fin-punto {
+  opacity: 0;
+  animation: finPunto 0.4s ease-out 1.45s forwards;
+}
+@keyframes finPunto {
+  from { opacity: 0; transform: translateY(-50%) scale(0.2); }
+  to { opacity: 1; transform: translateY(-50%) scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   .fin-linea { stroke-dashoffset: 0; animation: none; }
   .fin-area { opacity: 1; animation: none; }
+  .fin-punto { opacity: 1; animation: none; }
 }
 
 /* ===== Mappa (MapLibre): marker luminosi + tema scuro ===== */

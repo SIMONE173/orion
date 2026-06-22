@@ -1854,8 +1854,14 @@ const handlers: Record<string, Handler> = {
       const key = process.env.TWELVEDATA_KEY;
       if (prezzo === undefined && key) {
         try {
+          // Twelve Data usa simboli diversi da Yahoo per materie prime/indici.
+          const TD: Record<string, string> = {
+            "GC=F": "XAU/USD", "SI=F": "XAG/USD", "CL=F": "WTI/USD", "NG=F": "NG/USD",
+            "^GSPC": "GSPC", "^IXIC": "IXIC", "^DJI": "DJI", "FTSEMIB.MI": "FTSEMIB",
+          };
+          const symTD = TD[sym] ?? sym;
           const tsRes = await fetch(
-            `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=60&apikey=${key}`,
+            `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symTD)}&interval=1day&outputsize=60&apikey=${key}`,
             { signal: AbortSignal.timeout(9000) }
           );
           const ts = (await tsRes.json()) as {
