@@ -96,9 +96,12 @@ export function MappaPanel({ dati }: { dati: Dati }) {
     cv.style.position = "absolute";
     host.appendChild(cv);
 
-    const targetPhi = -(dati.lon * Math.PI) / 180;
-    let phi = targetPhi - 0.7;
-    const theta = Math.max(-0.5, Math.min(0.5, (dati.lat / 90) * 0.6));
+    // Angoli per portare ESATTAMENTE lat/lon davanti alla camera (formula COBE).
+    const focusPhi = Math.PI - ((dati.lon * Math.PI) / 180 - Math.PI / 2);
+    const focusTheta = Math.max(-0.9, Math.min(0.9, (dati.lat * Math.PI) / 180));
+    // Parte un po' a ovest del target: così il globo RUOTA fino al posto richiesto.
+    let phi = focusPhi - 1.1;
+    let theta = 0.1;
     let lato = Math.min(host.clientWidth, host.clientHeight) * 0.72 || 260;
     const applica = () => {
       lato = Math.min(host.clientWidth, host.clientHeight) * 0.72 || 260;
@@ -126,8 +129,12 @@ export function MappaPanel({ dati }: { dati: Dati }) {
       glowColor: [0.16, 0.5, 0.8],
       markers: [{ location: [dati.lat, dati.lon], size: 0.1 }],
       onRender: (state) => {
-        phi += (targetPhi - phi) * 0.045 + 0.004;
+        // Ruota lentamente verso il posto richiesto; il piccolo addendo costante
+        // fa sì che il globo non resti mai fermo come una foto.
+        phi += (focusPhi - phi) * 0.028 + 0.0012;
+        theta += (focusTheta - theta) * 0.04;
         state.phi = phi;
+        state.theta = theta;
         state.width = lato * 2;
         state.height = lato * 2;
       },
@@ -149,7 +156,7 @@ export function MappaPanel({ dati }: { dati: Dati }) {
       container: mapRef.current,
       style: STILE,
       center: [dati.lon, dati.lat],
-      zoom: Math.max(3, dati.zoom - 3),
+      zoom: 4.5, // parte largo (vista paese) e poi "scende" sul posto
       pitch: 0,
       bearing: 0,
       attributionControl: { compact: true },
@@ -181,7 +188,7 @@ export function MappaPanel({ dati }: { dati: Dati }) {
           .addTo(map);
       }
 
-      // Dopo l'intro del globo: rivela e "tuffati" nella città.
+      // Dopo che il globo ha ruotato fino al posto: rivela e "scendi" sulla città.
       revealTimer = setTimeout(() => {
         setMostraMappa(true);
         map.flyTo({
@@ -189,10 +196,10 @@ export function MappaPanel({ dati }: { dati: Dati }) {
           zoom: dati.zoom,
           pitch: 55,
           bearing: -18,
-          duration: 2600,
+          duration: 3400,
           essential: true,
         });
-      }, 2000);
+      }, 2800);
     });
 
     return () => {
