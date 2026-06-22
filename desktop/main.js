@@ -40,20 +40,20 @@ function creaFinestra() {
   return win;
 }
 
-// Una finestra per ogni TIPO di vista (mappa, agenda, notizie…): così un secondo
-// comando-mappa (es. "ristoranti vicini") AGGIORNA la mappa già aperta invece di
-// aprirne un'altra. La finestra principale resta sul "nucleo".
-const finestreVista = new Map(); // tipo -> BrowserWindow
+// Apre una VISTA in una finestra separata. La principale resta sul "nucleo".
+// Riuso della finestra SOLO per le MAPPE: così "ristoranti vicini" dopo "mappa di
+// Londra" aggiorna la stessa mappa invece di aprire un doppione. Per tutti gli altri
+// tipi (agenda, notizie, ecc.) ogni comando apre una finestra nuova, come prima.
+let finestraMappa = null;
 
 function apriFinestraVista(vista) {
   const tipo = vista && vista.tipo ? String(vista.tipo) : "vista";
-  const esistente = finestreVista.get(tipo);
-  if (esistente && !esistente.isDestroyed()) {
-    // Stesso tipo già aperto: aggiorno il contenuto, niente doppione.
-    esistente.webContents.send("orion:vista", vista);
-    if (esistente.isMinimized()) esistente.restore();
-    esistente.focus();
-    return esistente;
+
+  if (tipo === "mappa" && finestraMappa && !finestraMappa.isDestroyed()) {
+    finestraMappa.webContents.send("orion:vista", vista);
+    if (finestraMappa.isMinimized()) finestraMappa.restore();
+    finestraMappa.focus();
+    return finestraMappa;
   }
 
   const win = new BrowserWindow({
@@ -68,10 +68,12 @@ function apriFinestraVista(vista) {
       nodeIntegration: false,
     },
   });
-  finestreVista.set(tipo, win);
-  win.on("closed", () => {
-    if (finestreVista.get(tipo) === win) finestreVista.delete(tipo);
-  });
+  if (tipo === "mappa") {
+    finestraMappa = win;
+    win.on("closed", () => {
+      if (finestraMappa === win) finestraMappa = null;
+    });
+  }
   win.loadURL(`${ORION_URL}/pannello`);
   // Mando la vista appena la pagina è pronta (il preload la bufferizza se arriva prima).
   win.webContents.on("did-finish-load", () => {
