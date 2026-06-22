@@ -33,6 +33,8 @@ type OrionDesktop = {
   apriFile: (q: string) => Promise<EsitoOS>;
   cestina: (q: string) => Promise<EsitoOS>;
   apriApp: (n: string) => Promise<EsitoOS>;
+  // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
+  apriVista?: (v: Vista) => void;
 };
 declare global {
   interface Window {
@@ -106,7 +108,15 @@ export default function Home() {
           setMessages((m) => [...m, { role: "assistant", content: data.testo }]);
           speakRef.current?.(data.testo);
         }
-        if (Array.isArray(data.viste) && data.viste.length) setViste(data.viste);
+        if (Array.isArray(data.viste) && data.viste.length) {
+          const d = desktopBridge();
+          if (d?.apriVista) {
+            // Desktop: ogni vista in una finestra a parte; la principale resta sul nucleo.
+            data.viste.forEach((v) => d.apriVista!(v));
+          } else {
+            setViste(data.viste);
+          }
+        }
         if (Array.isArray(data.azioni)) data.azioni.forEach((a) => eseguiAzioneRef.current?.(a));
       } catch {
         setMessages((m) => [

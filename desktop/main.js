@@ -40,6 +40,33 @@ function creaFinestra() {
   return win;
 }
 
+// Apre una VISTA (pannello: agenda, mappa, notizie, ecc.) in una finestra separata.
+// Richiesto solo su desktop: la finestra principale resta sul "nucleo".
+function apriFinestraVista(vista) {
+  const win = new BrowserWindow({
+    width: 900,
+    height: 720,
+    minWidth: 360,
+    backgroundColor: "#070b12",
+    title: "ORION",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  win.loadURL(`${ORION_URL}/pannello`);
+  // Mando la vista appena la pagina è pronta (il preload la bufferizza se arriva prima).
+  win.webContents.on("did-finish-load", () => {
+    win.webContents.send("orion:vista", vista);
+  });
+  return win;
+}
+
+ipcMain.on("os:apriVista", (_e, vista) => {
+  apriFinestraVista(vista);
+});
+
 app.whenReady().then(() => {
   creaFinestra();
   app.on("activate", () => {
