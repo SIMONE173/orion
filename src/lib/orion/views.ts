@@ -131,6 +131,19 @@ export type Vista =
         articoli: { titolo: string; fonte: string; data: string | null; url: string }[];
       };
     }
+  | {
+      tipo: "finanza";
+      dati: {
+        nome: string;
+        simbolo: string;
+        categoria: "crypto" | "azione";
+        valuta: string;
+        prezzo: number;
+        variazione: number | null;
+        periodo: string;
+        serie: number[];
+      };
+    }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire

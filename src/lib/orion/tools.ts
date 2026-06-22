@@ -672,6 +672,20 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "mostra_quotazione",
+    description:
+      "Mostra il PREZZO e il GRAFICO di una crypto, azione o ETF dentro ORION. Usalo per 'quanto vale il bitcoin', 'andamento di Apple', 'grafico Ethereum', 'come va Tesla', 'prezzo ETF X'. 'nome' = il nome/termine (es. 'Bitcoin', 'Apple', 'Tesla'); 'categoria' = 'crypto' per criptovalute, 'azione' per azioni ed ETF; 'simbolo' (opzionale, solo per azioni/ETF) = il ticker se lo conosci (es. 'AAPL', 'TSLA'). IMPORTANTE: tu fornisci SOLO dati e informazioni generali con un breve commento neutro; NON dai MAI consigli d'investimento personalizzati (non sei abilitato) — se te li chiedono, declina gentilmente e rimanda a un consulente.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string" },
+        categoria: { type: "string", enum: ["crypto", "azione"] },
+        simbolo: { type: "string", description: "Ticker per azioni/ETF (opzionale)" },
+      },
+      required: ["nome", "categoria"],
+    },
+  },
+  {
     name: "crea_schema",
     description:
       "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
@@ -1501,6 +1515,127 @@ const handlers: Record<string, Handler> = {
     } catch (e) {
       console.error("[mostra_notizie]", e instanceof Error ? e.message : e);
       return { result: { ok: false, errore: "Notizie non disponibili al momento." } };
+    }
+  },
+
+  mostra_quotazione: async (input) => {
+    const nome = String(input.nome ?? "").trim();
+    const categoria = input.categoria === "azione" ? "azione" : "crypto";
+    if (!nome) return { result: { ok: false, errore: "Quale titolo?" } };
+
+    try {
+      if (categoria === "crypto") {
+        // CoinGecko: gratis, senza chiave.
+        const sRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(nome)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const s = (await sRes.json()) as { coins?: { id: string; name: string; symbol: string }[] };
+        const coin = s.coins?.[0];
+        if (!coin) return { result: { ok: false, errore: `Non ho trovato la crypto "${nome}".` } };
+
+        const [pRes, cRes] = await Promise.all([
+          fetch(
+            `https://api.coingecko.com/api/v3/simple/price?ids=${coin.id}&vs_currencies=eur&include_24hr_change=true`,
+            { signal: AbortSignal.timeout(8000) }
+          ),
+          fetch(
+            `https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=eur&days=30&interval=daily`,
+            { signal: AbortSignal.timeout(9000) }
+          ),
+        ]);
+        const p = (await pRes.json()) as Record<string, { eur?: number; eur_24h_change?: number }>;
+        const c = (await cRes.json()) as { prices?: [number, number][] };
+        const prezzo = p[coin.id]?.eur;
+        if (typeof prezzo !== "number") return { result: { ok: false, errore: "Prezzo non disponibile ora." } };
+        const variazione = p[coin.id]?.eur_24h_change ?? null;
+        const serie = (c.prices ?? []).map((x) => x[1]).filter((n) => typeof n === "number");
+
+        return {
+          result: {
+            ok: true,
+            nome: coin.name,
+            simbolo: coin.symbol.toUpperCase(),
+            prezzo,
+            valuta: "EUR",
+            variazione24h: variazione,
+          },
+          vista: {
+            tipo: "finanza",
+            dati: {
+              nome: coin.name,
+              simbolo: coin.symbol.toUpperCase(),
+              categoria: "crypto",
+              valuta: "EUR",
+              prezzo,
+              variazione,
+              periodo: "30 giorni",
+              serie,
+            },
+          },
+        };
+      }
+
+      // Azioni/ETF: Twelve Data (chiave gratuita). Spento finché non c'è la chiave.
+      const key = process.env.TWELVEDATA_KEY;
+      if (!key) {
+        return {
+          result: {
+            ok: false,
+            gated: true,
+            errore:
+              "Le azioni e gli ETF richiedono una chiave gratuita (Twelve Data) non ancora configurata. Le crypto invece te le mostro subito.",
+          },
+        };
+      }
+      const sym = (input.simbolo ? String(input.simbolo) : nome).trim();
+      const tsRes = await fetch(
+        `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=60&apikey=${key}`,
+        { signal: AbortSignal.timeout(9000) }
+      );
+      const ts = (await tsRes.json()) as {
+        status?: string;
+        meta?: { symbol?: string; currency?: string };
+        values?: { datetime: string; close: string }[];
+        message?: string;
+      };
+      if (ts.status === "error" || !ts.values?.length) {
+        return { result: { ok: false, errore: `Non ho trovato il titolo "${sym}".` } };
+      }
+      // Twelve Data restituisce dal più recente al più vecchio: invertiamo.
+      const serie = ts.values
+        .map((v) => parseFloat(v.close))
+        .filter((n) => !Number.isNaN(n))
+        .reverse();
+      const prezzo = serie[serie.length - 1];
+      const primo = serie[0];
+      const variazione = primo ? ((prezzo - primo) / primo) * 100 : null;
+
+      return {
+        result: {
+          ok: true,
+          nome,
+          simbolo: ts.meta?.symbol ?? sym.toUpperCase(),
+          prezzo,
+          valuta: ts.meta?.currency ?? "USD",
+          variazionePeriodo: variazione,
+        },
+        vista: {
+          tipo: "finanza",
+          dati: {
+            nome,
+            simbolo: ts.meta?.symbol ?? sym.toUpperCase(),
+            categoria: "azione",
+            valuta: ts.meta?.currency ?? "USD",
+            prezzo,
+            variazione,
+            periodo: "60 giorni",
+            serie,
+          },
+        },
+      };
+    } catch (e) {
+      console.error("[mostra_quotazione]", e instanceof Error ? e.message : e);
+      return { result: { ok: false, errore: "Quotazione non disponibile al momento." } };
     }
   },
 
