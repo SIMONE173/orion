@@ -1443,24 +1443,47 @@ const handlers: Record<string, Handler> = {
     const luogo = String(input.luogo ?? "").trim();
     if (!luogo) return { result: { ok: false, errore: "Quale luogo?" } };
     try {
-      // Geocoding server-friendly (Photon/Komoot, gratis, JSON, gestisce città E monumenti).
-      const gRes = await fetch(`https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(luogo)}`, {
-        signal: AbortSignal.timeout(8000),
-      });
-      const g = (await gRes.json()) as {
-        features?: {
-          geometry: { coordinates: [number, number] };
-          properties: { name?: string; city?: string; state?: string; country?: string };
-        }[];
-      };
-      const hit = g.features?.[0];
-      if (!hit) return { result: { ok: false, errore: `Non ho trovato "${luogo}".` } };
-      const lon = hit.geometry.coordinates[0];
-      const lat = hit.geometry.coordinates[1];
-      const pr = hit.properties;
-      const nome = [pr.name, pr.city && pr.city !== pr.name ? pr.city : null, pr.country]
-        .filter(Boolean)
-        .join(", ");
+      // Geocoding a due livelli, gratis e senza chiave:
+      // 1) Open-Meteo (language=it) per le CITTÀ — gestisce gli esonimi italiani
+      //    (Londra→London, Parigi→Paris) e dà la popolazione per scegliere la più rilevante.
+      // 2) Photon/Komoot come fallback per i MONUMENTI/luoghi (Colosseo, Duomo…).
+      let lat: number | undefined;
+      let lon: number | undefined;
+      let nome = luogo;
+      try {
+        const omRes = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?count=5&language=it&format=json&name=${encodeURIComponent(luogo)}`,
+          { signal: AbortSignal.timeout(8000) }
+        );
+        const om = (await omRes.json()) as {
+          results?: { latitude: number; longitude: number; name: string; admin1?: string; country?: string; population?: number }[];
+        };
+        if (om.results?.length) {
+          const best = [...om.results].sort((a, b) => (b.population ?? 0) - (a.population ?? 0))[0];
+          lat = best.latitude;
+          lon = best.longitude;
+          nome = [best.name, best.admin1, best.country].filter(Boolean).join(", ");
+        }
+      } catch {
+        /* Open-Meteo non raggiungibile: passo a Photon */
+      }
+      if (lat === undefined || lon === undefined) {
+        const gRes = await fetch(`https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(luogo)}`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        const g = (await gRes.json()) as {
+          features?: {
+            geometry: { coordinates: [number, number] };
+            properties: { name?: string; city?: string; country?: string };
+          }[];
+        };
+        const hit = g.features?.[0];
+        if (!hit) return { result: { ok: false, errore: `Non ho trovato "${luogo}".` } };
+        lon = hit.geometry.coordinates[0];
+        lat = hit.geometry.coordinates[1];
+        const pr = hit.properties;
+        nome = [pr.name, pr.city && pr.city !== pr.name ? pr.city : null, pr.country].filter(Boolean).join(", ");
+      }
 
       let poi: { nome: string; lat: number; lon: number }[] = [];
       const cerca = input.cerca ? String(input.cerca).toLowerCase().trim() : "";
