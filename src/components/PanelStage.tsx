@@ -18,7 +18,7 @@ const LavagnaPanel = dynamic(() => import("./panels/LavagnaPanel").then((m) => m
   loading: () => <div className="grid h-full place-items-center text-sm text-slate-500">Preparo la lavagna…</div>,
 });
 
-// La mappa usa Leaflet (richiede il browser): caricata solo quando serve.
+// La mappa usa MapLibre GL + COBE (pesanti, richiedono il browser): caricata solo quando serve.
 const MappaPanel = dynamic(() => import("./panels/MappaPanel").then((m) => m.MappaPanel), {
   ssr: false,
   loading: () => <div className="grid h-full place-items-center text-sm text-slate-500">Preparo la mappa…</div>,
