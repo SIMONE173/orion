@@ -40,9 +40,22 @@ function creaFinestra() {
   return win;
 }
 
-// Apre una VISTA (pannello: agenda, mappa, notizie, ecc.) in una finestra separata.
-// Richiesto solo su desktop: la finestra principale resta sul "nucleo".
+// Una finestra per ogni TIPO di vista (mappa, agenda, notizie…): così un secondo
+// comando-mappa (es. "ristoranti vicini") AGGIORNA la mappa già aperta invece di
+// aprirne un'altra. La finestra principale resta sul "nucleo".
+const finestreVista = new Map(); // tipo -> BrowserWindow
+
 function apriFinestraVista(vista) {
+  const tipo = vista && vista.tipo ? String(vista.tipo) : "vista";
+  const esistente = finestreVista.get(tipo);
+  if (esistente && !esistente.isDestroyed()) {
+    // Stesso tipo già aperto: aggiorno il contenuto, niente doppione.
+    esistente.webContents.send("orion:vista", vista);
+    if (esistente.isMinimized()) esistente.restore();
+    esistente.focus();
+    return esistente;
+  }
+
   const win = new BrowserWindow({
     width: 900,
     height: 720,
@@ -54,6 +67,10 @@ function apriFinestraVista(vista) {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+  finestreVista.set(tipo, win);
+  win.on("closed", () => {
+    if (finestreVista.get(tipo) === win) finestreVista.delete(tipo);
   });
   win.loadURL(`${ORION_URL}/pannello`);
   // Mando la vista appena la pagina è pronta (il preload la bufferizza se arriva prima).
