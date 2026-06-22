@@ -1666,45 +1666,125 @@ const handlers: Record<string, Handler> = {
 
     try {
       if (categoria === "crypto") {
-        // CoinGecko: gratis, senza chiave.
-        const sRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(nome)}`, {
-          signal: AbortSignal.timeout(8000),
-        });
-        const s = (await sRes.json()) as { coins?: { id: string; name: string; symbol: string }[] };
-        const coin = s.coins?.[0];
-        if (!coin) return { result: { ok: false, errore: `Non ho trovato la crypto "${nome}".` } };
+        // undici (fetch di Node) non manda User-Agent: alcuni servizi lo richiedono.
+        const headers = { "User-Agent": "Mozilla/5.0 (compatible; ORION/1.0)", Accept: "application/json" };
 
-        const [pRes, cRes] = await Promise.all([
-          fetch(
-            `https://api.coingecko.com/api/v3/simple/price?ids=${coin.id}&vs_currencies=eur&include_24hr_change=true`,
-            { signal: AbortSignal.timeout(8000) }
-          ),
-          fetch(
-            `https://api.coingecko.com/api/v3/coins/${coin.id}/market_chart?vs_currency=eur&days=30&interval=daily`,
-            { signal: AbortSignal.timeout(9000) }
-          ),
-        ]);
-        const p = (await pRes.json()) as Record<string, { eur?: number; eur_24h_change?: number }>;
-        const c = (await cRes.json()) as { prices?: [number, number][] };
-        const prezzo = p[coin.id]?.eur;
-        if (typeof prezzo !== "number") return { result: { ok: false, errore: "Prezzo non disponibile ora." } };
-        const variazione = p[coin.id]?.eur_24h_change ?? null;
-        const serie = (c.prices ?? []).map((x) => x[1]).filter((n) => typeof n === "number");
+        // 1) Risolvi nome → id/simbolo/nome con CoinGecko search; se fallisce (su cloud
+        //    spesso rate-limita), uso una mappa di riserva delle crypto più comuni.
+        let id: string | null = null;
+        let simbolo: string | null = null;
+        let nomeCoin = nome;
+        try {
+          const sRes = await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(nome)}`, {
+            headers,
+            signal: AbortSignal.timeout(7000),
+          });
+          if (sRes.ok) {
+            const s = (await sRes.json()) as { coins?: { id: string; name: string; symbol: string }[] };
+            const coin = s.coins?.[0];
+            if (coin) {
+              id = coin.id;
+              simbolo = coin.symbol.toUpperCase();
+              nomeCoin = coin.name;
+            }
+          }
+        } catch {
+          /* search non disponibile: uso la mappa */
+        }
+        if (!simbolo) {
+          const MAP: Record<string, string> = {
+            bitcoin: "BTC", btc: "BTC", ethereum: "ETH", eth: "ETH", ether: "ETH",
+            solana: "SOL", sol: "SOL", cardano: "ADA", ada: "ADA", dogecoin: "DOGE", doge: "DOGE",
+            ripple: "XRP", xrp: "XRP", litecoin: "LTC", ltc: "LTC", polkadot: "DOT", dot: "DOT",
+            bnb: "BNB", binance: "BNB", tron: "TRX", trx: "TRX", avalanche: "AVAX", avax: "AVAX",
+            polygon: "MATIC", matic: "MATIC", chainlink: "LINK", link: "LINK", "shiba inu": "SHIB", shib: "SHIB",
+          };
+          const k = nome.toLowerCase();
+          simbolo = MAP[k] ?? (/^[a-z]{2,6}$/i.test(nome) ? nome.toUpperCase() : null);
+          if (!simbolo) return { result: { ok: false, errore: `Non ho trovato la crypto "${nome}".` } };
+        }
+
+        let prezzo: number | undefined;
+        let variazione: number | null = null;
+        let serie: number[] = [];
+
+        // 2) Prezzo + grafico: prima CoinGecko (se ho l'id), poi Coinbase come fallback.
+        if (id) {
+          try {
+            const pRes = await fetch(
+              `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=eur&include_24hr_change=true`,
+              { headers, signal: AbortSignal.timeout(7000) }
+            );
+            if (pRes.ok) {
+              const p = (await pRes.json()) as Record<string, { eur?: number; eur_24h_change?: number }>;
+              if (typeof p[id]?.eur === "number") {
+                prezzo = p[id]!.eur;
+                variazione = p[id]?.eur_24h_change ?? null;
+                try {
+                  const cRes = await fetch(
+                    `https://api.coingecko.com/api/v3/coins/${id}/market_chart?vs_currency=eur&days=30&interval=daily`,
+                    { headers, signal: AbortSignal.timeout(8000) }
+                  );
+                  if (cRes.ok) {
+                    const c = (await cRes.json()) as { prices?: [number, number][] };
+                    serie = (c.prices ?? []).map((x) => x[1]).filter((n) => typeof n === "number");
+                  }
+                } catch {
+                  /* grafico best-effort */
+                }
+              }
+            }
+          } catch {
+            /* CoinGecko ko: passo a Coinbase */
+          }
+        }
+
+        if (prezzo === undefined) {
+          // Coinbase: gratis, senza chiave, in EUR, affidabile dai server cloud.
+          try {
+            const spot = await fetch(`https://api.coinbase.com/v2/prices/${simbolo}-EUR/spot`, {
+              headers,
+              signal: AbortSignal.timeout(7000),
+            });
+            const sj = (await spot.json()) as { data?: { amount?: string } };
+            const amt = parseFloat(sj.data?.amount ?? "");
+            if (!Number.isNaN(amt)) {
+              prezzo = amt;
+              try {
+                const cRes = await fetch(
+                  `https://api.exchange.coinbase.com/products/${simbolo}-EUR/candles?granularity=86400`,
+                  { headers, signal: AbortSignal.timeout(8000) }
+                );
+                if (cRes.ok) {
+                  // [time, low, high, open, close, volume], dal più recente al più vecchio.
+                  const candele = (await cRes.json()) as number[][];
+                  if (Array.isArray(candele) && candele.length) {
+                    serie = candele.map((x) => x[4]).reverse().slice(-30);
+                    if (candele.length > 1 && candele[1][4]) {
+                      variazione = ((candele[0][4] - candele[1][4]) / candele[1][4]) * 100;
+                    }
+                  }
+                }
+              } catch {
+                /* grafico best-effort */
+              }
+            }
+          } catch {
+            /* anche Coinbase ko */
+          }
+        }
+
+        if (prezzo === undefined) {
+          return { result: { ok: false, errore: "Quotazione crypto non disponibile al momento." } };
+        }
 
         return {
-          result: {
-            ok: true,
-            nome: coin.name,
-            simbolo: coin.symbol.toUpperCase(),
-            prezzo,
-            valuta: "EUR",
-            variazione24h: variazione,
-          },
+          result: { ok: true, nome: nomeCoin, simbolo, prezzo, valuta: "EUR", variazione24h: variazione },
           vista: {
             tipo: "finanza",
             dati: {
-              nome: coin.name,
-              simbolo: coin.symbol.toUpperCase(),
+              nome: nomeCoin,
+              simbolo,
               categoria: "crypto",
               valuta: "EUR",
               prezzo,
