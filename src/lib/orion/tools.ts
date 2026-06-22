@@ -648,6 +648,19 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "mostra_mappa",
+    description:
+      "Mostra una MAPPA dentro ORION (non apre Google Maps). Usalo quando l'utente dice 'mostrami/fammi vedere la mappa di X', 'dove si trova X', 'trova i bar/tabacchi/farmacie vicino a X' SENZA citare un'app o un sito. 'luogo' = città/indirizzo da centrare; 'cerca' (opzionale) = categoria di posti vicini (es. bar, tabacchi, farmacia, ristorante, supermercato, distributore, bancomat, hotel, banca, parcheggio, ospedale). NB: se l'utente dice 'aprimi Google Maps' o 'su maps', NON usare questo: usa 'apri'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        luogo: { type: "string" },
+        cerca: { type: "string", description: "Categoria di posti vicini (opzionale)" },
+      },
+      required: ["luogo"],
+    },
+  },
+  {
     name: "crea_schema",
     description:
       "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
@@ -1281,6 +1294,149 @@ const handlers: Record<string, Handler> = {
       result: { ok: true, rami: rami.length },
       vista: { tipo: "schema", dati: { titolo: String(input.titolo ?? "Schema"), rami } },
     };
+  },
+
+  mostra_mappa: async (input) => {
+    const luogo = String(input.luogo ?? "").trim();
+    if (!luogo) return { result: { ok: false, errore: "Quale luogo?" } };
+    try {
+      // Geocoding server-friendly (Photon/Komoot, gratis, JSON, gestisce città E monumenti).
+      const gRes = await fetch(`https://photon.komoot.io/api/?limit=1&q=${encodeURIComponent(luogo)}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      const g = (await gRes.json()) as {
+        features?: {
+          geometry: { coordinates: [number, number] };
+          properties: { name?: string; city?: string; state?: string; country?: string };
+        }[];
+      };
+      const hit = g.features?.[0];
+      if (!hit) return { result: { ok: false, errore: `Non ho trovato "${luogo}".` } };
+      const lon = hit.geometry.coordinates[0];
+      const lat = hit.geometry.coordinates[1];
+      const pr = hit.properties;
+      const nome = [pr.name, pr.city && pr.city !== pr.name ? pr.city : null, pr.country]
+        .filter(Boolean)
+        .join(", ");
+
+      let poi: { nome: string; lat: number; lon: number }[] = [];
+      const cerca = input.cerca ? String(input.cerca).toLowerCase().trim() : "";
+      if (cerca) {
+        // Ogni categoria ha il filtro Overpass (preciso) e il tag OSM per Photon (fallback).
+        const CAT: Record<string, { op: string; tag: string }> = {
+          bar: { op: '["amenity"~"bar|cafe|pub"]', tag: "amenity:bar" },
+          caff: { op: '["amenity"~"cafe|bar"]', tag: "amenity:cafe" },
+          tabacc: { op: '["shop"="tobacco"]', tag: "shop:tobacco" },
+          farmac: { op: '["amenity"="pharmacy"]', tag: "amenity:pharmacy" },
+          ristor: { op: '["amenity"="restaurant"]', tag: "amenity:restaurant" },
+          pizz: { op: '["amenity"="restaurant"]', tag: "amenity:restaurant" },
+          supermerc: { op: '["shop"="supermarket"]', tag: "shop:supermarket" },
+          benzin: { op: '["amenity"="fuel"]', tag: "amenity:fuel" },
+          distributor: { op: '["amenity"="fuel"]', tag: "amenity:fuel" },
+          bancomat: { op: '["amenity"="atm"]', tag: "amenity:atm" },
+          atm: { op: '["amenity"="atm"]', tag: "amenity:atm" },
+          ospedal: { op: '["amenity"="hospital"]', tag: "amenity:hospital" },
+          hotel: { op: '["tourism"="hotel"]', tag: "tourism:hotel" },
+          banc: { op: '["amenity"="bank"]', tag: "amenity:bank" },
+          parchegg: { op: '["amenity"="parking"]', tag: "amenity:parking" },
+        };
+        const key = Object.keys(CAT).find((k) => cerca.includes(k));
+        const cat = key ? CAT[key] : null;
+        if (cat) {
+          // Distanza in metri (haversine) per filtrare i risultati del fallback.
+          const distM = (la1: number, lo1: number, la2: number, lo2: number) => {
+            const R = 6371000;
+            const dLa = ((la2 - la1) * Math.PI) / 180;
+            const dLo = ((lo2 - lo1) * Math.PI) / 180;
+            const a =
+              Math.sin(dLa / 2) ** 2 +
+              Math.cos((la1 * Math.PI) / 180) * Math.cos((la2 * Math.PI) / 180) * Math.sin(dLo / 2) ** 2;
+            return 2 * R * Math.asin(Math.sqrt(a));
+          };
+
+          // 1) Overpass (preciso, raggio 1.8km) con più mirror + User-Agent.
+          //    L'istanza pubblica a volte rate-limita/va in timeout: best-effort.
+          const q = `[out:json][timeout:15];(node${cat.op}(around:1800,${lat},${lon});way${cat.op}(around:1800,${lat},${lon}););out center 25;`;
+          const MIRRORS = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+          ];
+          for (const url of MIRRORS) {
+            try {
+              const opRes = await fetch(url, {
+                method: "POST",
+                body: "data=" + encodeURIComponent(q),
+                // undici (fetch di Node) NON manda lo User-Agent di default: senza,
+                // Overpass risponde 406. Va messo a mano.
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  Accept: "application/json",
+                  "User-Agent": "ORION/1.0 (https://orion-production-5ddd.up.railway.app)",
+                },
+                // Se un mirror si impalla, lo molliamo e proviamo il successivo.
+                signal: AbortSignal.timeout(12000),
+              });
+              const ct = opRes.headers.get("content-type") ?? "";
+              if (!opRes.ok || !ct.includes("json")) {
+                console.error("[mostra_mappa overpass]", url, opRes.status, ct);
+                continue;
+              }
+              const od = (await opRes.json()) as {
+                elements?: { tags?: { name?: string }; lat?: number; lon?: number; center?: { lat: number; lon: number } }[];
+              };
+              poi = (od.elements ?? [])
+                .map((e) => ({
+                  nome: e.tags?.name ?? String(input.cerca),
+                  lat: e.lat ?? e.center?.lat,
+                  lon: e.lon ?? e.center?.lon,
+                }))
+                .filter((p): p is { nome: string; lat: number; lon: number } =>
+                  typeof p.lat === "number" && typeof p.lon === "number"
+                )
+                .slice(0, 25);
+              if (poi.length) break;
+            } catch (e) {
+              console.error("[mostra_mappa overpass]", url, e instanceof Error ? e.message : e);
+            }
+          }
+
+          // 2) Fallback affidabile: Photon (lo stesso geocoder) con tag OSM + bias
+          //    geografico. Tiene solo i risultati entro ~3km, ordinati per vicinanza.
+          if (!poi.length) {
+            try {
+              const pRes = await fetch(
+                `https://photon.komoot.io/api/?limit=20&lat=${lat}&lon=${lon}&osm_tag=${encodeURIComponent(cat.tag)}&q=${encodeURIComponent(String(input.cerca))}`,
+                { signal: AbortSignal.timeout(8000) }
+              );
+              const pd = (await pRes.json()) as {
+                features?: { geometry: { coordinates: [number, number] }; properties: { name?: string } }[];
+              };
+              poi = (pd.features ?? [])
+                .map((f) => ({
+                  nome: f.properties?.name ?? String(input.cerca),
+                  lat: f.geometry.coordinates[1],
+                  lon: f.geometry.coordinates[0],
+                }))
+                .filter((p) => distM(lat, lon, p.lat, p.lon) <= 3000)
+                .sort((a, b) => distM(lat, lon, a.lat, a.lon) - distM(lat, lon, b.lat, b.lon))
+                .slice(0, 15);
+            } catch (e) {
+              console.error("[mostra_mappa photon-poi]", e instanceof Error ? e.message : e);
+            }
+          }
+        }
+      }
+      return {
+        result: { ok: true, luogo: nome, trovati: poi.length },
+        vista: {
+          tipo: "mappa",
+          dati: { luogo: nome, lat, lon, zoom: cerca ? 14 : 12, cerca: input.cerca ?? null, poi },
+        },
+      };
+    } catch (e) {
+      console.error("[mostra_mappa]", e instanceof Error ? e.message : e);
+      return { result: { ok: false, errore: "Mappa non disponibile al momento." } };
+    }
   },
 
   risolvi_matematica: (input) => {

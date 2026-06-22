@@ -17,6 +17,12 @@ const LavagnaPanel = dynamic(() => import("./panels/LavagnaPanel").then((m) => m
   ssr: false,
   loading: () => <div className="grid h-full place-items-center text-sm text-slate-500">Preparo la lavagna…</div>,
 });
+
+// La mappa usa Leaflet (richiede il browser): caricata solo quando serve.
+const MappaPanel = dynamic(() => import("./panels/MappaPanel").then((m) => m.MappaPanel), {
+  ssr: false,
+  loading: () => <div className="grid h-full place-items-center text-sm text-slate-500">Preparo la mappa…</div>,
+});
 import { BriefingPanel } from "./panels/BriefingPanel";
 import { FatturaPanel } from "./panels/FatturaPanel";
 import { PromemoriaPanel } from "./panels/PromemoriaPanel";
@@ -49,6 +55,8 @@ function renderPanel(v: Vista) {
       return <LavagnaPanel dati={v.dati} />;
     case "schema":
       return <SchemaPanel dati={v.dati} />;
+    case "mappa":
+      return <MappaPanel dati={v.dati} />;
     case "briefing":
       return <BriefingPanel dati={v.dati} />;
     case "fattura":
