@@ -7,10 +7,13 @@ import { IconClose } from "./icons";
 export function CameraCapture({
   onCapture,
   onClose,
+  modo = "documento",
 }: {
   onCapture: (dataUrl: string) => void;
   onClose: () => void;
+  modo?: "documento" | "descrizione";
 }) {
+  const titolo = modo === "descrizione" ? "Inquadra la foto da descrivere" : "Digitalizza un documento";
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [errore, setErrore] = useState<string | null>(null);
@@ -80,7 +83,7 @@ export function CameraCapture({
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm">
       <div className="glass relative w-full max-w-lg rounded-2xl p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-semibold text-slate-100">Digitalizza un documento</h3>
+          <h3 className="font-semibold text-slate-100">{titolo}</h3>
           <button onClick={onClose} className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-white/10">
             <IconClose className="h-4 w-4" />
           </button>

@@ -52,6 +52,7 @@ export default function Home() {
   const [modoTesto, setModoTesto] = useState(false);
   const [mostraStorico, setMostraStorico] = useState(false);
   const [mostraCamera, setMostraCamera] = useState(false);
+  const [cameraModo, setCameraModo] = useState<"documento" | "descrizione">("documento");
   const [avviso, setAvviso] = useState<string | null>(null);
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
@@ -183,6 +184,10 @@ export default function Home() {
         break;
       case "cerca_documento":
         setDocView((v) => (v ? { ...v, cerca: a.testo } : v));
+        break;
+      case "apri_camera":
+        setCameraModo(a.modo);
+        setMostraCamera(true);
         break;
       case "riposo":
         entraStandbyRef.current?.();
@@ -456,9 +461,13 @@ export default function Home() {
     inviaAOrion(t);
   };
 
-  const catturaDocumento = (dataUrl: string) => {
+  const catturaFoto = (dataUrl: string) => {
     setMostraCamera(false);
-    inviaAOrion("Digitalizza questo documento e proponi dove archiviarlo.", false, dataUrl);
+    if (cameraModo === "descrizione") {
+      inviaAOrion("Descrivi in modo chiaro e naturale cosa si vede in questa foto.", false, dataUrl);
+    } else {
+      inviaAOrion("Digitalizza questo documento e proponi dove archiviarlo.", false, dataUrl);
+    }
   };
 
   const sottotitolo = interim
@@ -634,7 +643,10 @@ export default function Home() {
               </button>
               <button
                 type="button"
-                onClick={() => setMostraCamera(true)}
+                onClick={() => {
+                  setCameraModo("documento");
+                  setMostraCamera(true);
+                }}
                 className="grid shrink-0 place-items-center rounded-xl border border-white/10 bg-white/5 px-3.5 py-3 text-slate-300 hover:bg-white/10"
                 title="Digitalizza documento"
               >
@@ -680,7 +692,10 @@ export default function Home() {
                 <IconKeyboard />
               </button>
               <button
-                onClick={() => setMostraCamera(true)}
+                onClick={() => {
+                  setCameraModo("documento");
+                  setMostraCamera(true);
+                }}
                 className="grid place-items-center rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-300 hover:bg-white/10"
                 title="Digitalizza documento"
               >
@@ -748,7 +763,7 @@ export default function Home() {
       )}
 
       {mostraCamera && (
-        <CameraCapture onCapture={catturaDocumento} onClose={() => setMostraCamera(false)} />
+        <CameraCapture modo={cameraModo} onCapture={catturaFoto} onClose={() => setMostraCamera(false)} />
       )}
 
       {appunti && (

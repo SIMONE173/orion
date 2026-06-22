@@ -700,6 +700,22 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "guarda_foto",
+    description:
+      "Apre la fotocamera (o caricamento immagine) per far DESCRIVERE a ORION una foto. Usalo quando l'utente dice 'descrivimi una foto', 'guarda questa immagine e dimmi cosa c'è', 'cosa vedi in questa foto'. Dopo che l'utente scatta/carica, riceverai l'immagine e dovrai descrivere a parole, in modo naturale, cosa si vede. A voce di' una frase tipo 'Inquadra pure la foto'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "riassumi_link",
+    description:
+      "Scarica il contenuto di un LINK (articolo, pagina web, o video di YouTube) e te lo restituisce come testo, così puoi RIASSUMERLO a voce. Usalo per 'riassumimi questo articolo/pagina/video: <url>', 'di cosa parla questo link'. Passa 'url' completo. Dopo aver ricevuto il testo, fai un riassunto chiaro e sintetico (i punti principali). NB: per i video di YouTube i sottotitoli a volte non sono accessibili: se manca il testo, dillo con naturalezza.",
+    input_schema: {
+      type: "object",
+      properties: { url: { type: "string", description: "URL completo della pagina o del video" } },
+      required: ["url"],
+    },
+  },
+  {
     name: "crea_schema",
     description:
       "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
@@ -1326,6 +1342,94 @@ const handlers: Record<string, Handler> = {
   }),
 
   vai_in_pausa: () => ({ result: { ok: true, standby: true }, azione: { tipo: "riposo" } }),
+
+  guarda_foto: () => ({
+    result: { ok: true, fotocamera: "aperta", nota: "Quando arriva la foto, descrivila a parole in modo naturale." },
+    azione: { tipo: "apri_camera", modo: "descrizione" },
+  }),
+
+  riassumi_link: async (input) => {
+    const url = String(input.url ?? "").trim();
+    if (!/^https?:\/\//i.test(url)) return { result: { ok: false, errore: "Dammi un link valido (http...)." } };
+    const UA =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+    const unescapeHtml = (s: string) =>
+      s
+        .replace(/&nbsp;/g, " ")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;|&apos;/g, "'")
+        .replace(/&amp;/g, "&");
+
+    try {
+      const ytId = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/)?.[1];
+
+      // VIDEO YouTube: tentativo best-effort sui sottotitoli (a volte bloccati).
+      if (ytId) {
+        try {
+          const pag = await fetch(`https://www.youtube.com/watch?v=${ytId}`, {
+            headers: { "User-Agent": UA },
+            signal: AbortSignal.timeout(9000),
+          });
+          const htmlPag = await pag.text();
+          const titoloYt = unescapeHtml(htmlPag.match(/<title>([^<]*)<\/title>/)?.[1] ?? "Video");
+          const tracks = JSON.parse(htmlPag.match(/"captionTracks":(\[.*?\])/)?.[1] ?? "[]") as {
+            baseUrl: string;
+            languageCode: string;
+            kind?: string;
+          }[];
+          const scelta =
+            tracks.find((t) => t.languageCode === "it" && t.kind !== "asr") ??
+            tracks.find((t) => t.languageCode === "en" && t.kind !== "asr") ??
+            tracks.find((t) => t.languageCode === "it") ??
+            tracks.find((t) => t.languageCode === "en") ??
+            tracks[0];
+          if (scelta) {
+            const sub = await fetch(`${scelta.baseUrl}&fmt=json3`, {
+              headers: { "User-Agent": UA },
+              signal: AbortSignal.timeout(9000),
+            });
+            const j = (await sub.json()) as { events?: { segs?: { utf8?: string }[] }[] };
+            const testo = (j.events ?? [])
+              .flatMap((e) => e.segs ?? [])
+              .map((s) => s.utf8 ?? "")
+              .join("")
+              .replace(/\s+/g, " ")
+              .trim();
+            if (testo.length > 40) {
+              return { result: { ok: true, tipo: "video", titolo: titoloYt, testo: testo.slice(0, 12000) } };
+            }
+          }
+          return {
+            result: {
+              ok: false,
+              errore: "Per questo video i sottotitoli non sono accessibili, quindi non riesco a riassumerlo.",
+            },
+          };
+        } catch {
+          return { result: { ok: false, errore: "Non riesco ad accedere al testo di questo video." } };
+        }
+      }
+
+      // PAGINA/ARTICOLO: scarico e ripulisco l'HTML.
+      const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(12000) });
+      if (!res.ok) return { result: { ok: false, errore: "Non riesco ad aprire questo link." } };
+      let h = await res.text();
+      const titolo = unescapeHtml(h.match(/<title>([^<]*)<\/title>/)?.[1] ?? url);
+      h = h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<noscript[\s\S]*?<\/noscript>/gi, " ");
+      const art = h.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+      if (art) h = art[1];
+      const testo = unescapeHtml(h.replace(/<[^>]+>/g, " "))
+        .replace(/\s+/g, " ")
+        .trim();
+      if (testo.length < 120) return { result: { ok: false, errore: "Questa pagina non ha abbastanza testo da riassumere." } };
+      return { result: { ok: true, tipo: "pagina", titolo, testo: testo.slice(0, 12000) } };
+    } catch (e) {
+      console.error("[riassumi_link]", e instanceof Error ? e.message : e);
+      return { result: { ok: false, errore: "Contenuto non disponibile al momento." } };
+    }
+  },
 
   crea_schema: (input) => {
     const rami = Array.isArray(input.rami) ? input.rami : [];

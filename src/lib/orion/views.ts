@@ -163,6 +163,7 @@ export type Azione =
   | { tipo: "apri_documento"; documento_id: number; cerca?: string }
   | { tipo: "zoom_documento"; verso: "avvicina" | "allontana" | "reset" }
   | { tipo: "cerca_documento"; testo: string }
+  | { tipo: "apri_camera"; modo: "documento" | "descrizione" }
   | { tipo: "riposo" }
   // Solo ORION Desktop (controllo del computer):
   | { tipo: "apri_file"; query: string }
