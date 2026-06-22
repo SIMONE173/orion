@@ -69,6 +69,12 @@ ipcMain.on("os:apriVista", (_e, vista) => {
 
 app.whenReady().then(() => {
   creaFinestra();
+  // Pre-carica (e scarica, la prima volta) il modello vocale in background, così
+  // quando l'utente parla è già pronto. Non blocca l'avvio.
+  whisper
+    .getTranscriber()
+    .then(() => console.log("[main] STT pronto"))
+    .catch((e) => console.error("[main] STT pre-carico fallito:", e && e.message ? e.message : e));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) creaFinestra();
   });
