@@ -63,8 +63,19 @@ export function FinanzaPanel({ dati }: { dati: Dati }) {
               <stop offset="100%" stopColor={colore} stopOpacity="0" />
             </linearGradient>
           </defs>
-          <path d={area} fill="url(#finArea)" />
-          <path d={linea} fill="none" stroke={colore} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {/* key = ridisegna l'animazione a ogni nuovo titolo/prezzo */}
+          <path key={`a-${dati.simbolo}-${dati.prezzo}`} className="fin-area" d={area} fill="url(#finArea)" />
+          <path
+            key={`l-${dati.simbolo}-${dati.prezzo}`}
+            className="fin-linea"
+            d={linea}
+            fill="none"
+            stroke={colore}
+            strokeWidth="2.5"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            pathLength={1}
+          />
         </svg>
       </div>
 

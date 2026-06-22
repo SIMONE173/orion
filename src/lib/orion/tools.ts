@@ -1796,60 +1796,115 @@ const handlers: Record<string, Handler> = {
         };
       }
 
-      // Azioni/ETF: Twelve Data (chiave gratuita). Spento finché non c'è la chiave.
+      // Azioni / ETF / materie prime. Alias per i termini italiani comuni.
+      const ALIAS: Record<string, string> = {
+        oro: "GC=F", gold: "GC=F", argento: "SI=F", silver: "SI=F",
+        petrolio: "CL=F", greggio: "CL=F", oil: "CL=F", gas: "NG=F", rame: "HG=F",
+        "s&p 500": "^GSPC", "s&p500": "^GSPC", sp500: "^GSPC",
+        nasdaq: "^IXIC", "dow jones": "^DJI", dax: "^GDAXI",
+        "ftse mib": "FTSEMIB.MI", mib: "FTSEMIB.MI",
+      };
+      const grezzo = (input.simbolo ? String(input.simbolo) : nome).trim();
+      const sym = ALIAS[grezzo.toLowerCase()] ?? grezzo;
+      const headers = {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36",
+        Accept: "application/json",
+        Referer: "https://finance.yahoo.com/",
+      };
+
+      let prezzo: number | undefined;
+      let variazione: number | null = null;
+      let serie: number[] = [];
+      let valuta = "USD";
+      let nomeTitolo = nome;
+      let simboloFinale = sym.toUpperCase();
+
+      // 1) Yahoo Finance (gratis, senza chiave): azioni, ETF, materie prime, indici.
+      try {
+        const yRes = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=3mo&interval=1d`,
+          { headers, signal: AbortSignal.timeout(8000) }
+        );
+        if (yRes.ok && (yRes.headers.get("content-type") ?? "").includes("json")) {
+          const y = (await yRes.json()) as {
+            chart?: {
+              result?: {
+                meta?: { regularMarketPrice?: number; currency?: string; shortName?: string; symbol?: string };
+                indicators?: { quote?: { close?: (number | null)[] }[] };
+              }[];
+            };
+          };
+          const r = y.chart?.result?.[0];
+          if (r?.meta && typeof r.meta.regularMarketPrice === "number") {
+            prezzo = r.meta.regularMarketPrice;
+            valuta = r.meta.currency ?? "USD";
+            nomeTitolo = r.meta.shortName ?? nome;
+            simboloFinale = r.meta.symbol ?? simboloFinale;
+            serie = (r.indicators?.quote?.[0]?.close ?? []).filter((n): n is number => typeof n === "number");
+            const primo = serie[0];
+            variazione = primo ? ((prezzo - primo) / primo) * 100 : null;
+          }
+        }
+      } catch {
+        /* Yahoo ko (a volte rate-limita i server): provo Twelve Data */
+      }
+
+      // 2) Fallback Twelve Data (se è configurata la chiave gratuita su Railway).
       const key = process.env.TWELVEDATA_KEY;
-      if (!key) {
+      if (prezzo === undefined && key) {
+        try {
+          const tsRes = await fetch(
+            `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=60&apikey=${key}`,
+            { signal: AbortSignal.timeout(9000) }
+          );
+          const ts = (await tsRes.json()) as {
+            status?: string;
+            meta?: { symbol?: string; currency?: string };
+            values?: { close: string }[];
+          };
+          if (ts.status !== "error" && ts.values?.length) {
+            const s = ts.values.map((v) => parseFloat(v.close)).filter((n) => !Number.isNaN(n)).reverse();
+            prezzo = s[s.length - 1];
+            serie = s;
+            valuta = ts.meta?.currency ?? "USD";
+            simboloFinale = ts.meta?.symbol ?? simboloFinale;
+            const primo = s[0];
+            variazione = primo ? ((prezzo - primo) / primo) * 100 : null;
+          }
+        } catch {
+          /* anche Twelve Data ko */
+        }
+      }
+
+      if (prezzo === undefined) {
         return {
           result: {
             ok: false,
-            gated: true,
-            errore:
-              "Le azioni e gli ETF richiedono una chiave gratuita (Twelve Data) non ancora configurata. Le crypto invece te le mostro subito.",
+            errore: `Non riesco a recuperare "${nome}" in questo momento. Le crypto invece te le mostro sempre; per azioni/ETF posso anche usare una fonte dedicata se servisse.`,
           },
         };
       }
-      const sym = (input.simbolo ? String(input.simbolo) : nome).trim();
-      const tsRes = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(sym)}&interval=1day&outputsize=60&apikey=${key}`,
-        { signal: AbortSignal.timeout(9000) }
-      );
-      const ts = (await tsRes.json()) as {
-        status?: string;
-        meta?: { symbol?: string; currency?: string };
-        values?: { datetime: string; close: string }[];
-        message?: string;
-      };
-      if (ts.status === "error" || !ts.values?.length) {
-        return { result: { ok: false, errore: `Non ho trovato il titolo "${sym}".` } };
-      }
-      // Twelve Data restituisce dal più recente al più vecchio: invertiamo.
-      const serie = ts.values
-        .map((v) => parseFloat(v.close))
-        .filter((n) => !Number.isNaN(n))
-        .reverse();
-      const prezzo = serie[serie.length - 1];
-      const primo = serie[0];
-      const variazione = primo ? ((prezzo - primo) / primo) * 100 : null;
 
       return {
         result: {
           ok: true,
-          nome,
-          simbolo: ts.meta?.symbol ?? sym.toUpperCase(),
+          nome: nomeTitolo,
+          simbolo: simboloFinale,
           prezzo,
-          valuta: ts.meta?.currency ?? "USD",
+          valuta,
           variazionePeriodo: variazione,
         },
         vista: {
           tipo: "finanza",
           dati: {
-            nome,
-            simbolo: ts.meta?.symbol ?? sym.toUpperCase(),
+            nome: nomeTitolo,
+            simbolo: simboloFinale,
             categoria: "azione",
-            valuta: ts.meta?.currency ?? "USD",
+            valuta,
             prezzo,
             variazione,
-            periodo: "60 giorni",
+            periodo: "3 mesi",
             serie,
           },
         },

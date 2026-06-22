@@ -215,6 +215,27 @@ body {
   .appare { animation: fadeIn 0.3s ease both; }
 }
 
+/* ===== Grafico finanza: la linea si "disegna" da sinistra a destra ===== */
+.fin-linea {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: finDraw 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+@keyframes finDraw {
+  to { stroke-dashoffset: 0; }
+}
+.fin-area {
+  opacity: 0;
+  animation: finFill 1.1s ease-out 0.5s forwards;
+}
+@keyframes finFill {
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fin-linea { stroke-dashoffset: 0; animation: none; }
+  .fin-area { opacity: 1; animation: none; }
+}
+
 /* ===== Mappa (MapLibre): marker luminosi + tema scuro ===== */
 .orion-mark {
   border-radius: 9999px;
