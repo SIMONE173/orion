@@ -686,6 +686,20 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "mostra_sport",
+    description:
+      "Mostra CLASSIFICHE e RISULTATI sportivi (calcio) dentro ORION. Usalo per 'classifica di Serie A', 'come ha giocato l'Inter', 'prossima partita del Milan', 'risultati Premier League'. Imposta 'tipo'='classifica' con 'lega' (es. 'Serie A', 'Premier League', 'Liga', 'Bundesliga', 'Champions League') oppure 'tipo'='squadra' con 'squadra' (es. 'Inter', 'Juventus'). A voce commenta in breve i dati. NB: i risultati IN TEMPO REALE (minuto per minuto) e le formazioni non sono disponibili nella versione gratuita: se li chiedono, spiegalo e offri classifica/ultimi risultati.",
+    input_schema: {
+      type: "object",
+      properties: {
+        tipo: { type: "string", enum: ["classifica", "squadra"] },
+        lega: { type: "string", description: "Nome del campionato (per tipo=classifica)" },
+        squadra: { type: "string", description: "Nome della squadra (per tipo=squadra)" },
+      },
+      required: ["tipo"],
+    },
+  },
+  {
     name: "crea_schema",
     description:
       "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
@@ -1636,6 +1650,117 @@ const handlers: Record<string, Handler> = {
     } catch (e) {
       console.error("[mostra_quotazione]", e instanceof Error ? e.message : e);
       return { result: { ok: false, errore: "Quotazione non disponibile al momento." } };
+    }
+  },
+
+  mostra_sport: async (input) => {
+    const KEY = process.env.SPORTSDB_KEY || "3"; // chiave di test gratuita
+    const base = `https://www.thesportsdb.com/api/v1/json/${KEY}`;
+    const tipo = input.tipo === "squadra" ? "squadra" : "classifica";
+    // Stagione corrente: da luglio in poi è anno-anno+1.
+    const oggi = new Date();
+    const annoA = oggi.getMonth() >= 6 ? oggi.getFullYear() : oggi.getFullYear() - 1;
+    const stagione = `${annoA}-${annoA + 1}`;
+
+    const LEGHE: { re: RegExp; id: string; nome: string }[] = [
+      { re: /serie\s*a/i, id: "4332", nome: "Serie A" },
+      { re: /serie\s*b/i, id: "4396", nome: "Serie B" },
+      { re: /premier/i, id: "4328", nome: "Premier League" },
+      { re: /liga|spagn/i, id: "4335", nome: "La Liga" },
+      { re: /bundes|tedesc/i, id: "4331", nome: "Bundesliga" },
+      { re: /ligue|franc/i, id: "4334", nome: "Ligue 1" },
+      { re: /champions|coppa dei campioni/i, id: "4480", nome: "Champions League" },
+    ];
+
+    try {
+      if (tipo === "classifica") {
+        const q = String(input.lega ?? "Serie A");
+        const lega = LEGHE.find((l) => l.re.test(q)) ?? LEGHE[0];
+        const res = await fetch(`${base}/lookuptable.php?l=${lega.id}&s=${stagione}`, {
+          signal: AbortSignal.timeout(9000),
+        });
+        const d = (await res.json()) as {
+          table?: { intRank: string; strTeam: string; intPoints: string; strBadge?: string }[];
+        };
+        const classifica = (d.table ?? []).map((r) => ({
+          pos: parseInt(r.intRank, 10),
+          squadra: r.strTeam,
+          punti: parseInt(r.intPoints, 10),
+          logo: r.strBadge ? `${r.strBadge}/tiny` : null,
+        }));
+        if (!classifica.length) {
+          return { result: { ok: false, errore: `Classifica di ${lega.nome} non disponibile ora.` } };
+        }
+        return {
+          result: {
+            ok: true,
+            lega: lega.nome,
+            stagione,
+            top: classifica.slice(0, 5).map((r) => `${r.pos}. ${r.squadra} (${r.punti} pt)`),
+          },
+          vista: {
+            tipo: "sport",
+            dati: { titolo: lega.nome, sottotitolo: `Stagione ${stagione}`, classifica, partite: [] },
+          },
+        };
+      }
+
+      // tipo === "squadra"
+      const nomeQ = String(input.squadra ?? "").trim();
+      if (!nomeQ) return { result: { ok: false, errore: "Quale squadra?" } };
+      const sRes = await fetch(`${base}/searchteams.php?t=${encodeURIComponent(nomeQ)}`, {
+        signal: AbortSignal.timeout(9000),
+      });
+      const s = (await sRes.json()) as {
+        teams?: { idTeam: string; strTeam: string; strLeague: string; strSport: string; strBadge?: string }[];
+      };
+      const calcio = (s.teams ?? []).filter((t) => t.strSport === "Soccer");
+      // Preferiamo una squadra di un campionato europeo noto (evita omonimie esotiche).
+      const team = calcio.find((t) => LEGHE.some((l) => l.re.test(t.strLeague))) ?? calcio[0];
+      if (!team) return { result: { ok: false, errore: `Non ho trovato la squadra "${nomeQ}".` } };
+
+      const [lastRes, nextRes] = await Promise.all([
+        fetch(`${base}/eventslast.php?id=${team.idTeam}`, { signal: AbortSignal.timeout(9000) }),
+        fetch(`${base}/eventsnext.php?id=${team.idTeam}`, { signal: AbortSignal.timeout(9000) }),
+      ]);
+      const last = (await lastRes.json()) as {
+        results?: { dateEvent: string; strEvent: string; intHomeScore: string; intAwayScore: string }[];
+      };
+      const next = (await nextRes.json()) as { events?: { dateEvent: string; strEvent: string }[] };
+
+      const partite = [
+        ...(last.results ?? []).slice(0, 3).map((e) => ({
+          data: e.dateEvent ?? null,
+          titolo: e.strEvent,
+          punteggio:
+            e.intHomeScore != null && e.intAwayScore != null ? `${e.intHomeScore} - ${e.intAwayScore}` : null,
+          stato: "Conclusa",
+        })),
+        ...(next.events ?? []).slice(0, 2).map((e) => ({
+          data: e.dateEvent ?? null,
+          titolo: e.strEvent,
+          punteggio: null,
+          stato: "In programma",
+        })),
+      ];
+      if (!partite.length) {
+        return { result: { ok: false, errore: `Nessuna partita trovata per ${team.strTeam}.` } };
+      }
+      return {
+        result: {
+          ok: true,
+          squadra: team.strTeam,
+          campionato: team.strLeague,
+          partite: partite.map((p) => `${p.titolo}${p.punteggio ? ` ${p.punteggio}` : ""} (${p.stato})`),
+        },
+        vista: {
+          tipo: "sport",
+          dati: { titolo: team.strTeam, sottotitolo: team.strLeague, classifica: [], partite },
+        },
+      };
+    } catch (e) {
+      console.error("[mostra_sport]", e instanceof Error ? e.message : e);
+      return { result: { ok: false, errore: "Dati sportivi non disponibili al momento." } };
     }
   },
 

@@ -144,6 +144,15 @@ export type Vista =
         serie: number[];
       };
     }
+  | {
+      tipo: "sport";
+      dati: {
+        titolo: string;
+        sottotitolo: string | null;
+        classifica: { pos: number; squadra: string; punti: number; logo: string | null }[];
+        partite: { data: string | null; titolo: string; punteggio: string | null; stato: string }[];
+      };
+    }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
