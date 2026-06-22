@@ -661,6 +661,17 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "mostra_notizie",
+    description:
+      "Mostra le ULTIME NOTIZIE dentro ORION (non apre un sito). Usalo quando l'utente dice 'che notizie ci sono', 'ultime notizie', 'novità su X', 'cosa succede con Y' SENZA citare un sito/app. 'argomento' (opzionale) = il tema su cui cercare (es. 'Inter', 'borsa', 'intelligenza artificiale'); se manca, dà le notizie principali del giorno. Dopo aver ricevuto i titoli, RIASSUMI tu a voce i 2-3 fatti principali in modo naturale (non leggere tutti i titoli). NB: se l'utente cita un sito ('aprimi il Corriere', 'vai su ANSA'), NON usare questo: usa 'apri'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        argomento: { type: "string", description: "Tema su cui cercare le notizie (opzionale)" },
+      },
+    },
+  },
+  {
     name: "crea_schema",
     description:
       "Crea uno SCHEMA (mappa/scaletta) su un argomento e lo mostra a schermo, condivisibile e salvabile. Usalo per 'fammi uno schema su X', 'schematizza Y', 'mappa concettuale di Z'. Genera tu i contenuti e passa: 'titolo' (l'argomento), e 'rami' = i punti principali, ognuno con 'titolo' e una lista 'punti' di sotto-concetti brevi. Tieni i rami concisi (3-7) e i punti sintetici. A voce di' che hai preparato lo schema, senza leggerlo tutto.",
@@ -1436,6 +1447,60 @@ const handlers: Record<string, Handler> = {
     } catch (e) {
       console.error("[mostra_mappa]", e instanceof Error ? e.message : e);
       return { result: { ok: false, errore: "Mappa non disponibile al momento." } };
+    }
+  },
+
+  mostra_notizie: async (input) => {
+    const argomento = input.argomento ? String(input.argomento).trim() : "";
+    // Google News RSS: gratis, senza chiave, qualsiasi argomento, fonti italiane.
+    const url = argomento
+      ? `https://news.google.com/rss/search?q=${encodeURIComponent(argomento)}&hl=it&gl=IT&ceid=IT:it`
+      : `https://news.google.com/rss?hl=it&gl=IT&ceid=IT:it`;
+    const unescape = (s: string) =>
+      s
+        .replace(/<!\[CDATA\[(.*?)\]\]>/gs, "$1")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;|&apos;/g, "'")
+        .replace(/&amp;/g, "&")
+        .trim();
+    try {
+      const res = await fetch(url, {
+        // undici (fetch di Node) non manda User-Agent: alcuni feed lo richiedono.
+        headers: { "User-Agent": "ORION/1.0 (+https://orion-production-5ddd.up.railway.app)" },
+        signal: AbortSignal.timeout(9000),
+      });
+      const xml = await res.text();
+      const blocchi = xml.match(/<item>([\s\S]*?)<\/item>/g) ?? [];
+      const articoli = blocchi
+        .map((b) => {
+          const titoloRaw = b.match(/<title>([\s\S]*?)<\/title>/)?.[1] ?? "";
+          const fonte = unescape(b.match(/<source[^>]*>([\s\S]*?)<\/source>/)?.[1] ?? "");
+          const titolo = unescape(titoloRaw).replace(new RegExp(`\\s*-\\s*${fonte}\\s*$`), "");
+          const dataRaw = b.match(/<pubDate>([\s\S]*?)<\/pubDate>/)?.[1] ?? "";
+          const link = unescape(b.match(/<link>([\s\S]*?)<\/link>/)?.[1] ?? "");
+          return {
+            titolo,
+            fonte: fonte || "Notizie",
+            data: dataRaw ? new Date(dataRaw).toISOString() : null,
+            url: link,
+          };
+        })
+        .filter((a) => a.titolo)
+        .slice(0, 7);
+
+      if (!articoli.length) {
+        return { result: { ok: false, errore: "Nessuna notizia trovata al momento." } };
+      }
+      return {
+        // I titoli servono al modello per RIASSUMERE a voce i fatti principali.
+        result: { ok: true, argomento: argomento || null, titoli: articoli.map((a) => `${a.titolo} (${a.fonte})`) },
+        vista: { tipo: "notizie", dati: { argomento: argomento || null, articoli } },
+      };
+    } catch (e) {
+      console.error("[mostra_notizie]", e instanceof Error ? e.message : e);
+      return { result: { ok: false, errore: "Notizie non disponibili al momento." } };
     }
   },
 

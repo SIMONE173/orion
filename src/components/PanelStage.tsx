@@ -11,6 +11,7 @@ import { WhatsAppPanel } from "./panels/WhatsAppPanel";
 import { WhatsAppConnectPanel } from "./panels/WhatsAppConnectPanel";
 import { AbbonamentoPanel } from "./panels/AbbonamentoPanel";
 import { SchemaPanel } from "./panels/SchemaPanel";
+import { NotiziePanel } from "./panels/NotiziePanel";
 
 // La lavagna usa KaTeX (pesante): la carichiamo solo quando serve.
 const LavagnaPanel = dynamic(() => import("./panels/LavagnaPanel").then((m) => m.LavagnaPanel), {
@@ -57,6 +58,8 @@ function renderPanel(v: Vista) {
       return <SchemaPanel dati={v.dati} />;
     case "mappa":
       return <MappaPanel dati={v.dati} />;
+    case "notizie":
+      return <NotiziePanel dati={v.dati} />;
     case "briefing":
       return <BriefingPanel dati={v.dati} />;
     case "fattura":

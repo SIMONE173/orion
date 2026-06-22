@@ -124,6 +124,13 @@ export type Vista =
         poi: { nome: string; lat: number; lon: number }[];
       };
     }
+  | {
+      tipo: "notizie";
+      dati: {
+        argomento: string | null;
+        articoli: { titolo: string; fonte: string; data: string | null; url: string }[];
+      };
+    }
   | { tipo: "profilo"; dati: { profilo: Profilo } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
