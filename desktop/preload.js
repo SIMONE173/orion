@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   trascrivi: (pcm) => ipcRenderer.invoke("os:trascrivi", pcm),
   // Apre una vista (pannello) in una finestra separata.
   apriVista: (vista) => ipcRenderer.send("os:apriVista", vista),
+  // Chiude le finestre-pannello (per tipo, o "tutto").
+  chiudiVista: (vista) => ipcRenderer.send("os:chiudiVista", vista),
   // La pagina /pannello riceve la vista da mostrare (con buffer anti-race).
   onVista: (cb) => {
     vistaCallback = cb;

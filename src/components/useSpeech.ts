@@ -39,6 +39,16 @@ export function useSpeech(onFinal: (testo: string) => void) {
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
 
+  // Filtro anti-rumore: scarta trascrizioni vuote/troppo corte o senza lettere/numeri
+  // (il riconoscimento a volte produce "." o un singolo carattere su un rumore),
+  // così ORION non riceve spazzatura e non risponde "non ho capito".
+  const inviaTestoRef = useRef((t: string) => {
+    const pulito = (t || "").trim();
+    if (pulito.length < 2) return;
+    if (!/[\p{L}\p{N}]/u.test(pulito)) return;
+    onFinalRef.current(pulito);
+  });
+
   const continuoRef = useRef(false); // interruttore: il mic deve restare attivo
   const speakingRef = useRef(false); // ORION sta parlando (non ascoltare: niente eco)
   const busyRef = useRef(false); // ORION sta elaborando (loading)
@@ -106,7 +116,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
         setInterim(parziale);
         if (finale.trim()) {
           setInterim("");
-          onFinalRef.current(finale.trim());
+          inviaTestoRef.current(finale);
         }
       };
       rec.onerror = (e: AnyRec) => {
@@ -200,27 +210,66 @@ export function useSpeech(onFinal: (testo: string) => void) {
       }
       setListening(false);
       setInterim("");
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(testo);
-      u.lang = "it-IT";
-      if (voiceRef.current) u.voice = voiceRef.current;
-      u.rate = 1.0; // ritmo naturale
-      u.pitch = 1.0; // timbro naturale (il genere lo dà la voce scelta)
-      u.onstart = () => {
-        speakingRef.current = true;
-        setSpeaking(true);
+      const synth = window.speechSynthesis;
+      synth.cancel();
+
+      // ~1 volta su 20 l'audio non parte (utterance "persa", tipico bug del motore
+      // vocale). Watchdog: se entro ~500ms non è partito né in coda, riprova (fino a 2).
+      let partito = false;
+      let tentativi = 0;
+      const avvia = () => {
+        const u = new SpeechSynthesisUtterance(testo);
+        u.lang = "it-IT";
+        if (voiceRef.current) u.voice = voiceRef.current;
+        u.rate = 1.0; // ritmo naturale
+        u.pitch = 1.0; // timbro naturale (il genere lo dà la voce scelta)
+        u.onstart = () => {
+          partito = true;
+          speakingRef.current = true;
+          setSpeaking(true);
+        };
+        u.onend = () => {
+          speakingRef.current = false;
+          setSpeaking(false);
+          maybeRestart();
+        };
+        u.onerror = () => {
+          speakingRef.current = false;
+          setSpeaking(false);
+          maybeRestart();
+        };
+        try {
+          synth.resume(); // alcuni motori vanno in "pausa": sblocca
+        } catch {
+          /* noop */
+        }
+        synth.speak(u);
+        setTimeout(() => {
+          if (partito || !speakingRef.current) return;
+          if (synth.speaking || synth.pending) {
+            try {
+              synth.resume();
+            } catch {
+              /* noop */
+            }
+            return; // sta partendo, solo in ritardo
+          }
+          if (tentativi < 2) {
+            tentativi += 1;
+            try {
+              synth.cancel();
+            } catch {
+              /* noop */
+            }
+            avvia();
+          } else {
+            speakingRef.current = false;
+            setSpeaking(false);
+            maybeRestart();
+          }
+        }, 500);
       };
-      u.onend = () => {
-        speakingRef.current = false;
-        setSpeaking(false);
-        maybeRestart();
-      };
-      u.onerror = () => {
-        speakingRef.current = false;
-        setSpeaking(false);
-        maybeRestart();
-      };
-      window.speechSynthesis.speak(u);
+      avvia();
     },
     [voiceOn, maybeRestart]
   );
@@ -242,7 +291,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
       setMicAttivo(true);
       setListening(true);
       avviaAscoltoContinuo({
-        onTesto: (t) => onFinalRef.current(t),
+        onTesto: (t) => inviaTestoRef.current(t),
         puoAscoltare: () => !speakingRef.current && !busyRef.current,
       }).catch(() => {
         setMicAttivo(false);

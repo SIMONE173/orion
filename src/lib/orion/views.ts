@@ -164,6 +164,7 @@ export type Azione =
   | { tipo: "zoom_documento"; verso: "avvicina" | "allontana" | "reset" }
   | { tipo: "cerca_documento"; testo: string }
   | { tipo: "apri_camera"; modo: "documento" | "descrizione" }
+  | { tipo: "chiudi_vista"; vista: string }
   | { tipo: "riposo" }
   // Solo ORION Desktop (controllo del computer):
   | { tipo: "apri_file"; query: string }

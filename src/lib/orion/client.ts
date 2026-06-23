@@ -82,6 +82,9 @@ export async function runConversation(
         model: MODEL,
         max_tokens: 16000,
         thinking: { type: "adaptive" },
+        // Assistente vocale: priorità alla RAPIDITÀ. I task sono semplici (capire
+        // l'intento + chiamare lo strumento giusto), non ragionamenti profondi.
+        output_config: { effort: "low" },
         system,
         tools: TOOLS,
         messages,

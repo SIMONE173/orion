@@ -38,6 +38,8 @@ type OrionDesktop = {
   rinomina?: (d: { da: string; a: string }) => Promise<EsitoOS>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
+  // Solo desktop: chiude le finestre-pannello (per tipo, o "tutto").
+  chiudiVista?: (vista: string) => void;
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra?: () => void;
   onFinestra?: (cb: (stato: string) => void) => void;
@@ -210,6 +212,20 @@ export default function Home() {
         setCameraModo(a.modo);
         setMostraCamera(true);
         break;
+      case "chiudi_vista": {
+        const d = desktopBridge();
+        if (d?.chiudiVista) {
+          // Desktop: i pannelli sono finestre separate → le chiude il main process.
+          d.chiudiVista(a.vista);
+        } else if (a.vista === "tutto") {
+          setViste([]);
+          setDocView(null);
+        } else {
+          setViste((vs) => vs.filter((v) => v.tipo !== a.vista));
+          if (a.vista === "documento" || a.vista === "documenti") setDocView(null);
+        }
+        break;
+      }
       case "riposo":
         entraStandbyRef.current?.();
         break;

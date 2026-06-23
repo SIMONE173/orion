@@ -700,6 +700,16 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "chiudi_vista",
+    description:
+      "Chiude un pannello/finestra che hai aperto. Usalo per 'chiudi l'agenda', 'chiudi la mappa', 'togli le notizie', 'via questo', 'chiudi tutto'. Passa in 'vista' il tipo di pannello da chiudere: agenda, mappa, notizie, finanza, sport, clienti, cliente, documento, documenti, lavagna, schema, abbonamento, pagamenti, whatsapp, promemoria, attesa, briefing, profilo — oppure 'tutto' per chiudere tutti i pannelli.",
+    input_schema: {
+      type: "object",
+      properties: { vista: { type: "string" } },
+      required: ["vista"],
+    },
+  },
+  {
     name: "guarda_foto",
     description:
       "Apre la fotocamera (o caricamento immagine) per far DESCRIVERE a ORION una foto. Usalo quando l'utente dice 'descrivimi una foto', 'guarda questa immagine e dimmi cosa c'è', 'cosa vedi in questa foto'. Dopo che l'utente scatta/carica, riceverai l'immagine e dovrai descrivere a parole, in modo naturale, cosa si vede. A voce di' una frase tipo 'Inquadra pure la foto'.",
@@ -1388,6 +1398,11 @@ const handlers: Record<string, Handler> = {
     result: { ok: true, fotocamera: "aperta", nota: "Aspetta l'immagine: poi leggi il testo e chiama archivia_documento." },
     azione: { tipo: "apri_camera", modo: "documento" },
   }),
+
+  chiudi_vista: (input) => {
+    const vista = String(input.vista ?? "tutto").toLowerCase().trim() || "tutto";
+    return { result: { ok: true, chiuso: vista }, azione: { tipo: "chiudi_vista", vista } };
+  },
 
   riassumi_link: async (input) => {
     const url = String(input.url ?? "").trim();

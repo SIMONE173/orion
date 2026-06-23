@@ -63,19 +63,22 @@ function mostraFinestraPrincipale() {
 }
 
 // Apre una VISTA in una finestra separata. La principale resta sul "nucleo".
-// Riuso della finestra SOLO per le MAPPE: così "ristoranti vicini" dopo "mappa di
-// Londra" aggiorna la stessa mappa invece di aprire un doppione. Per tutti gli altri
-// tipi (agenda, notizie, ecc.) ogni comando apre una finestra nuova, come prima.
-let finestraMappa = null;
+// Teniamo traccia delle finestre per poterle CHIUDERE a voce ("chiudi l'agenda").
+// Riuso della finestra SOLO per le MAPPE (così "ristoranti vicini" aggiorna la stessa
+// mappa); gli altri tipi aprono una finestra nuova a ogni comando.
+const finestreViste = []; // { win, tipo }
 
 function apriFinestraVista(vista) {
   const tipo = vista && vista.tipo ? String(vista.tipo) : "vista";
 
-  if (tipo === "mappa" && finestraMappa && !finestraMappa.isDestroyed()) {
-    finestraMappa.webContents.send("orion:vista", vista);
-    if (finestraMappa.isMinimized()) finestraMappa.restore();
-    finestraMappa.focus();
-    return finestraMappa;
+  if (tipo === "mappa") {
+    const m = finestreViste.find((f) => f.tipo === "mappa" && !f.win.isDestroyed());
+    if (m) {
+      m.win.webContents.send("orion:vista", vista);
+      if (m.win.isMinimized()) m.win.restore();
+      m.win.focus();
+      return m.win;
+    }
   }
 
   const win = new BrowserWindow({
@@ -90,12 +93,11 @@ function apriFinestraVista(vista) {
       nodeIntegration: false,
     },
   });
-  if (tipo === "mappa") {
-    finestraMappa = win;
-    win.on("closed", () => {
-      if (finestraMappa === win) finestraMappa = null;
-    });
-  }
+  finestreViste.push({ win, tipo });
+  win.on("closed", () => {
+    const i = finestreViste.findIndex((f) => f.win === win);
+    if (i >= 0) finestreViste.splice(i, 1);
+  });
   win.loadURL(`${ORION_URL}/pannello`);
   // Mando la vista appena la pagina è pronta (il preload la bufferizza se arriva prima).
   win.webContents.on("did-finish-load", () => {
@@ -106,6 +108,21 @@ function apriFinestraVista(vista) {
 
 ipcMain.on("os:apriVista", (_e, vista) => {
   apriFinestraVista(vista);
+});
+
+// Chiude le finestre-pannello: per tipo (es. "agenda", "mappa") o tutte ("tutto").
+ipcMain.on("os:chiudiVista", (_e, vista) => {
+  const t = String(vista || "").toLowerCase().trim();
+  const tutto = !t || t === "tutto" || t === "tutti";
+  for (const f of [...finestreViste]) {
+    if (tutto || f.tipo === t) {
+      try {
+        f.win.close();
+      } catch {
+        /* già chiusa */
+      }
+    }
+  }
 });
 
 app.whenReady().then(() => {
