@@ -55,6 +55,8 @@ export default function Home() {
   const [mostraStorico, setMostraStorico] = useState(false);
   const [mostraCamera, setMostraCamera] = useState(false);
   const [cameraModo, setCameraModo] = useState<"documento" | "descrizione">("documento");
+  // Incrementato quando l'utente dice "scatta" a voce: fa scattare la fotocamera.
+  const [scattaTick, setScattaTick] = useState(0);
   const [avviso, setAvviso] = useState<string | null>(null);
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
@@ -346,6 +348,14 @@ export default function Home() {
 
   // Quando il mic è attivo in modalità appunti, la voce o detta o comanda.
   gestisciVoceRef.current = (t: string) => {
+    // Mentre la fotocamera è aperta: "scatta/fotografa/vai/ok/pronto" → scatta la foto.
+    // La voce non viene mandata a ORION finché si sta inquadrando.
+    if (mostraCamera) {
+      if (/scatt|fotograf|^foto\b|\bpronto\b|^vai\b|^ok\b|adesso|ci sono|fatto/i.test(t.trim())) {
+        setScattaTick((n) => n + 1);
+      }
+      return;
+    }
     if (!appuntiRef.current) {
       inviaAOrion(t);
       return;
@@ -773,7 +783,12 @@ export default function Home() {
       )}
 
       {mostraCamera && (
-        <CameraCapture modo={cameraModo} onCapture={catturaFoto} onClose={() => setMostraCamera(false)} />
+        <CameraCapture
+          modo={cameraModo}
+          scattaTick={scattaTick}
+          onCapture={catturaFoto}
+          onClose={() => setMostraCamera(false)}
+        />
       )}
 
       {appunti && (
