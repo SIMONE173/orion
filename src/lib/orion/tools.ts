@@ -706,6 +706,12 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "scansiona_documento",
+    description:
+      "Apre la FOTOCAMERA (o caricamento immagine) per digitalizzare un documento fisico. Usalo SEMPRE quando l'utente dice 'scansiona/digitalizza un documento', 'porta questo foglio in digitale', 'archivia questo documento'. NON inventare un documento e NON chiamare archivia_documento finché non hai ricevuto l'immagine: prima apri la fotocamera con questo strumento, poi — quando ti arriva la foto — leggi il contenuto e chiamerai archivia_documento. A voce di' una frase tipo 'Inquadra pure il documento'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "riassumi_link",
     description:
       "Scarica il contenuto di un LINK (articolo, pagina web, o video di YouTube) e te lo restituisce come testo, così puoi RIASSUMERLO a voce. Usalo per 'riassumimi questo articolo/pagina/video: <url>', 'di cosa parla questo link'. Passa 'url' completo. Dopo aver ricevuto il testo, fai un riassunto chiaro e sintetico (i punti principali). NB: per i video di YouTube i sottotitoli a volte non sono accessibili: se manca il testo, dillo con naturalezza.",
@@ -1346,6 +1352,11 @@ const handlers: Record<string, Handler> = {
   guarda_foto: () => ({
     result: { ok: true, fotocamera: "aperta", nota: "Quando arriva la foto, descrivila a parole in modo naturale." },
     azione: { tipo: "apri_camera", modo: "descrizione" },
+  }),
+
+  scansiona_documento: () => ({
+    result: { ok: true, fotocamera: "aperta", nota: "Aspetta l'immagine: poi leggi il testo e chiama archivia_documento." },
+    azione: { tipo: "apri_camera", modo: "documento" },
   }),
 
   riassumi_link: async (input) => {

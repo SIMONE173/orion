@@ -21,7 +21,14 @@
     "appId": "app.orion.desktop",
     "productName": "ORION",
     "files": ["main.js", "preload.js", "whisper.js"],
-    "mac": { "category": "public.app-category.productivity", "target": "dmg" },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": "dmg",
+      "extendInfo": {
+        "NSCameraUsageDescription": "ORION usa la fotocamera per digitalizzare i documenti e descrivere le foto.",
+        "NSMicrophoneUsageDescription": "ORION usa il microfono per parlare con te."
+      }
+    },
     "win": { "target": "nsis" },
     "linux": { "target": "AppImage" }
   }
