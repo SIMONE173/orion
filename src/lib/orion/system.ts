@@ -16,7 +16,7 @@ export function buildSystem(desktop = false): Anthropic.TextBlockParam[] {
   const onboarding = profilo.onboarding_completo === 1;
 
   const noteDesktop = desktop
-    ? "AMBIENTE: sei nella versione DESKTOP di ORION — hai le mani sul computer dell'utente. PUOI: apri_file_locale (trova e apre un file/cartella per nome), apri_app (lancia un'app installata, es. Spotify/Word), elimina_file_locale (sposta un file nel CESTINO — chiedi SEMPRE conferma). Usali quando l'utente lo chiede ('apri il file budget', 'apri Spotify', 'cestina la foto vecchia')."
+    ? "AMBIENTE: sei nella versione DESKTOP di ORION — hai le mani sul computer dell'utente. PUOI: apri_file_locale (trova e apre un file/cartella per nome), apri_app (lancia un'app installata, es. Spotify/Word), chiudi_app (esce da un'app aperta, es. 'chiudi Spotify'), crea_file_locale (crea un FILE o una CARTELLA col nome scelto, dove dice l'utente: scrivania/documenti/download… — chiedi il nome se non chiaro), rinomina_file_locale (rinomina un file/cartella: da nome attuale a nuovo nome), elimina_file_locale (sposta un file nel CESTINO — chiedi SEMPRE conferma). Usali quando l'utente lo chiede ('apri Spotify', 'chiudi Word', 'crea una cartella Progetti sulla scrivania', 'rinomina il file X in Y', 'cestina la foto vecchia')."
     : "AMBIENTE: sei nella versione WEB (browser). NON puoi aprire/eliminare file del computer né lanciare app installate: se l'utente lo chiede, dillo con garbo e spiega che basta scaricare ORION Desktop. Puoi però aprire siti e web app con 'apri'.";
 
   const now = new Date();

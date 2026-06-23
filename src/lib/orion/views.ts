@@ -168,7 +168,10 @@ export type Azione =
   // Solo ORION Desktop (controllo del computer):
   | { tipo: "apri_file"; query: string }
   | { tipo: "cestina_file"; query: string }
-  | { tipo: "apri_app"; nome: string };
+  | { tipo: "apri_app"; nome: string }
+  | { tipo: "chiudi_app"; nome: string }
+  | { tipo: "crea_file"; nome: string; tipoElemento: "file" | "cartella"; posizione?: string }
+  | { tipo: "rinomina_file"; da: string; a: string };
 
 export type RisultatoConversazione = {
   testo: string;

@@ -762,6 +762,36 @@ export const TOOLS: Anthropic.Tool[] = [
       "SOLO versione DESKTOP: sposta nel CESTINO un file del computer, trovandolo per nome. Usalo per 'elimina/cestina il file X'. CHIEDI SEMPRE CONFERMA prima. Passa il nome in 'nome'.",
     input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
   },
+  {
+    name: "chiudi_app",
+    description:
+      "SOLO versione DESKTOP: chiude (esce da) un'applicazione aperta sul computer. Usalo per 'chiudi Spotify', 'chiudi Word', 'chiudi questa finestra di X'. Passa il nome dell'app in 'nome'. È il contrario di apri_app.",
+    input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
+  },
+  {
+    name: "crea_file_locale",
+    description:
+      "SOLO versione DESKTOP: crea un FILE o una CARTELLA sul computer, con il nome dato, nella posizione indicata. Usalo per 'crea una cartella chiamata X sulla scrivania', 'creami un file note.txt in Documenti'. 'nome' = come chiamarlo; 'tipoElemento' = 'cartella' o 'file'; 'posizione' (opzionale) = scrivania, documenti, download, immagini, home, oppure il nome di una cartella esistente (se manca, uso la Scrivania).",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string" },
+        tipoElemento: { type: "string", enum: ["file", "cartella"] },
+        posizione: { type: "string", description: "Dove crearlo (opzionale)" },
+      },
+      required: ["nome", "tipoElemento"],
+    },
+  },
+  {
+    name: "rinomina_file_locale",
+    description:
+      "SOLO versione DESKTOP: rinomina un file o una cartella del computer (trovandolo per nome). Usalo per 'rinomina il file X in Y', 'chiama la cartella X invece Y'. 'da' = nome attuale (anche parziale), 'a' = nuovo nome.",
+    input_schema: {
+      type: "object",
+      properties: { da: { type: "string" }, a: { type: "string" } },
+      required: ["da", "a"],
+    },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
@@ -2067,6 +2097,26 @@ const handlers: Record<string, Handler> = {
   elimina_file_locale: (input) => ({
     result: { ok: true, richiesto: input.nome },
     azione: { tipo: "cestina_file", query: String(input.nome ?? "") },
+  }),
+
+  chiudi_app: (input) => ({
+    result: { ok: true, app: input.nome },
+    azione: { tipo: "chiudi_app", nome: String(input.nome ?? "") },
+  }),
+
+  crea_file_locale: (input) => ({
+    result: { ok: true, nome: input.nome, tipo: input.tipoElemento, posizione: input.posizione ?? "scrivania" },
+    azione: {
+      tipo: "crea_file",
+      nome: String(input.nome ?? ""),
+      tipoElemento: input.tipoElemento === "cartella" ? "cartella" : "file",
+      posizione: input.posizione ? String(input.posizione) : undefined,
+    },
+  }),
+
+  rinomina_file_locale: (input) => ({
+    result: { ok: true, da: input.da, a: input.a },
+    azione: { tipo: "rinomina_file", da: String(input.da ?? ""), a: String(input.a ?? "") },
   }),
 };
 

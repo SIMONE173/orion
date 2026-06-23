@@ -26,15 +26,21 @@ type StatoAbb = {
   periodoFine: string | null;
 };
 
-type EsitoOS = { ok: boolean; nome?: string; app?: string; errore?: string };
+type EsitoOS = { ok: boolean; nome?: string; app?: string; da?: string; a?: string; tipo?: string; cartella?: string; errore?: string };
 type OrionDesktop = {
   versione: string;
   piattaforma: string;
   apriFile: (q: string) => Promise<EsitoOS>;
   cestina: (q: string) => Promise<EsitoOS>;
   apriApp: (n: string) => Promise<EsitoOS>;
+  chiudiApp?: (n: string) => Promise<EsitoOS>;
+  crea?: (d: { nome: string; tipo: string; posizione?: string }) => Promise<EsitoOS>;
+  rinomina?: (d: { da: string; a: string }) => Promise<EsitoOS>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
+  // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
+  mostraFinestra?: () => void;
+  onFinestra?: (cb: (stato: string) => void) => void;
 };
 declare global {
   interface Window {
@@ -65,6 +71,9 @@ export default function Home() {
   const [appuntiStato, setAppuntiStato] = useState<"idle" | "salvando" | "salvato">("idle");
   const [docView, setDocView] = useState<{ doc: DocVisore; zoom: number; cerca: string } | null>(null);
   const [standby, setStandby] = useState(false);
+  const [minimizzata, setMinimizzata] = useState(false);
+  const minimizzataRef = useRef(false);
+  minimizzataRef.current = minimizzata;
   const standbyDa = useRef<string>(new Date().toISOString());
   const ultimaAttivita = useRef<number>(Date.now());
 
@@ -237,6 +246,41 @@ export default function Home() {
         });
         break;
       }
+      case "chiudi_app": {
+        const d = desktopBridge();
+        if (!d?.chiudiApp) {
+          speakRef.current?.("Chiudere le app del computer è possibile con ORION Desktop.");
+          break;
+        }
+        d.chiudiApp(a.nome).then((r) => {
+          if (!r.ok) speakRef.current?.(`Non sono riuscito a chiudere ${a.nome}.`);
+        });
+        break;
+      }
+      case "crea_file": {
+        const d = desktopBridge();
+        if (!d?.crea) {
+          speakRef.current?.("Creare file e cartelle sul computer è possibile con ORION Desktop.");
+          break;
+        }
+        d.crea({ nome: a.nome, tipo: a.tipoElemento, posizione: a.posizione }).then((r) => {
+          if (r.ok) speakRef.current?.(`Fatto, ho creato ${a.tipoElemento} "${r.nome}" in ${r.cartella}.`);
+          else speakRef.current?.(`Non sono riuscito a creare ${a.nome}${r.errore === "esiste già" ? ": esiste già" : ""}.`);
+        });
+        break;
+      }
+      case "rinomina_file": {
+        const d = desktopBridge();
+        if (!d?.rinomina) {
+          speakRef.current?.("Rinominare file e cartelle è possibile con ORION Desktop.");
+          break;
+        }
+        d.rinomina({ da: a.da, a: a.a }).then((r) => {
+          if (r.ok) speakRef.current?.(`Fatto, ho rinominato ${r.da} in ${r.a}.`);
+          else speakRef.current?.(`Non sono riuscito a rinominare ${a.da}.`);
+        });
+        break;
+      }
       default:
         break;
     }
@@ -322,9 +366,23 @@ export default function Home() {
     speakRef.current?.(saluto);
   }, []);
 
-  // Doppio battito di mani = risveglio dallo standby. (Il microfono si attiva/muta
-  // col tasto, come prima.)
-  useClapWake(standby, risveglia);
+  // Doppio battito di mani: se la finestra è ridotta a icona → riappare ("Eccomi");
+  // altrimenti, se in standby → risveglio. (Il microfono si attiva/muta col tasto.)
+  const onDoppioClap = useCallback(() => {
+    if (minimizzataRef.current) {
+      desktopBridge()?.mostraFinestra?.();
+      const nome = nomeUtenteRef.current ? `, ${nomeUtenteRef.current}` : "";
+      speakRef.current?.(`Eccomi${nome}.`);
+      return;
+    }
+    if (standbyRef.current) risveglia();
+  }, [risveglia]);
+  useClapWake(standby || minimizzata, onDoppioClap);
+
+  // Desktop: sapere quando la finestra è ridotta a icona / ripristinata (per il clap).
+  useEffect(() => {
+    desktopBridge()?.onFinestra?.((stato) => setMinimizzata(stato === "minimizzata"));
+  }, []);
 
   // Standby automatico dopo qualche minuto d'inattività (non durante voce/elaborazione/pannelli aperti).
   useEffect(() => {

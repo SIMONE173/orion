@@ -19,6 +19,8 @@ const CARTELLE = [
   path.join(os.homedir(), "Pictures"),
 ];
 
+let finestraPrincipale = null;
+
 function creaFinestra() {
   const win = new BrowserWindow({
     width: 1100,
@@ -30,13 +32,33 @@ function creaFinestra() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      // Continua a girare (e ad ascoltare i colpi) anche da ridotta a icona.
+      backgroundThrottling: false,
     },
   });
+  finestraPrincipale = win;
 
   // Concedi microfono/notifiche (servono a voce e push) senza prompt continui.
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
 
+  // Avvisa la pagina quando la finestra è ridotta a icona / ripristinata.
+  win.on("minimize", () => win.webContents.send("orion:finestra", "minimizzata"));
+  win.on("restore", () => win.webContents.send("orion:finestra", "ripristinata"));
+  win.on("closed", () => {
+    if (finestraPrincipale === win) finestraPrincipale = null;
+  });
+
   win.loadURL(ORION_URL);
+  return win;
+}
+
+// Riporta in primo piano la finestra principale (richiamata dal doppio battito di mani).
+function mostraFinestraPrincipale() {
+  let win = finestraPrincipale;
+  if (!win || win.isDestroyed()) win = creaFinestra();
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
   return win;
 }
 
@@ -103,8 +125,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// ── Ricerca file: scansione superficiale (profondità limitata) delle cartelle utente ──
-function cercaFile(query, limite = 1) {
+// ── Ricerca voci (file/cartelle): scansione superficiale delle cartelle utente ──
+function trovaVoci(query, { file = true, cartelle = true, limite = 1 } = {}) {
   const q = String(query || "").toLowerCase().trim();
   if (!q) return [];
   const trovati = [];
@@ -123,10 +145,12 @@ function cercaFile(query, limite = 1) {
       if (trovati.length >= limite) return;
       if (v.name.startsWith(".")) continue;
       const p = path.join(dir, v.name);
-      if (v.isFile() && v.name.toLowerCase().includes(q)) {
+      const match = v.name.toLowerCase().includes(q);
+      if (v.isDirectory()) {
+        if (cartelle && match) trovati.push(p);
+        if (!["node_modules", "Library"].includes(v.name)) scava(p, profondita + 1);
+      } else if (v.isFile() && file && match) {
         trovati.push(p);
-      } else if (v.isDirectory() && !["node_modules", "Library"].includes(v.name)) {
-        scava(p, profondita + 1);
       }
     }
   };
@@ -136,6 +160,20 @@ function cercaFile(query, limite = 1) {
     scava(base, 0);
   }
   return trovati;
+}
+
+const cercaFile = (q, limite = 1) => trovaVoci(q, { cartelle: false, limite });
+
+// Risolve "dove" creare qualcosa: parole note (scrivania/documenti…) o una cartella per nome.
+function cartellaBase(posizione) {
+  const p = String(posizione || "").toLowerCase().trim();
+  if (!p || /scrivania|desktop/.test(p)) return path.join(os.homedir(), "Desktop");
+  if (/documenti|documents/.test(p)) return path.join(os.homedir(), "Documents");
+  if (/download/.test(p)) return path.join(os.homedir(), "Downloads");
+  if (/immagini|pictures|foto/.test(p)) return path.join(os.homedir(), "Pictures");
+  if (/home|utente|principale/.test(p)) return os.homedir();
+  const [cartella] = trovaVoci(p, { file: false, limite: 1 });
+  return cartella || path.join(os.homedir(), "Desktop");
 }
 
 // Apri un file/cartella trovato per nome.
@@ -196,4 +234,65 @@ ipcMain.handle("os:apriApp", async (_e, nome) => {
   } catch (err) {
     return { ok: false, errore: String(err) };
   }
+});
+
+// Chiude (esce da) un'app per nome.
+ipcMain.handle("os:chiudiApp", async (_e, nome) => {
+  const n = String(nome || "").trim();
+  if (!n) return { ok: false, errore: "nome mancante" };
+  try {
+    if (process.platform === "darwin") {
+      spawn("osascript", ["-e", `quit app "${n.replace(/"/g, "")}"`], { detached: true, stdio: "ignore" }).unref();
+    } else if (process.platform === "win32") {
+      spawn("taskkill", ["/IM", `${n}.exe`, "/F"], { detached: true, stdio: "ignore" }).unref();
+    } else {
+      spawn("pkill", ["-i", n], { detached: true, stdio: "ignore" }).unref();
+    }
+    return { ok: true, app: n };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Crea un file o una cartella (con un nome) nella posizione indicata.
+ipcMain.handle("os:crea", async (_e, dati) => {
+  const nome = String((dati && dati.nome) || "").replace(/[/\\]/g, "").trim();
+  if (!nome) return { ok: false, errore: "nome mancante" };
+  const cartella = dati && /cartell|folder/i.test(String(dati.tipo || "")) ? true : false;
+  const base = cartellaBase(dati && dati.posizione);
+  const dest = path.join(base, nome);
+  try {
+    if (cartella) {
+      fs.mkdirSync(dest, { recursive: true });
+    } else {
+      if (fs.existsSync(dest)) return { ok: false, errore: "esiste già" };
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, "");
+    }
+    return { ok: true, percorso: dest, nome, cartella: path.basename(base), tipo: cartella ? "cartella" : "file" };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Rinomina un file o una cartella (trovato per nome) in un nuovo nome.
+ipcMain.handle("os:rinomina", async (_e, dati) => {
+  const da = String((dati && dati.da) || "").trim();
+  const a = String((dati && dati.a) || "").replace(/[/\\]/g, "").trim();
+  if (!da || !a) return { ok: false, errore: "servono vecchio e nuovo nome" };
+  const [trovato] = trovaVoci(da, { limite: 1 });
+  if (!trovato) return { ok: false, errore: "non trovato" };
+  const nuovo = path.join(path.dirname(trovato), a);
+  if (fs.existsSync(nuovo)) return { ok: false, errore: "esiste già un elemento con quel nome" };
+  try {
+    fs.renameSync(trovato, nuovo);
+    return { ok: true, da: path.basename(trovato), a };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Riporta in primo piano la finestra principale (doppio battito di mani da ridotta a icona).
+ipcMain.on("os:mostraFinestra", () => {
+  mostraFinestraPrincipale();
 });

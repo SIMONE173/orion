@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   apriFile: (query) => ipcRenderer.invoke("os:apriFile", query),
   cestina: (query) => ipcRenderer.invoke("os:cestina", query),
   apriApp: (nome) => ipcRenderer.invoke("os:apriApp", nome),
+  chiudiApp: (nome) => ipcRenderer.invoke("os:chiudiApp", nome),
+  crea: (dati) => ipcRenderer.invoke("os:crea", dati),
+  rinomina: (dati) => ipcRenderer.invoke("os:rinomina", dati),
+  // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
+  mostraFinestra: () => ipcRenderer.send("os:mostraFinestra"),
+  onFinestra: (cb) => ipcRenderer.on("orion:finestra", (_e, stato) => cb(stato)),
   // Riconoscimento vocale offline:
   sttPronto: () => ipcRenderer.invoke("os:sttPronto"),
   trascrivi: (pcm) => ipcRenderer.invoke("os:trascrivi", pcm),

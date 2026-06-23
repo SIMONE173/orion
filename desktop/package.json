@@ -26,7 +26,8 @@
       "target": "dmg",
       "extendInfo": {
         "NSCameraUsageDescription": "ORION usa la fotocamera per digitalizzare i documenti e descrivere le foto.",
-        "NSMicrophoneUsageDescription": "ORION usa il microfono per parlare con te."
+        "NSMicrophoneUsageDescription": "ORION usa il microfono per parlare con te.",
+        "NSAppleEventsUsageDescription": "ORION usa gli eventi di sistema per aprire e chiudere le app che gli chiedi."
       }
     },
     "win": { "target": "nsis" },
