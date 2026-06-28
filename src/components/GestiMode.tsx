@@ -41,6 +41,9 @@ class OneEuro {
 
 const PINCH_ON = 0.05; // distanza normalizzata pollice↔indice per "chiudere"
 const PINCH_OFF = 0.09; // soglia di rilascio (isteresi → niente sfarfallio)
+// Sensibilità del movimento: solo una zona CENTRALE dell'inquadratura copre tutto
+// lo schermo, così il dito non deve mai uscire dall'obiettivo per raggiungere i bordi.
+const SENSIBILITA = 2.4;
 const VERSIONE_WASM = "0.10.35";
 
 export function GestiMode({
@@ -138,15 +141,18 @@ export function GestiMode({
         const era = pinchStato.current[i];
         const ora = era ? dist < PINCH_OFF : dist < PINCH_ON;
         pinchStato.current[i] = ora;
-        // punto = midpoint, specchiato, mappato sul viewport
-        const nx = 1 - (pollice.x + indice.x) / 2;
-        const ny = (pollice.y + indice.y) / 2;
+        // punto = midpoint, AMPLIFICATO attorno al centro (sensibilità), specchiato.
+        const cx = 0.5 + ((pollice.x + indice.x) / 2 - 0.5) * SENSIBILITA;
+        const cy = 0.5 + ((pollice.y + indice.y) / 2 - 0.5) * SENSIBILITA;
+        const nx = 1 - cx;
+        const ny = cy;
         if (!filtri.current[i * 2]) {
           filtri.current[i * 2] = new OneEuro();
           filtri.current[i * 2 + 1] = new OneEuro();
         }
-        const x = filtri.current[i * 2].filtra(nx * window.innerWidth, t);
-        const y = filtri.current[i * 2 + 1].filtra(ny * window.innerHeight, t);
+        // Filtra (anti-tremolio) e blocca ai bordi dello schermo.
+        const x = Math.max(0, Math.min(window.innerWidth, filtri.current[i * 2].filtra(nx * window.innerWidth, t)));
+        const y = Math.max(0, Math.min(window.innerHeight, filtri.current[i * 2 + 1].filtra(ny * window.innerHeight, t)));
         mani.push({ x, y, pinch: ora });
       }
       disegnaCursori(mani);
@@ -252,16 +258,14 @@ export function GestiMode({
 
   return (
     <>
-      {/* Anteprima camera piccola in basso a sinistra (specchiata) + stato. */}
-      <video
-        ref={videoRef}
-        muted
-        playsInline
-        className="pointer-events-none fixed bottom-4 left-4 z-[55] h-24 w-32 -scale-x-100 rounded-lg border border-white/15 object-cover opacity-70"
-      />
+      {/* La telecamera serve SOLO al tracciamento delle mani → resta INVISIBILE
+          (non si vede in modalità gesti). Si vede solo per scansione documenti
+          e per la modalità visione/assistenza. */}
+      <video ref={videoRef} muted playsInline className="pointer-events-none fixed bottom-0 left-0 h-px w-px opacity-0" />
+      {/* Solo il cursore della mano (non l'immagine della camera) per mirare. */}
       <canvas ref={overlayRef} className="pointer-events-none fixed inset-0 z-[56]" />
       {stato !== "pronto" && (
-        <div className="pointer-events-none fixed bottom-4 left-40 z-[57] rounded-lg bg-black/60 px-3 py-1.5 text-xs text-slate-300">
+        <div className="pointer-events-none fixed bottom-4 left-4 z-[57] rounded-lg bg-black/60 px-3 py-1.5 text-xs text-slate-300">
           {stato === "carico" ? "Avvio del controllo a gesti…" : "Telecamera non disponibile: usa il mouse."}
         </div>
       )}
