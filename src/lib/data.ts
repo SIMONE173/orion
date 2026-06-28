@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
+import { cifra } from "./crypto";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Accesso ai dati, MULTI-TENANT: ogni query è filtrata per tenant_id, preso
@@ -23,7 +24,35 @@ export type Profilo = {
   regime_fiscale: string | null;
   pec: string | null;
   sdi: string | null;
+  // Onboarding dinamico:
+  tipo_uso: string | null; // 'personale' | 'lavoro'
+  tipo_lavoro: string | null; // 'autonomo' | 'azienda'
+  memoria_operativa: string | null; // JSON flessibile: { tema: dettaglio, ... }
+  ultima_consolidazione: string | null; // data (YYYY-MM-DD) ultima distillazione AI
   onboarding_completo: number;
+  updated_at: string;
+};
+
+// Una voce di memoria operativa: tema (chiave breve) → dettaglio (testo libero).
+export type VoceMemoria = { tema: string; dettaglio: string };
+
+// Azienda/team (onboarding Caso B): ambiente condiviso. tenant_id = id del
+// fondatore = tenant dei dati comuni. I dipendenti si agganciano col codice.
+export type Azienda = {
+  tenant_id: number;
+  nome: string | null;
+  settore: string | null;
+  dimensioni: string | null;
+  sedi: string | null;
+  codice_aziendale: string | null;
+  memoria_operativa: string | null; // JSON: organigramma, processi, regole…
+  piva: string | null;
+  codice_fiscale: string | null;
+  indirizzo: string | null;
+  regime_fiscale: string | null;
+  pec: string | null;
+  sdi: string | null;
+  created_at: string;
   updated_at: string;
 };
 
@@ -165,7 +194,8 @@ export function getProfilo(): Profilo {
 const CAMPI_PROFILO = [
   "nome", "professione", "durata_visita_min", "gestione_cancellazioni",
   "canale_comunicazione", "problemi_tempo", "abitudini", "piva", "codice_fiscale",
-  "indirizzo", "regime_fiscale", "pec", "sdi", "onboarding_completo",
+  "indirizzo", "regime_fiscale", "pec", "sdi",
+  "tipo_uso", "tipo_lavoro", "onboarding_completo",
 ] as const;
 
 export function aggiornaProfilo(fields: Record<string, unknown>): Profilo {
@@ -184,6 +214,837 @@ export function aggiornaProfilo(fields: Record<string, unknown>): Profilo {
     db().prepare(`UPDATE profili SET ${updates.join(", ")} WHERE tenant_id = ?`).run(...values);
   }
   return getProfilo();
+}
+
+// Fonde nuove voci nella memoria_operativa (JSON) del profilo, senza perdere le
+// precedenti: stesso tema → aggiornato, tema nuovo → aggiunto.
+function fondiMemoria(attuale: string | null, voci: VoceMemoria[]): string {
+  let mappa: Record<string, string> = {};
+  if (attuale) {
+    try {
+      mappa = JSON.parse(attuale);
+    } catch {
+      /* memoria corrotta: riparti pulito */
+    }
+  }
+  for (const v of voci) {
+    if (v?.tema && typeof v.dettaglio === "string") mappa[String(v.tema).trim()] = v.dettaglio;
+  }
+  return JSON.stringify(mappa);
+}
+
+export function aggiornaMemoriaProfilo(voci: VoceMemoria[]): Profilo {
+  const p = getProfilo();
+  const json = fondiMemoria(p.memoria_operativa, voci);
+  db()
+    .prepare("UPDATE profili SET memoria_operativa = ?, updated_at = ? WHERE tenant_id = ?")
+    .run(json, nowISO(), T());
+  return getProfilo();
+}
+
+// ── Azienda / team (onboarding Caso B) ───────────────────────────────────────
+
+const ALFABETO_CODICE = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // niente O/0/I/1 ambigui
+
+function generaCodiceAziendale(): string {
+  const d = db();
+  for (let tentativi = 0; tentativi < 50; tentativi++) {
+    let suffisso = "";
+    for (let i = 0; i < 6; i++) {
+      suffisso += ALFABETO_CODICE[Math.floor(Math.random() * ALFABETO_CODICE.length)];
+    }
+    const codice = `ORION-${suffisso}`;
+    const esiste = d.prepare("SELECT 1 FROM aziende WHERE codice_aziendale = ?").get(codice);
+    if (!esiste) return codice;
+  }
+  // Fallback praticamente impossibile: aggiungi entropia temporale.
+  return `ORION-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+}
+
+export function getAzienda(tenantId?: number): Azienda | undefined {
+  return db().prepare("SELECT * FROM aziende WHERE tenant_id = ?").get(tenantId ?? T()) as
+    | Azienda
+    | undefined;
+}
+
+export function trovaAziendaPerCodice(codice: string): Azienda | undefined {
+  return db()
+    .prepare("SELECT * FROM aziende WHERE codice_aziendale = ?")
+    .get(String(codice).trim().toUpperCase()) as Azienda | undefined;
+}
+
+const CAMPI_AZIENDA = [
+  "nome", "settore", "dimensioni", "sedi",
+  "piva", "codice_fiscale", "indirizzo", "regime_fiscale", "pec", "sdi",
+] as const;
+
+// Crea (se non esiste) o aggiorna l'azienda del tenant corrente. Alla creazione
+// genera un codice aziendale univoco. `memoria` viene fusa nella memoria_operativa.
+export function configuraAzienda(
+  fields: Record<string, unknown>,
+  memoria: VoceMemoria[] = []
+): Azienda {
+  const now = nowISO();
+  let azienda = getAzienda();
+  if (!azienda) {
+    const codice = generaCodiceAziendale();
+    db()
+      .prepare(
+        "INSERT INTO aziende (tenant_id, codice_aziendale, memoria_operativa, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)"
+      )
+      .run(T(), codice, now, now);
+    azienda = getAzienda()!;
+  }
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  for (const k of CAMPI_AZIENDA) {
+    if (k in fields && fields[k] !== undefined && fields[k] !== null) {
+      updates.push(`${k} = ?`);
+      values.push(fields[k]);
+    }
+  }
+  if (memoria.length) {
+    updates.push("memoria_operativa = ?");
+    values.push(fondiMemoria(azienda.memoria_operativa, memoria));
+  }
+  updates.push("updated_at = ?");
+  values.push(now);
+  values.push(T());
+  db().prepare(`UPDATE aziende SET ${updates.join(", ")} WHERE tenant_id = ?`).run(...values);
+  return getAzienda()!;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MEMORIA DI CONTESTO VIVENTE
+// ════════════════════════════════════════════════════════════════════════════
+
+export type Memoria = {
+  id: number;
+  tenant_id: number;
+  categoria: string;
+  soggetto: string | null;
+  cliente_id: number | null;
+  contenuto: string;
+  motivo: string | null;
+  confidenza: string; // 'basso' | 'medio' | 'alto'
+  evidenze: number;
+  stato: string; // 'attivo' | 'superato'
+  created_at: string;
+  updated_at: string;
+  ultima_conferma: string | null;
+};
+
+export type Evento = {
+  id: number;
+  tenant_id: number;
+  tipo: string;
+  soggetto: string | null;
+  cliente_id: number | null;
+  riferimento: string | null;
+  descrizione: string;
+  created_at: string;
+};
+
+export type RigaDiario = { id: number; tenant_id: number; data: string; riassunto: string; created_at: string };
+export type MessaggioSalvato = { id: number; ruolo: string; contenuto: string; created_at: string };
+
+const CONF_LIVELLO: Record<string, number> = { basso: 0, medio: 1, alto: 2 };
+const CONF_NOME = ["basso", "medio", "alto"];
+function alzaConfidenza(attuale: string): string {
+  return CONF_NOME[Math.min(2, (CONF_LIVELLO[attuale] ?? 1) + 1)];
+}
+
+// ── Livello 1: memoria viva ───────────────────────────────────────────────────
+
+// Inserisce un'intuizione; se ne esiste già una uguale (stessa categoria + stesso
+// soggetto + stesso contenuto) la RINFORZA invece di duplicarla: più volte ORION
+// osserva una cosa, più ne è certo (evidenze+1, confidenza che sale).
+export function impara(i: {
+  categoria?: string;
+  soggetto?: string | null;
+  cliente_id?: number | null;
+  contenuto: string;
+  motivo?: string | null;
+  confidenza?: string;
+}): Memoria {
+  const t = T();
+  const now = nowISO();
+  const categoria = i.categoria ?? "contesto";
+  const soggetto = i.soggetto ?? null;
+  const esistente = db()
+    .prepare(
+      `SELECT * FROM memoria WHERE tenant_id = ? AND stato = 'attivo' AND categoria = ?
+       AND COALESCE(soggetto,'') = COALESCE(?,'') AND lower(contenuto) = lower(?) LIMIT 1`
+    )
+    .get(t, categoria, soggetto, i.contenuto) as Memoria | undefined;
+  if (esistente) {
+    db()
+      .prepare(
+        `UPDATE memoria SET evidenze = evidenze + 1, confidenza = ?, motivo = COALESCE(?, motivo),
+         updated_at = ?, ultima_conferma = ? WHERE id = ?`
+      )
+      .run(alzaConfidenza(esistente.confidenza), i.motivo ?? null, now, now, esistente.id);
+    return db().prepare("SELECT * FROM memoria WHERE id = ?").get(esistente.id) as Memoria;
+  }
+  const r = db()
+    .prepare(
+      `INSERT INTO memoria (tenant_id, categoria, soggetto, cliente_id, contenuto, motivo, confidenza, evidenze, stato, created_at, updated_at, ultima_conferma)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'attivo', ?, ?, ?)`
+    )
+    .run(t, categoria, soggetto, i.cliente_id ?? null, i.contenuto, i.motivo ?? null, i.confidenza ?? "medio", now, now, now);
+  return db().prepare("SELECT * FROM memoria WHERE id = ?").get(Number(r.lastInsertRowid)) as Memoria;
+}
+
+// Corregge/evolve un'intuizione. superato=true → l'intuizione non vale più (evoluzione
+// nel tempo); altrimenti aggiorna contenuto/motivo/confidenza.
+export function aggiornaApprendimento(
+  id: number,
+  patch: { contenuto?: string; motivo?: string; confidenza?: string; superato?: boolean }
+): Memoria | undefined {
+  const t = T();
+  const m = db().prepare("SELECT * FROM memoria WHERE id = ? AND tenant_id = ?").get(id, t) as Memoria | undefined;
+  if (!m) return undefined;
+  db()
+    .prepare(
+      `UPDATE memoria SET contenuto = COALESCE(?, contenuto), motivo = COALESCE(?, motivo),
+       confidenza = COALESCE(?, confidenza), stato = ?, updated_at = ? WHERE id = ? AND tenant_id = ?`
+    )
+    .run(
+      patch.contenuto ?? null,
+      patch.motivo ?? null,
+      patch.confidenza ?? null,
+      patch.superato ? "superato" : m.stato,
+      nowISO(),
+      id,
+      t
+    );
+  return db().prepare("SELECT * FROM memoria WHERE id = ?").get(id) as Memoria;
+}
+
+// Richiama le intuizioni rilevanti. Ordina per confidenza e recency. Se passi un
+// soggetto/cliente filtra su quello (più eventuali generali), altrimenti generali.
+export function recallMemoria(opts: {
+  soggetto?: string | null;
+  cliente_id?: number | null;
+  categorie?: string[];
+  limite?: number;
+} = {}): Memoria[] {
+  const t = T();
+  const limite = opts.limite ?? 12;
+  const cond: string[] = ["tenant_id = ?", "stato = 'attivo'"];
+  const args: unknown[] = [t];
+  if (opts.cliente_id != null) {
+    cond.push("(cliente_id = ? OR cliente_id IS NULL)");
+    args.push(opts.cliente_id);
+  } else if (opts.soggetto) {
+    cond.push("(soggetto LIKE ? OR soggetto IS NULL)");
+    args.push(`%${opts.soggetto}%`);
+  }
+  if (opts.categorie?.length) {
+    cond.push(`categoria IN (${opts.categorie.map(() => "?").join(",")})`);
+    args.push(...opts.categorie);
+  }
+  return db()
+    .prepare(
+      `SELECT * FROM memoria WHERE ${cond.join(" AND ")}
+       ORDER BY CASE confidenza WHEN 'alto' THEN 0 WHEN 'medio' THEN 1 ELSE 2 END,
+       evidenze DESC, updated_at DESC LIMIT ?`
+    )
+    .all(...args, limite) as Memoria[];
+}
+
+export function listMemoria(): Memoria[] {
+  return db()
+    .prepare(
+      `SELECT * FROM memoria WHERE tenant_id = ? AND stato = 'attivo'
+       ORDER BY CASE confidenza WHEN 'alto' THEN 0 WHEN 'medio' THEN 1 ELSE 2 END, evidenze DESC, updated_at DESC`
+    )
+    .all(T()) as Memoria[];
+}
+
+// ── Livello 2a: registro eventi ───────────────────────────────────────────────
+
+export function logEvento(e: {
+  tipo: string;
+  descrizione: string;
+  soggetto?: string | null;
+  cliente_id?: number | null;
+  riferimento?: string | null;
+}) {
+  try {
+    db()
+      .prepare(
+        "INSERT INTO eventi (tenant_id, tipo, soggetto, cliente_id, riferimento, descrizione, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(T(), e.tipo, e.soggetto ?? null, e.cliente_id ?? null, e.riferimento ?? null, e.descrizione, nowISO());
+  } catch {
+    /* il log non deve mai far fallire l'azione principale */
+  }
+}
+
+export function eventiDopo(iso: string, limite = 20): Evento[] {
+  return db()
+    .prepare("SELECT * FROM eventi WHERE tenant_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT ?")
+    .all(T(), iso, limite) as Evento[];
+}
+
+export function eventiRecenti(limite = 20): Evento[] {
+  return db()
+    .prepare("SELECT * FROM eventi WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?")
+    .all(T(), limite) as Evento[];
+}
+
+// Catena di eventi collegati dallo stesso riferimento (es. "ordine 245"):
+// cliente → ordine → produzione → problema → decisione → nuova scadenza.
+export function eventiPerRiferimento(riferimento: string, limite = 30): Evento[] {
+  return db()
+    .prepare("SELECT * FROM eventi WHERE tenant_id = ? AND riferimento = ? ORDER BY created_at ASC LIMIT ?")
+    .all(T(), riferimento, limite) as Evento[];
+}
+
+// ── Livello 2b: diario ────────────────────────────────────────────────────────
+
+export function scriviDiario(riassunto: string): RigaDiario {
+  const now = nowISO();
+  const r = db()
+    .prepare("INSERT INTO diario (tenant_id, data, riassunto, created_at) VALUES (?, ?, ?, ?)")
+    .run(T(), now.slice(0, 10), riassunto, now);
+  return db().prepare("SELECT * FROM diario WHERE id = ?").get(Number(r.lastInsertRowid)) as RigaDiario;
+}
+
+export function ultimoDiario(): RigaDiario | undefined {
+  return db()
+    .prepare("SELECT * FROM diario WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1")
+    .get(T()) as RigaDiario | undefined;
+}
+
+// ── Livello 2c: conversazione persistita ──────────────────────────────────────
+
+export function salvaMessaggio(ruolo: "user" | "assistant", contenuto: string, utenteId?: number | null) {
+  const testo = (contenuto ?? "").trim();
+  if (!testo) return;
+  db()
+    .prepare("INSERT INTO messaggi (tenant_id, utente_id, ruolo, contenuto, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(T(), utenteId ?? null, ruolo, testo, nowISO());
+}
+
+export function messaggiRecenti(limite = 40): MessaggioSalvato[] {
+  const righe = db()
+    .prepare("SELECT id, ruolo, contenuto, created_at FROM messaggi WHERE tenant_id = ? ORDER BY id DESC LIMIT ?")
+    .all(T(), limite) as MessaggioSalvato[];
+  return righe.reverse(); // dal più vecchio al più recente
+}
+
+export function cercaNeiMessaggi(testo: string, limite = 8): MessaggioSalvato[] {
+  return db()
+    .prepare(
+      "SELECT id, ruolo, contenuto, created_at FROM messaggi WHERE tenant_id = ? AND contenuto LIKE ? ORDER BY id DESC LIMIT ?"
+    )
+    .all(T(), `%${testo}%`, limite) as MessaggioSalvato[];
+}
+
+// ── Guardia consolidazione giornaliera ────────────────────────────────────────
+
+export function ultimaConsolidazione(): string | null {
+  const r = db().prepare("SELECT ultima_consolidazione FROM profili WHERE tenant_id = ?").get(T()) as
+    | { ultima_consolidazione: string | null }
+    | undefined;
+  return r?.ultima_consolidazione ?? null;
+}
+
+export function segnaConsolidazione(data: string) {
+  db().prepare("UPDATE profili SET ultima_consolidazione = ? WHERE tenant_id = ?").run(data, T());
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MODALITÀ AZIENDA: organigramma, compiti, consegne, briefing per ruolo, triage
+// ════════════════════════════════════════════════════════════════════════════
+
+export type MembroOrganico = {
+  id: number;
+  tenant_id: number;
+  nome: string;
+  ruolo: string | null;
+  reparto: string | null;
+  responsabilita: string | null;
+  riporta_a: string | null;
+  contatti: string | null;
+  note: string | null;
+  utente_id: number | null;
+  attivo: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Compito = {
+  id: number;
+  tenant_id: number;
+  titolo: string;
+  descrizione: string | null;
+  assegnatario: string | null;
+  assegnato_da: string | null;
+  reparto: string | null;
+  cliente_id: number | null;
+  riferimento: string | null;
+  stato: string; // aperto | in_corso | completato | annullato
+  scadenza: string | null;
+  frequenza_giorni: number | null;
+  ultimo_aggiornamento: string | null;
+  notificato: number;
+  created_at: string;
+  updated_at: string;
+  in_ritardo?: boolean; // derivato
+};
+
+export type Consegna = {
+  id: number;
+  tenant_id: number;
+  reparto: string | null;
+  da_nome: string | null;
+  completato: string | null;
+  in_sospeso: string | null;
+  problemi: string | null;
+  suggerimenti: string | null;
+  created_at: string;
+};
+
+// ── Organigramma ──────────────────────────────────────────────────────────────
+
+export function listOrganico(): MembroOrganico[] {
+  return db()
+    .prepare("SELECT * FROM organico WHERE tenant_id = ? AND attivo = 1 ORDER BY reparto, nome COLLATE NOCASE")
+    .all(T()) as MembroOrganico[];
+}
+
+export function trovaMembro(nome: string): MembroOrganico | undefined {
+  const n = nome.trim();
+  return db()
+    .prepare("SELECT * FROM organico WHERE tenant_id = ? AND attivo = 1 AND nome LIKE ? ORDER BY length(nome) LIMIT 1")
+    .get(T(), `%${n}%`) as MembroOrganico | undefined;
+}
+
+const CAMPI_ORGANICO = ["nome", "ruolo", "reparto", "responsabilita", "riporta_a", "contatti", "note", "utente_id"] as const;
+
+// Crea o aggiorna un membro: se esiste già qualcuno con lo stesso nome lo aggiorna
+// (così "Marco fa il responsabile produzione" arricchisce il profilo esistente).
+export function aggiornaOrganico(m: Record<string, unknown> & { nome: string }): MembroOrganico {
+  const now = nowISO();
+  const esistente = m.id
+    ? (db().prepare("SELECT * FROM organico WHERE id = ? AND tenant_id = ?").get(Number(m.id), T()) as MembroOrganico | undefined)
+    : trovaMembro(String(m.nome));
+  if (esistente) {
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    for (const k of CAMPI_ORGANICO) {
+      if (k in m && m[k] !== undefined && m[k] !== null) {
+        updates.push(`${k} = ?`);
+        values.push(m[k]);
+      }
+    }
+    updates.push("updated_at = ?");
+    values.push(now, esistente.id, T());
+    db().prepare(`UPDATE organico SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
+    return db().prepare("SELECT * FROM organico WHERE id = ?").get(esistente.id) as MembroOrganico;
+  }
+  const r = db()
+    .prepare(
+      `INSERT INTO organico (tenant_id, nome, ruolo, reparto, responsabilita, riporta_a, contatti, note, utente_id, attivo, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    )
+    .run(
+      T(),
+      String(m.nome),
+      (m.ruolo as string) ?? null,
+      (m.reparto as string) ?? null,
+      (m.responsabilita as string) ?? null,
+      (m.riporta_a as string) ?? null,
+      (m.contatti as string) ?? null,
+      (m.note as string) ?? null,
+      (m.utente_id as number) ?? null,
+      now,
+      now
+    );
+  return db().prepare("SELECT * FROM organico WHERE id = ?").get(Number(r.lastInsertRowid)) as MembroOrganico;
+}
+
+// ── Compiti (attività assegnate) ──────────────────────────────────────────────
+
+function arricchisciCompito(c: Compito): Compito {
+  const oggiData = new Date().toISOString().slice(0, 10);
+  c.in_ritardo = c.stato !== "completato" && c.stato !== "annullato" && !!c.scadenza && c.scadenza.slice(0, 10) < oggiData;
+  return c;
+}
+
+export function creaCompito(c: {
+  titolo: string;
+  descrizione?: string | null;
+  assegnatario?: string | null;
+  assegnato_da?: string | null;
+  reparto?: string | null;
+  cliente_id?: number | null;
+  riferimento?: string | null;
+  scadenza?: string | null;
+  frequenza_giorni?: number | null;
+}): Compito {
+  const now = nowISO();
+  const r = db()
+    .prepare(
+      `INSERT INTO compiti (tenant_id, titolo, descrizione, assegnatario, assegnato_da, reparto, cliente_id, riferimento, stato, scadenza, frequenza_giorni, ultimo_aggiornamento, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aperto', ?, ?, ?, ?, ?)`
+    )
+    .run(
+      T(),
+      c.titolo,
+      c.descrizione ?? null,
+      c.assegnatario ?? null,
+      c.assegnato_da ?? null,
+      c.reparto ?? null,
+      c.cliente_id ?? null,
+      c.riferimento ?? null,
+      c.scadenza ?? null,
+      c.frequenza_giorni ?? null,
+      now,
+      now,
+      now
+    );
+  return arricchisciCompito(db().prepare("SELECT * FROM compiti WHERE id = ?").get(Number(r.lastInsertRowid)) as Compito);
+}
+
+export function aggiornaCompito(
+  id: number,
+  patch: { stato?: string; descrizione?: string; scadenza?: string; assegnatario?: string; avanzamento?: string }
+): Compito | undefined {
+  const t = T();
+  const c = db().prepare("SELECT * FROM compiti WHERE id = ? AND tenant_id = ?").get(id, t) as Compito | undefined;
+  if (!c) return undefined;
+  const now = nowISO();
+  const descr = patch.avanzamento
+    ? `${c.descrizione ? c.descrizione + "\n" : ""}[${now.slice(0, 10)}] ${patch.avanzamento}`
+    : patch.descrizione ?? c.descrizione;
+  db()
+    .prepare(
+      `UPDATE compiti SET stato = COALESCE(?, stato), descrizione = ?, scadenza = COALESCE(?, scadenza),
+       assegnatario = COALESCE(?, assegnatario), ultimo_aggiornamento = ?, notificato = 0, updated_at = ? WHERE id = ? AND tenant_id = ?`
+    )
+    .run(patch.stato ?? null, descr, patch.scadenza ?? null, patch.assegnatario ?? null, now, now, id, t);
+  return arricchisciCompito(db().prepare("SELECT * FROM compiti WHERE id = ?").get(id) as Compito);
+}
+
+export function listCompiti(opts: { assegnatario?: string; reparto?: string; stato?: string; soloAttivi?: boolean } = {}): Compito[] {
+  const cond: string[] = ["tenant_id = ?"];
+  const args: unknown[] = [T()];
+  if (opts.assegnatario) {
+    cond.push("assegnatario LIKE ?");
+    args.push(`%${opts.assegnatario}%`);
+  }
+  if (opts.reparto) {
+    cond.push("reparto LIKE ?");
+    args.push(`%${opts.reparto}%`);
+  }
+  if (opts.stato) {
+    cond.push("stato = ?");
+    args.push(opts.stato);
+  } else if (opts.soloAttivi) {
+    cond.push("stato NOT IN ('completato','annullato')");
+  }
+  return (
+    db()
+      .prepare(`SELECT * FROM compiti WHERE ${cond.join(" AND ")} ORDER BY (scadenza IS NULL), scadenza, created_at DESC`)
+      .all(...args) as Compito[]
+  ).map(arricchisciCompito);
+}
+
+// Compiti che richiedono attenzione: in ritardo, oppure senza aggiornamento da
+// più giorni della cadenza richiesta (frequenza_giorni).
+export function compitiDaSeguire(): Compito[] {
+  return listCompiti({ soloAttivi: true }).filter((c) => {
+    if (c.in_ritardo) return true;
+    if (c.frequenza_giorni && c.ultimo_aggiornamento) {
+      const giorni = (Date.now() - new Date(c.ultimo_aggiornamento).getTime()) / 86400000;
+      return giorni >= c.frequenza_giorni;
+    }
+    return false;
+  });
+}
+
+// Compiti da NOTIFICARE (push): in ritardo e non ancora notificati. Il flag si
+// azzera a ogni aggiornamento del compito → si rinotifica se torna in ritardo.
+export function compitiDaNotificare(): Compito[] {
+  return compitiDaSeguire().filter((c) => c.in_ritardo && c.notificato === 0);
+}
+
+export function segnaCompitiNotificati(ids: number[]) {
+  if (!ids.length) return;
+  const stmt = db().prepare("UPDATE compiti SET notificato = 1 WHERE id = ? AND tenant_id = ?");
+  const t = T();
+  for (const id of ids) stmt.run(id, t);
+}
+
+// ── Consegne (passaggio di turno) ─────────────────────────────────────────────
+
+export function passaConsegne(c: {
+  reparto?: string | null;
+  da_nome?: string | null;
+  completato?: string | null;
+  in_sospeso?: string | null;
+  problemi?: string | null;
+  suggerimenti?: string | null;
+}): Consegna {
+  const r = db()
+    .prepare(
+      `INSERT INTO consegne (tenant_id, reparto, da_nome, completato, in_sospeso, problemi, suggerimenti, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(T(), c.reparto ?? null, c.da_nome ?? null, c.completato ?? null, c.in_sospeso ?? null, c.problemi ?? null, c.suggerimenti ?? null, nowISO());
+  return db().prepare("SELECT * FROM consegne WHERE id = ?").get(Number(r.lastInsertRowid)) as Consegna;
+}
+
+// Ultima consegna (eventualmente filtrata per reparto) → letta dal briefing.
+export function ultimaConsegna(reparto?: string | null): Consegna | undefined {
+  if (reparto) {
+    const r = db()
+      .prepare("SELECT * FROM consegne WHERE tenant_id = ? AND reparto = ? ORDER BY created_at DESC LIMIT 1")
+      .get(T(), reparto) as Consegna | undefined;
+    if (r) return r;
+  }
+  return db().prepare("SELECT * FROM consegne WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1").get(T()) as
+    | Consegna
+    | undefined;
+}
+
+// ── Briefing per ruolo + triage delle priorità ────────────────────────────────
+
+// Classifica il ruolo testuale in una delle quattro "lenti" del briefing.
+function classeRuolo(ruolo?: string | null): "titolare" | "responsabile" | "amministrativo" | "operatore" {
+  const r = (ruolo ?? "").toLowerCase();
+  if (/titolar|amministrator delegat|ceo|direttore|propriet|fondator|owner/.test(r)) return "titolare";
+  if (/responsabil|capo|manager|coordinator|preposto|caporeparto/.test(r)) return "responsabile";
+  if (/ammininistrat|segret|contabil|ufficio|backoffice|hr|risorse uman/.test(r)) return "amministrativo";
+  return "operatore";
+}
+
+// Briefing intelligente SCOPED sul ruolo/reparto di chi apre ORION in azienda.
+export function briefingAzienda(ruolo?: string | null, reparto?: string | null) {
+  const oggi = new Date().toISOString().slice(0, 10);
+  const classe = classeRuolo(ruolo);
+  const appuntamenti = listAppuntamenti(oggi, oggi);
+  const daSeguire = compitiDaSeguire();
+  const consegna = ultimaConsegna(reparto);
+
+  let compitiRilevanti: Compito[];
+  if (classe === "operatore" && reparto) compitiRilevanti = listCompiti({ reparto, soloAttivi: true });
+  else if (classe === "responsabile" && reparto) compitiRilevanti = listCompiti({ reparto, soloAttivi: true });
+  else compitiRilevanti = listCompiti({ soloAttivi: true });
+
+  return {
+    classe,
+    ruolo: ruolo ?? null,
+    reparto: reparto ?? null,
+    data: oggi,
+    appuntamenti,
+    compiti: compitiRilevanti,
+    compitiDaSeguire: daSeguire,
+    consegna: consegna ?? null,
+    procedure: recallMemoria({ categorie: ["procedura"], limite: 6 }),
+    triage: triagePriorita(),
+  };
+}
+
+// Triage: aggrega i pendenti in fasce di urgenza (urgente|importante|normale).
+export function triagePriorita() {
+  const t = T();
+  const oggi = new Date().toISOString().slice(0, 10);
+  const tra3 = new Date();
+  tra3.setDate(tra3.getDate() + 3);
+  const a3 = tra3.toISOString().slice(0, 10);
+
+  const compitiRitardo = compitiDaSeguire().length;
+  const scadenzeVicine = (
+    db()
+      .prepare("SELECT COUNT(*) n FROM compiti WHERE tenant_id = ? AND stato NOT IN ('completato','annullato') AND scadenza IS NOT NULL AND substr(scadenza,1,10) BETWEEN ? AND ?")
+      .get(t, oggi, a3) as { n: number }
+  ).n;
+  const msgDaRispondere = (
+    db()
+      .prepare("SELECT COUNT(*) n FROM comunicazioni WHERE tenant_id = ? AND direzione = 'in' AND substr(created_at,1,10) = ?")
+      .get(t, oggi) as { n: number }
+  ).n;
+  const pagamentiSospesi = (
+    db().prepare("SELECT COUNT(*) n FROM pagamenti WHERE tenant_id = ? AND stato = 'da_incassare'").get(t) as { n: number }
+  ).n;
+
+  const urgente = compitiRitardo;
+  const importante = scadenzeVicine + pagamentiSospesi;
+  const normale = msgDaRispondere;
+  return {
+    urgente,
+    importante,
+    normale,
+    totale: urgente + importante + normale,
+    dettaglio: { compitiInRitardo: compitiRitardo, scadenzeVicine, messaggiDaRispondere: msgDaRispondere, pagamentiSospesi },
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ECOSISTEMA COGNITIVO: registro dei sistemi esterni + modello unificato
+// ════════════════════════════════════════════════════════════════════════════
+
+export type Connessione = {
+  id: number;
+  tenant_id: number;
+  tipo: string;
+  nome: string;
+  descrizione: string | null;
+  regole: string | null;
+  modalita: string; // 'descritto' | 'ingest'
+  token: string | null;
+  autorizzato: number;
+  attivo: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type EntitaEsterna = {
+  id: number;
+  tenant_id: number;
+  connessione_id: number | null;
+  tipo: string;
+  chiave_esterna: string | null;
+  titolo: string | null;
+  dati: string | null;
+  cliente_id: number | null;
+  organico_id: number | null;
+  riferimento: string | null;
+  aggiornato_at: string | null;
+  created_at: string;
+  sistema_nome?: string; // join, comodità per le viste
+};
+
+function generaTokenIngest(): string {
+  const alfabeto = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let t = "";
+  for (let i = 0; i < 32; i++) t += alfabeto[Math.floor(Math.random() * alfabeto.length)];
+  return t;
+}
+
+export function listConnessioni(): Connessione[] {
+  return db()
+    .prepare("SELECT * FROM connessioni WHERE tenant_id = ? AND attivo = 1 ORDER BY tipo, nome COLLATE NOCASE")
+    .all(T()) as Connessione[];
+}
+
+export function getConnessione(id: number): Connessione | undefined {
+  return db().prepare("SELECT * FROM connessioni WHERE id = ? AND tenant_id = ?").get(id, T()) as Connessione | undefined;
+}
+
+export function trovaConnessionePerToken(token: string): Connessione | undefined {
+  return db().prepare("SELECT * FROM connessioni WHERE token = ? AND attivo = 1").get(token) as Connessione | undefined;
+}
+
+const CAMPI_CONNESSIONE = ["tipo", "nome", "descrizione", "regole", "modalita", "autorizzato"] as const;
+
+// Registra (o aggiorna, se stesso nome) un sistema esterno. Se modalita='ingest'
+// e non c'è ancora un token, ne genera uno (per il webhook).
+export function registraConnessione(c: Record<string, unknown> & { nome: string }): Connessione {
+  const now = nowISO();
+  const esistente = c.id
+    ? getConnessione(Number(c.id))
+    : (db().prepare("SELECT * FROM connessioni WHERE tenant_id = ? AND attivo = 1 AND nome LIKE ?").get(T(), String(c.nome)) as Connessione | undefined);
+  let id: number;
+  if (esistente) {
+    const updates: string[] = [];
+    const values: unknown[] = [];
+    for (const k of CAMPI_CONNESSIONE) {
+      if (k in c && c[k] !== undefined && c[k] !== null) {
+        updates.push(`${k} = ?`);
+        values.push(c[k]);
+      }
+    }
+    updates.push("updated_at = ?");
+    values.push(now, esistente.id, T());
+    db().prepare(`UPDATE connessioni SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
+    id = esistente.id;
+  } else {
+    const r = db()
+      .prepare(
+        `INSERT INTO connessioni (tenant_id, tipo, nome, descrizione, regole, modalita, autorizzato, attivo, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      )
+      .run(T(), (c.tipo as string) ?? "altro", String(c.nome), (c.descrizione as string) ?? null, (c.regole as string) ?? null, (c.modalita as string) ?? "descritto", c.autorizzato === false ? 0 : 1, now, now);
+    id = Number(r.lastInsertRowid);
+  }
+  // Garantisci un token se serve l'ingest.
+  const conn = getConnessione(id)!;
+  if (conn.modalita === "ingest" && !conn.token) {
+    db().prepare("UPDATE connessioni SET token = ?, updated_at = ? WHERE id = ?").run(generaTokenIngest(), now, id);
+  }
+  return getConnessione(id)!;
+}
+
+// ── Modello unificato: entità esterne ─────────────────────────────────────────
+
+export function listEntitaEsterne(limite = 30): EntitaEsterna[] {
+  return db()
+    .prepare(
+      `SELECT e.*, c.nome AS sistema_nome FROM entita_esterne e
+       LEFT JOIN connessioni c ON c.id = e.connessione_id
+       WHERE e.tenant_id = ? ORDER BY COALESCE(e.aggiornato_at, e.created_at) DESC LIMIT ?`
+    )
+    .all(T(), limite) as EntitaEsterna[];
+}
+
+export function entitaPerCliente(clienteId: number): EntitaEsterna[] {
+  return db()
+    .prepare(
+      `SELECT e.*, c.nome AS sistema_nome FROM entita_esterne e
+       LEFT JOIN connessioni c ON c.id = e.connessione_id
+       WHERE e.tenant_id = ? AND e.cliente_id = ? ORDER BY COALESCE(e.aggiornato_at, e.created_at) DESC`
+    )
+    .all(T(), clienteId) as EntitaEsterna[];
+}
+
+// Inserisce o aggiorna (dedup per connessione + chiave_esterna) un record esterno,
+// collegandolo al cliente (per nome) e a una catena (riferimento) quando possibile.
+export function upsertEntitaEsterna(e: {
+  connessione_id: number;
+  tipo?: string;
+  chiave_esterna?: string | null;
+  titolo?: string | null;
+  dati?: unknown;
+  cliente_nome?: string | null;
+  cliente_id?: number | null;
+  riferimento?: string | null;
+}): EntitaEsterna {
+  const now = nowISO();
+  const datiStr = e.dati == null ? null : typeof e.dati === "string" ? e.dati : JSON.stringify(e.dati);
+  // Collega al cliente: id esplicito, oppure match per nome (1 solo risultato).
+  let cliente_id = e.cliente_id ?? null;
+  if (!cliente_id && e.cliente_nome) {
+    const found = cercaCliente(String(e.cliente_nome));
+    if (found.length === 1) cliente_id = found[0].id;
+  }
+  const esistente =
+    e.chiave_esterna != null
+      ? (db()
+          .prepare("SELECT * FROM entita_esterne WHERE tenant_id = ? AND connessione_id = ? AND chiave_esterna = ?")
+          .get(T(), e.connessione_id, e.chiave_esterna) as EntitaEsterna | undefined)
+      : undefined;
+  if (esistente) {
+    db()
+      .prepare(
+        `UPDATE entita_esterne SET tipo = COALESCE(?, tipo), titolo = COALESCE(?, titolo), dati = COALESCE(?, dati),
+         cliente_id = COALESCE(?, cliente_id), riferimento = COALESCE(?, riferimento), aggiornato_at = ? WHERE id = ?`
+      )
+      .run(e.tipo ?? null, e.titolo ?? null, datiStr, cliente_id, e.riferimento ?? null, now, esistente.id);
+    return db().prepare("SELECT * FROM entita_esterne WHERE id = ?").get(esistente.id) as EntitaEsterna;
+  }
+  const r = db()
+    .prepare(
+      `INSERT INTO entita_esterne (tenant_id, connessione_id, tipo, chiave_esterna, titolo, dati, cliente_id, riferimento, aggiornato_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(T(), e.connessione_id, e.tipo ?? "altro", e.chiave_esterna ?? null, e.titolo ?? null, datiStr, cliente_id, e.riferimento ?? null, now, now);
+  return db().prepare("SELECT * FROM entita_esterne WHERE id = ?").get(Number(r.lastInsertRowid)) as EntitaEsterna;
 }
 
 // ── Clienti ─────────────────────────────────────────────────────────────────
@@ -266,7 +1127,9 @@ export function schedaCliente(id: number) {
   const totaleIncassato = pagamenti
     .filter((p) => p.stato === "incassato")
     .reduce((s, p) => s + p.importo, 0);
-  return { cliente, appuntamenti, pagamenti, comunicazioni, note, totaleIncassato };
+  // Modello unificato: ciò che arriva dai sistemi esterni collegati a questo cliente.
+  const entitaEsterne = entitaPerCliente(id);
+  return { cliente, appuntamenti, pagamenti, comunicazioni, note, totaleIncassato, entitaEsterne };
 }
 
 // ── Agenda ────────────────────────────────────────────────────────────────
@@ -659,7 +1522,7 @@ export function salvaWhatsappAccount(a: {
     )
     .run(
       t, a.waba_id, a.phone_number_id, a.display_phone_number ?? null, a.verified_name ?? null,
-      a.token, a.stato ?? "collegato", now, now
+      cifra(a.token), a.stato ?? "collegato", now, now
     );
   return getWhatsappAccount()!;
 }
@@ -900,6 +1763,42 @@ export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
       titolo: `${buchi} spazio${buchi === 1 ? "" : " spazi"} liber${buchi === 1 ? "o" : "i"} oggi`,
       dettaglio: `In lista d'attesa: ${attesa.map((a) => a.nome).join(", ")}`,
       azione: "Riempire i buchi chiamando chi è in lista d'attesa.",
+    });
+  }
+
+  // ── ANTICIPAZIONE: guarda a DOMANI e incrocia lo storico di ogni cliente.
+  // Per ogni appuntamento di domani, se la memoria viva ha intuizioni su quel
+  // cliente (es. "porta sempre documenti", procedure/eccezioni), le propone come
+  // preparazione → prevenire invece di reagire.
+  const domani = new Date();
+  domani.setDate(domani.getDate() + 1);
+  const isoDomani = domani.toISOString().slice(0, 10);
+  const appDomani = db()
+    .prepare(
+      `SELECT a.id, a.titolo, a.cliente_id, c.nome AS cliente_nome FROM appuntamenti a
+       LEFT JOIN clienti c ON c.id = a.cliente_id
+       WHERE a.tenant_id = ? AND substr(a.inizio,1,10) = ? AND a.stato != 'cancellato' ORDER BY a.inizio`
+    )
+    .all(t, isoDomani) as { id: number; titolo: string; cliente_id: number | null; cliente_nome: string | null }[];
+  const preparazioni: string[] = [];
+  for (const a of appDomani) {
+    if (a.cliente_id == null) continue;
+    const intu = recallMemoria({
+      cliente_id: a.cliente_id,
+      categorie: ["procedura", "eccezione", "preferenza", "contesto", "abitudine"],
+      limite: 2,
+    }).filter((m) => m.cliente_id === a.cliente_id); // solo intuizioni SPECIFICHE del cliente
+    if (intu.length) {
+      const nome = a.cliente_nome ?? a.titolo;
+      preparazioni.push(`${nome}: ${intu.map((m) => m.contenuto).join("; ")}`);
+    }
+  }
+  if (preparazioni.length) {
+    segnalazioni.push({
+      categoria: "preparazione_domani",
+      titolo: `Preparazione per domani (${preparazioni.length})`,
+      dettaglio: preparazioni.slice(0, 5).join(" · "),
+      azione: "Preparare in anticipo ciò che di solito serve a questi appuntamenti.",
     });
   }
 

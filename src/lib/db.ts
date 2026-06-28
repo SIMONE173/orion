@@ -202,6 +202,203 @@ function migrate(d: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_abb_customer ON abbonamenti(stripe_customer_id);
+
+    -- Azienda/team (onboarding Caso B). Un'azienda è un AMBIENTE CONDIVISO: il suo
+    -- tenant_id (PK) coincide con l'id dell'utente fondatore, che diventa il tenant
+    -- dei dati condivisi. I dipendenti vengono "agganciati" a questo stesso tenant
+    -- (utenti.tenant_id) inserendo il codice_aziendale → vedono clienti/agenda/memoria
+    -- in comune. memoria_operativa è un JSON libero (organigramma, processi, regole…).
+    CREATE TABLE IF NOT EXISTS aziende (
+      tenant_id INTEGER PRIMARY KEY,
+      nome TEXT,
+      settore TEXT,
+      dimensioni TEXT,
+      sedi TEXT,
+      codice_aziendale TEXT UNIQUE,
+      memoria_operativa TEXT,
+      piva TEXT,
+      codice_fiscale TEXT,
+      indirizzo TEXT,
+      regime_fiscale TEXT,
+      pec TEXT,
+      sdi TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_aziende_codice ON aziende(codice_aziendale);
+
+    -- ── MEMORIA DI CONTESTO VIVENTE ─────────────────────────────────────────
+    -- Livello 1: memoria VIVA. Intuizioni che evolvono nel tempo, con il PERCHÉ,
+    -- la confidenza e il rinforzo (più volte osservata → più certa). soggetto è
+    -- libero (es. "paziente Rossi") o NULL=generale. stato='superato' = evoluta.
+    CREATE TABLE IF NOT EXISTS memoria (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      categoria TEXT NOT NULL DEFAULT 'contesto',
+      soggetto TEXT,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      contenuto TEXT NOT NULL,
+      motivo TEXT,
+      confidenza TEXT NOT NULL DEFAULT 'medio',
+      evidenze INTEGER NOT NULL DEFAULT 1,
+      stato TEXT NOT NULL DEFAULT 'attivo',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      ultima_conferma TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_memoria_tenant ON memoria(tenant_id, stato);
+    CREATE INDEX IF NOT EXISTS idx_memoria_cliente ON memoria(tenant_id, cliente_id);
+
+    -- Livello 2a: registro EVENTI (azioni/cambiamenti significativi) → "cosa è
+    -- successo ieri / cosa è cambiato". Puro DB, niente costo AI.
+    CREATE TABLE IF NOT EXISTS eventi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL,
+      soggetto TEXT,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      descrizione TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_eventi_tenant ON eventi(tenant_id, created_at);
+
+    -- Livello 2b: DIARIO (sintesi di sessione/giornata) → "dove eravamo rimasti".
+    CREATE TABLE IF NOT EXISTS diario (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      riassunto TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_diario_tenant ON diario(tenant_id, created_at);
+
+    -- Livello 2c: conversazione INTEGRALE persistita (scelta utente) → continuità
+    -- al reload + richiamo esatto di dettagli vecchi. Il contesto live resta
+    -- comunque LIMITATO (finestra recente + sintesi).
+    CREATE TABLE IF NOT EXISTS messaggi (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      utente_id INTEGER,
+      ruolo TEXT NOT NULL,
+      contenuto TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_messaggi_tenant ON messaggi(tenant_id, id);
+
+    -- ── MODALITÀ AZIENDA ────────────────────────────────────────────────────
+    -- Organigramma vivo: TUTTE le persone dell'azienda, anche chi NON usa ORION
+    -- (es. i 12 operai di un reparto). utente_id collega opzionalmente un account.
+    CREATE TABLE IF NOT EXISTS organico (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      nome TEXT NOT NULL,
+      ruolo TEXT,
+      reparto TEXT,
+      responsabilita TEXT,
+      riporta_a TEXT,
+      contatti TEXT,
+      note TEXT,
+      utente_id INTEGER,
+      attivo INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_organico_tenant ON organico(tenant_id, attivo);
+
+    -- Attività assegnate, con ciclo di vita e cadenza di aggiornamento.
+    CREATE TABLE IF NOT EXISTS compiti (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      titolo TEXT NOT NULL,
+      descrizione TEXT,
+      assegnatario TEXT,
+      assegnato_da TEXT,
+      reparto TEXT,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      riferimento TEXT,
+      stato TEXT NOT NULL DEFAULT 'aperto',
+      scadenza TEXT,
+      frequenza_giorni INTEGER,
+      ultimo_aggiornamento TEXT,
+      notificato INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_compiti_tenant ON compiti(tenant_id, stato);
+
+    -- Passaggio di consegne tra turni/persone.
+    CREATE TABLE IF NOT EXISTS consegne (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      reparto TEXT,
+      da_nome TEXT,
+      completato TEXT,
+      in_sospeso TEXT,
+      problemi TEXT,
+      suggerimenti TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_consegne_tenant ON consegne(tenant_id, created_at);
+
+    -- Account email del tenant (IMAP/SMTP, app-password). Gated: senza riga, le
+    -- funzioni email degradano con garbo. La password è in chiaro (come il token
+    -- WhatsApp) → in futuro cifratura a riposo.
+    CREATE TABLE IF NOT EXISTS email_accounts (
+      tenant_id INTEGER PRIMARY KEY,
+      email TEXT,
+      password TEXT,
+      imap_host TEXT,
+      imap_port INTEGER,
+      smtp_host TEXT,
+      smtp_port INTEGER,
+      from_name TEXT,
+      stato TEXT NOT NULL DEFAULT 'collegato',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- ── ECOSISTEMA COGNITIVO (sistemi esterni) ──────────────────────────────
+    -- Registro dei software già usati dal professionista/azienda (gestionali,
+    -- CRM, ERP…). Anche solo "descritto" rende ORION competente sull'ambiente.
+    -- token: segreto per il webhook di ingest (se modalita='ingest'). GATED:
+    -- senza righe, ORION funziona esattamente come oggi.
+    CREATE TABLE IF NOT EXISTS connessioni (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      tipo TEXT NOT NULL DEFAULT 'altro',
+      nome TEXT NOT NULL,
+      descrizione TEXT,
+      regole TEXT,
+      modalita TEXT NOT NULL DEFAULT 'descritto',
+      token TEXT UNIQUE,
+      autorizzato INTEGER NOT NULL DEFAULT 1,
+      attivo INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_connessioni_tenant ON connessioni(tenant_id, attivo);
+    CREATE INDEX IF NOT EXISTS idx_connessioni_token ON connessioni(token);
+
+    -- Modello cognitivo UNIFICATO: i record dei sistemi esterni, COLLEGATI alle
+    -- entità native (clienti, organico) e fra loro (riferimento → catena).
+    CREATE TABLE IF NOT EXISTS entita_esterne (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      connessione_id INTEGER REFERENCES connessioni(id) ON DELETE CASCADE,
+      tipo TEXT NOT NULL DEFAULT 'altro',
+      chiave_esterna TEXT,
+      titolo TEXT,
+      dati TEXT,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      organico_id INTEGER REFERENCES organico(id) ON DELETE SET NULL,
+      riferimento TEXT,
+      aggiornato_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_entita_tenant ON entita_esterne(tenant_id, connessione_id);
+    CREATE INDEX IF NOT EXISTS idx_entita_cliente ON entita_esterne(tenant_id, cliente_id);
+    CREATE INDEX IF NOT EXISTS idx_entita_chiave ON entita_esterne(connessione_id, chiave_esterna);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
@@ -221,6 +418,25 @@ function migrate(d: Database.Database) {
     "ALTER TABLE documenti ADD COLUMN tenant_id INTEGER",
     "ALTER TABLE lista_attesa ADD COLUMN tenant_id INTEGER",
     "ALTER TABLE push_subscriptions ADD COLUMN tenant_id INTEGER",
+    // Onboarding dinamico — livello UTENTE: tenant dati su cui opera (per i
+    // dipendenti = tenant aziendale), azienda di appartenenza, ruolo/reparto,
+    // preferenze personali (JSON) e stato onboarding PER-UTENTE.
+    "ALTER TABLE utenti ADD COLUMN tenant_id INTEGER",
+    "ALTER TABLE utenti ADD COLUMN azienda_id INTEGER",
+    "ALTER TABLE utenti ADD COLUMN ruolo TEXT",
+    "ALTER TABLE utenti ADD COLUMN reparto TEXT",
+    "ALTER TABLE utenti ADD COLUMN preferenze TEXT",
+    "ALTER TABLE utenti ADD COLUMN onboarding_completo INTEGER",
+    // Onboarding dinamico — livello PROFILO (autonomo/personale): tipo d'uso,
+    // tipo di lavoro e memoria operativa flessibile (JSON).
+    "ALTER TABLE profili ADD COLUMN tipo_uso TEXT",
+    "ALTER TABLE profili ADD COLUMN tipo_lavoro TEXT",
+    "ALTER TABLE profili ADD COLUMN memoria_operativa TEXT",
+    // Memoria di contesto vivente: data dell'ultima consolidazione giornaliera
+    // (guardia idempotente: la distillazione AI gira una sola volta al giorno).
+    "ALTER TABLE profili ADD COLUMN ultima_consolidazione TEXT",
+    // Modalità azienda: collega gli eventi in CATENE (es. "ordine 245").
+    "ALTER TABLE eventi ADD COLUMN riferimento TEXT",
   ];
   for (const sql of alters) {
     try {
@@ -229,6 +445,19 @@ function migrate(d: Database.Database) {
       /* colonna già presente */
     }
   }
+
+  // Backfill idempotente per i DB esistenti (single-user):
+  //  - ogni utente opera sul proprio tenant (tenant_id = id) finché non si
+  //    aggancia a un'azienda;
+  //  - lo stato onboarding per-utente eredita quello del profilo del tenant,
+  //    così gli account già configurati NON rifanno la Chiamata 0.
+  // Tocca solo le righe ancora NULL → non sovrascrive nulla ai giri successivi.
+  d.exec(`
+    UPDATE utenti SET tenant_id = id WHERE tenant_id IS NULL;
+    UPDATE utenti SET onboarding_completo = COALESCE(
+      (SELECT p.onboarding_completo FROM profili p WHERE p.tenant_id = utenti.id), 0
+    ) WHERE onboarding_completo IS NULL;
+  `);
 
   // Indici sulle colonne tenant_id: creati ORA, dopo che gli ALTER le hanno
   // garantite anche sui DB migrati dal vecchio schema single-tenant.

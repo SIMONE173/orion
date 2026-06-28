@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   chiudiApp: (nome) => ipcRenderer.invoke("os:chiudiApp", nome),
   crea: (dati) => ipcRenderer.invoke("os:crea", dati),
   rinomina: (dati) => ipcRenderer.invoke("os:rinomina", dati),
+  // Creative Workspace: lavorare DENTRO i software (terminale + file).
+  esegui: (dati) => ipcRenderer.invoke("os:esegui", dati),
+  scriviFile: (dati) => ipcRenderer.invoke("os:scriviFile", dati),
+  leggiFile: (dati) => ipcRenderer.invoke("os:leggiFile", dati),
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra: () => ipcRenderer.send("os:mostraFinestra"),
   onFinestra: (cb) => ipcRenderer.on("orion:finestra", (_e, stato) => cb(stato)),

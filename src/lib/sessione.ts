@@ -22,6 +22,8 @@ export async function conTenant<T>(
 ): Promise<Risultato<Awaited<T>>> {
   const utente = await utenteCorrente();
   if (!utente) return { ok: false };
-  const data = await runWithTenant(utente.id, () => fn(utente));
+  // Opera sul tenant DATI dell'utente: per un autonomo è il suo stesso id, per un
+  // dipendente è il tenant aziendale condiviso (vede clienti/agenda/memoria comuni).
+  const data = await runWithTenant(utente.tenant_id, () => fn(utente));
   return { ok: true, data, utente };
 }

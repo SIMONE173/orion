@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
+import { VisioneMode, type VisioneHandle } from "@/components/VisioneMode";
+import { SpatialStage, type Layout, MIN_W, MIN_H } from "@/components/SpatialStage";
+import { GestiMode } from "@/components/GestiMode";
 import { Notifiche } from "@/components/Notifiche";
 import { AuthScreen } from "@/components/AuthScreen";
 import { AppuntiPanel } from "@/components/AppuntiPanel";
@@ -36,6 +39,10 @@ type OrionDesktop = {
   chiudiApp?: (n: string) => Promise<EsitoOS>;
   crea?: (d: { nome: string; tipo: string; posizione?: string }) => Promise<EsitoOS>;
   rinomina?: (d: { da: string; a: string }) => Promise<EsitoOS>;
+  // Creative Workspace: lavorare DENTRO i software (terminale + file).
+  esegui?: (d: { comando: string; cwd?: string }) => Promise<{ ok: boolean; code?: number | null; stdout?: string; stderr?: string; errore?: string }>;
+  scriviFile?: (d: { percorso: string; contenuto: string }) => Promise<{ ok: boolean; percorso?: string; errore?: string }>;
+  leggiFile?: (d: { percorso: string }) => Promise<{ ok: boolean; percorso?: string; contenuto?: string; errore?: string }>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
   // Solo desktop: chiude le finestre-pannello (per tipo, o "tutto").
@@ -63,6 +70,14 @@ export default function Home() {
   const [mostraStorico, setMostraStorico] = useState(false);
   const [mostraCamera, setMostraCamera] = useState(false);
   const [cameraModo, setCameraModo] = useState<"documento" | "descrizione">("documento");
+  // Modalità visione (telecamera dal vivo). Opt-in.
+  const [visioneAttiva, setVisioneAttiva] = useState(false);
+  const visioneRef = useRef<VisioneHandle>(null);
+  // Modalità gesti (manipolazione spaziale dei pannelli con le mani). Opt-in.
+  const [gestiAttivi, setGestiAttivi] = useState(false);
+  const [layout, setLayout] = useState<Layout>({});
+  const [attivoPan, setAttivoPan] = useState<string | null>(null);
+  const zMax = useRef(20);
   // Incrementato quando l'utente dice "scatta" a voce: fa scattare la fotocamera.
   const [scattaTick, setScattaTick] = useState(0);
   const [avviso, setAvviso] = useState<string | null>(null);
@@ -88,12 +103,14 @@ export default function Home() {
   const ultimoAssistente = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
 
   const inviaAOrion = useCallback(
-    async (testo?: string, avvio = false, allegato?: string) => {
+    async (testo?: string, avvio = false, allegato?: string, quiet = false) => {
       setLoading(true);
       cancelSpeakRef.current?.();
 
       const storico: Msg[] = testo ? [...messagesRef.current, { role: "user", content: testo }] : messagesRef.current;
-      if (testo) setMessages(storico);
+      // quiet: il messaggio (es. esito di un comando) va al modello ma NON si
+      // mostra come bolla utente nella trascrizione.
+      if (testo && !quiet) setMessages(storico);
 
       try {
         const res = await fetch("/api/chat", {
@@ -174,6 +191,11 @@ export default function Home() {
     if (appuntiAperti && supported && !micAttivoRef.current) toggleMic();
   }, [appuntiAperti, supported, toggleMic]);
 
+  // Entrando in modalità visione accendo il microfono (così si può chiedere a voce).
+  useEffect(() => {
+    if (visioneAttiva && supported && !micAttivoRef.current) toggleMic();
+  }, [visioneAttiva, supported, toggleMic]);
+
   // Esegue le azioni che ORION comanda sullo schermo (apri sito, appunti, foto…).
   const eseguiAzione = useCallback((a: Azione) => {
     switch (a.tipo) {
@@ -212,7 +234,15 @@ export default function Home() {
         setCameraModo(a.modo);
         setMostraCamera(true);
         break;
+      case "apri_visione":
+        setVisioneAttiva(true);
+        break;
+      case "apri_gesti":
+        setGestiAttivi(true);
+        break;
       case "chiudi_vista": {
+        if (a.vista === "visione" || a.vista === "tutto") setVisioneAttiva(false);
+        if (a.vista === "gesti" || a.vista === "tutto") setGestiAttivi(false);
         const d = desktopBridge();
         if (d?.chiudiVista) {
           // Desktop: i pannelli sono finestre separate → le chiude il main process.
@@ -297,13 +327,150 @@ export default function Home() {
         });
         break;
       }
+      // ── Creative Workspace (solo Desktop) ──────────────────────────────────
+      case "scrivi_file": {
+        const d = desktopBridge();
+        if (!d?.scriviFile) {
+          speakRef.current?.("Scrivere file di progetto è una cosa che posso fare con ORION Desktop.");
+          break;
+        }
+        d.scriviFile({ percorso: a.percorso, contenuto: a.contenuto }).then((r) => {
+          if (!r.ok)
+            inviaAOrionRef.current?.(`[Sistema] Non sono riuscito a scrivere ${a.percorso}: ${r.errore}.`, false, undefined, true);
+        });
+        break;
+      }
+      case "esegui_comando": {
+        const d = desktopBridge();
+        if (!d?.esegui) {
+          speakRef.current?.("Eseguire comandi è una cosa che posso fare con ORION Desktop, l'app da scaricare.");
+          break;
+        }
+        d.esegui({ comando: a.comando, cwd: a.cwd }).then((r) => {
+          if (a.riporta === false) return;
+          // L'esito torna a ORION (silenzioso) così può proseguire/correggere.
+          const esito = r.ok
+            ? `[Sistema] Comando eseguito (exit ${r.code ?? 0}).\nOutput:\n${r.stdout || "(vuoto)"}${r.stderr ? `\nStderr:\n${r.stderr}` : ""}`
+            : `[Sistema] Comando NON riuscito: ${r.errore ?? r.stderr ?? "errore"}.${r.stdout ? `\nOutput:\n${r.stdout}` : ""}`;
+          inviaAOrionRef.current?.(esito, false, undefined, true);
+        });
+        break;
+      }
       default:
         break;
     }
   }, []);
   const eseguiAzioneRef = useRef(eseguiAzione);
   eseguiAzioneRef.current = eseguiAzione;
+  const inviaAOrionRef = useRef(inviaAOrion);
+  inviaAOrionRef.current = inviaAOrion;
   const entraStandbyRef = useRef<() => void>(() => {});
+
+  // ── Gesture Mode: gestione del layout spaziale dei pannelli ────────────────
+  // Carica il layout salvato (posizioni ricordate) al primo avvio.
+  useEffect(() => {
+    try {
+      const grezzo = localStorage.getItem("orion_layout_gesti");
+      if (grezzo) setLayout(JSON.parse(grezzo) as Layout);
+    } catch {
+      /* layout assente o corrotto */
+    }
+  }, []);
+  // Salva il layout a ogni cambiamento (persistente).
+  useEffect(() => {
+    try {
+      localStorage.setItem("orion_layout_gesti", JSON.stringify(layout));
+    } catch {
+      /* quota piena o non disponibile */
+    }
+  }, [layout]);
+
+  // Tiene il layout entro la finestra (sotto l'header, sopra il footer) + dimensioni minime.
+  const clampRett = useCallback((r: { x: number; y: number; w: number; h: number; z: number }) => {
+    const vw = typeof window !== "undefined" ? window.innerWidth : 1280;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+    const w = Math.max(MIN_W, Math.min(r.w, vw - 24));
+    const h = Math.max(MIN_H, Math.min(r.h, vh - 120));
+    const x = Math.max(8, Math.min(r.x, vw - w - 8));
+    const y = Math.max(60, Math.min(r.y, vh - h - 24));
+    return { x, y, w, h, z: r.z };
+  }, []);
+
+  const spostaPan = useCallback(
+    (tipo: string, x: number, y: number) =>
+      setLayout((l) => (l[tipo] ? { ...l, [tipo]: clampRett({ ...l[tipo], x, y }) } : l)),
+    [clampRett]
+  );
+  const ridimensionaPan = useCallback(
+    (tipo: string, w: number, h: number) =>
+      setLayout((l) => (l[tipo] ? { ...l, [tipo]: clampRett({ ...l[tipo], w, h }) } : l)),
+    [clampRett]
+  );
+  const portaAvantiPan = useCallback((tipo: string) => {
+    zMax.current += 1;
+    const z = zMax.current;
+    setLayout((l) => (l[tipo] ? { ...l, [tipo]: { ...l[tipo], z } } : l));
+    setAttivoPan(tipo);
+  }, []);
+  const chiudiPan = useCallback((tipo: string) => {
+    setViste((vs) => vs.filter((v) => v.tipo !== tipo));
+    if (tipo === "documento" || tipo === "documenti") setDocView(null);
+  }, []);
+
+  // ── Snap ai bordi/metà schermo (affiancare i pannelli con un gesto) ────────
+  const [snapHint, setSnapHint] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  // Dal punto di rilascio calcola la zona di destinazione (metà o quarto), o null.
+  const calcolaSnap = useCallback((x: number, y: number) => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const L = 8;
+    const T = 60;
+    const R = vw - 8;
+    const B = vh - 24;
+    const W = R - L;
+    const H = B - T;
+    const m = 72; // soglia dai bordi
+    const alto = y < T + H / 3;
+    const basso = y > B - H / 3;
+    if (x < L + m) {
+      if (alto) return { x: L, y: T, w: W / 2, h: H / 2 };
+      if (basso) return { x: L, y: T + H / 2, w: W / 2, h: H / 2 };
+      return { x: L, y: T, w: W / 2, h: H };
+    }
+    if (x > R - m) {
+      if (alto) return { x: L + W / 2, y: T, w: W / 2, h: H / 2 };
+      if (basso) return { x: L + W / 2, y: T + H / 2, w: W / 2, h: H / 2 };
+      return { x: L + W / 2, y: T, w: W / 2, h: H };
+    }
+    return null;
+  }, []);
+  const aggiornaSnapHint = useCallback((x: number, y: number) => setSnapHint(calcolaSnap(x, y)), [calcolaSnap]);
+  const applicaSnap = useCallback(
+    (tipo: string) => {
+      setSnapHint((hint) => {
+        if (hint) setLayout((l) => (l[tipo] ? { ...l, [tipo]: { ...l[tipo], ...hint } } : l));
+        return null;
+      });
+    },
+    []
+  );
+
+  // Assegna una posizione iniziale (a cascata) ai pannelli nuovi in modalità gesti.
+  useEffect(() => {
+    if (!gestiAttivi) return;
+    setLayout((l) => {
+      let cambiato = false;
+      const nuovo = { ...l };
+      viste.forEach((v, i) => {
+        if (!nuovo[v.tipo]) {
+          zMax.current += 1;
+          nuovo[v.tipo] = clampRett({ x: 120 + i * 44, y: 96 + i * 44, w: 440, h: 400, z: zMax.current });
+          cambiato = true;
+        }
+      });
+      return cambiato ? nuovo : l;
+    });
+  }, [viste, gestiAttivi, clampRett]);
 
   // ── Modalità appunti: dettatura, salvataggi, comandi vocali ────────────────
   const salvaAppuntiPdf = useCallback(() => {
@@ -422,6 +589,17 @@ export default function Home() {
 
   // Quando il mic è attivo in modalità appunti, la voce o detta o comanda.
   gestisciVoceRef.current = (t: string) => {
+    // In modalità visione la voce è una DOMANDA sull'inquadratura (o la chiude).
+    if (visioneAttiva) {
+      const low = t.trim().toLowerCase();
+      if (/(chiudi|ferma|spegni|esci)\b.*(vision|telecamer|videocamer|camera)|^(chiudi|ferma|basta|stop)$/.test(low)) {
+        setVisioneAttiva(false);
+        speakRef.current?.("Chiudo la visione.");
+      } else {
+        visioneRef.current?.chiedi(t);
+      }
+      return;
+    }
     // Mentre la fotocamera è aperta: "scatta/fotografa/vai/ok/pronto" → scatta la foto.
     // La voce non viene mandata a ORION finché si sta inquadrando.
     if (mostraCamera) {
@@ -468,6 +646,10 @@ export default function Home() {
         const r = await fetch("/api/state");
         const s = await r.json();
         setHasKey(Boolean(s.hasKey));
+        // Continuità: ripristina la conversazione precedente prima del saluto.
+        if (Array.isArray(s.storico) && s.storico.length) {
+          setMessages(s.storico as Msg[]);
+        }
         setAutenticato(Boolean(s.autenticato));
         nomeUtenteRef.current = s.nome || s.utente?.nome || null;
         if (s.abbonamento) setAbbonamento(s.abbonamento as StatoAbb);
@@ -624,6 +806,17 @@ export default function Home() {
         <div className="flex items-center gap-2">
           <Notifiche />
           <button
+            onClick={() => setGestiAttivi((v) => !v)}
+            className={`grid size-9 place-items-center rounded-lg border text-base ${
+              gestiAttivi
+                ? "border-cyan-400/40 bg-cyan-400/15 text-cyan-200"
+                : "border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
+            }`}
+            title={gestiAttivi ? "Disattiva controllo a gesti" : "Controllo a gesti (mani)"}
+          >
+            ✋
+          </button>
+          <button
             onClick={() => setVoiceOn(!voiceOn)}
             className="grid size-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
             title={voiceOn ? "Disattiva voce" : "Attiva voce"}
@@ -662,7 +855,7 @@ export default function Home() {
 
       {/* Stage */}
       <section className="relative min-h-0 flex-1 px-5">
-        {haPannelli ? (
+        {haPannelli && !gestiAttivi ? (
           <div className="fade-in relative h-full pb-2">
             <button
               onClick={() => setViste([])}
@@ -863,6 +1056,50 @@ export default function Home() {
           onCapture={catturaFoto}
           onClose={() => setMostraCamera(false)}
         />
+      )}
+
+      {visioneAttiva && (
+        <VisioneMode
+          ref={visioneRef}
+          parla={(t) => speakRef.current?.(t)}
+          onClose={() => setVisioneAttiva(false)}
+        />
+      )}
+
+      {gestiAttivi && (
+        <>
+          {snapHint && (
+            <div
+              className="pointer-events-none fixed z-[28] rounded-2xl border-2 border-dashed border-cyan-400/60 bg-cyan-400/10"
+              style={{ left: snapHint.x, top: snapHint.y, width: snapHint.w, height: snapHint.h }}
+            />
+          )}
+          <SpatialStage
+            viste={viste}
+            layout={layout}
+            attivo={attivoPan}
+            onSposta={spostaPan}
+            onRidimensiona={ridimensionaPan}
+            onPortaAvanti={portaAvantiPan}
+            onChiudi={chiudiPan}
+            onSnapHint={aggiornaSnapHint}
+            onSnapApplica={applicaSnap}
+          />
+          <GestiMode
+            onSposta={spostaPan}
+            onRidimensiona={ridimensionaPan}
+            onPortaAvanti={portaAvantiPan}
+            onChiudi={chiudiPan}
+            onSnapHint={aggiornaSnapHint}
+            onSnapApplica={applicaSnap}
+          />
+          <button
+            onClick={() => setGestiAttivi(false)}
+            className="fixed right-4 top-3 z-[60] flex items-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-3 py-1.5 text-xs font-medium text-cyan-100 hover:bg-cyan-400/20"
+          >
+            <IconClose className="h-3.5 w-3.5" /> Esci dai gesti
+          </button>
+        </>
       )}
 
       {appunti && (

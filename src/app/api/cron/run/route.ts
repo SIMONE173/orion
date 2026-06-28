@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { promemoriaDaNotificare, segnaPromemoriaNotificati } from "@/lib/data";
+import {
+  promemoriaDaNotificare,
+  segnaPromemoriaNotificati,
+  compitiDaNotificare,
+  segnaCompitiNotificati,
+} from "@/lib/data";
 import { inviaPushATutti } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
@@ -35,6 +40,22 @@ export async function POST(req: NextRequest) {
       const r = await inviaPushATutti({ titolo: "Promemoria ORION", corpo, url: "/" });
       if (r.inviati > 0) {
         segnaPromemoriaNotificati(dovuti.map((p) => p.id));
+        totInviati += r.inviati;
+      }
+    });
+
+    // Azienda: avvisa dei compiti in ritardo (una volta, finché non si aggiornano).
+    await runWithTenant(tenantId, async () => {
+      const ritardo = compitiDaNotificare();
+      if (!ritardo.length) return;
+      totDovuti += ritardo.length;
+      const corpo =
+        ritardo.length === 1
+          ? `In ritardo: ${ritardo[0].titolo}${ritardo[0].assegnatario ? ` (${ritardo[0].assegnatario})` : ""}`
+          : `${ritardo.length} compiti in ritardo: ${ritardo.slice(0, 3).map((c) => c.titolo).join("; ")}${ritardo.length > 3 ? "…" : ""}`;
+      const r = await inviaPushATutti({ titolo: "Compiti in ritardo", corpo, url: "/" });
+      if (r.inviati > 0) {
+        segnaCompitiNotificati(ritardo.map((c) => c.id));
         totInviati += r.inviati;
       }
     });

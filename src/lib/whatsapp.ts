@@ -1,5 +1,6 @@
 import { tenantIdOpzionale } from "./tenant";
 import { getWhatsappAccountByTenant } from "./data";
+import { decifra } from "./crypto";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Adapter WhatsApp (Meta Cloud API).
@@ -34,7 +35,8 @@ function credenziali(): { token: string; phoneId: string } | null {
   if (tid) {
     const acc = getWhatsappAccountByTenant(tid);
     if (acc?.token && acc.phone_number_id) {
-      return { token: acc.token.trim(), phoneId: acc.phone_number_id.trim() };
+      // decifra: token cifrato a riposo (o in chiaro se legacy/senza chiave).
+      return { token: (decifra(acc.token) ?? "").trim(), phoneId: acc.phone_number_id.trim() };
     }
   }
   const t = envToken();

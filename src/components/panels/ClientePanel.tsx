@@ -6,7 +6,7 @@ import { ora, dataBreve, euro, etichettaStato } from "./format";
 type Dati = Extract<Vista, { tipo: "cliente" }>["dati"];
 
 export function ClientePanel({ dati }: { dati: Dati }) {
-  const { cliente, appuntamenti, pagamenti, comunicazioni, note, totaleIncassato } = dati;
+  const { cliente, appuntamenti, pagamenti, comunicazioni, note, totaleIncassato, entitaEsterne } = dati;
 
   return (
     <div className="flex h-full flex-col">
@@ -79,6 +79,18 @@ export function ClientePanel({ dati }: { dati: Dati }) {
             ))
           )}
         </Sezione>
+
+        {entitaEsterne && entitaEsterne.length > 0 && (
+          <div className="md:col-span-2">
+            <Sezione titolo="Dai sistemi collegati">
+              {entitaEsterne.map((e) => (
+                <Riga key={e.id} sx={e.sistema_nome ?? "sistema"} dx={e.tipo}>
+                  {e.titolo ?? e.chiave_esterna ?? "—"}
+                </Riga>
+              ))}
+            </Sezione>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,10 +1,17 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, dispatch, type TurnoContext } from "./tools";
 import { buildSystem, DIRETTIVA_AVVIO } from "./system";
+import { consolidaSeNecessario } from "./memoria";
+import { salvaMessaggio } from "../data";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
+import type { Utente } from "../auth";
 
 const MODEL = "claude-opus-4-8";
 const MAX_GIRI = 8;
+// La conversazione è persistita per intero, ma al modello inviamo solo una
+// FINESTRA recente (i ricordi più vecchi vivono nella memoria viva / diario /
+// tool `ricorda`): contesto limitato = costi sotto controllo.
+const MAX_STORICO = 40;
 
 export type MessaggioStorico = { role: "user" | "assistant"; content: string };
 export type Allegato = { dataUrl: string };
@@ -13,7 +20,8 @@ export async function runConversation(
   storico: MessaggioStorico[],
   avvio = false,
   allegato?: Allegato,
-  desktop = false
+  desktop = false,
+  utente?: Utente
 ): Promise<RisultatoConversazione> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -26,9 +34,27 @@ export async function runConversation(
   }
 
   const client = new Anthropic({ apiKey });
-  const system = buildSystem(desktop);
 
-  const messages: Anthropic.MessageParam[] = storico.map((m) => ({
+  // All'avvio della giornata: consolidazione PIGRA della memoria (1 sola volta/
+  // giorno, modello economico) → aggiorna diario e intuizioni PRIMA di costruire
+  // il prompt, così il saluto sa già "dove eravamo rimasti".
+  if (avvio) {
+    try {
+      await consolidaSeNecessario();
+    } catch {
+      /* la consolidazione non deve mai bloccare l'avvio */
+    }
+  }
+
+  // Persisti il nuovo messaggio dell'utente (continuità + memoria). L'ultimo turno
+  // dello storico è l'input appena inviato; la DIRETTIVA_AVVIO di sistema non si salva.
+  if (!avvio && storico.length && storico[storico.length - 1].role === "user") {
+    salvaMessaggio("user", storico[storico.length - 1].content, utente?.id);
+  }
+
+  const system = buildSystem(desktop, utente);
+
+  const messages: Anthropic.MessageParam[] = storico.slice(-MAX_STORICO).map((m) => ({
     role: m.role,
     content: m.content,
   }));
@@ -42,7 +68,7 @@ export async function runConversation(
   }
 
   // Se c'è un'immagine (fotocamera/documento), la collego all'ultimo turno utente per la lettura (vision).
-  const ctx: TurnoContext = {};
+  const ctx: TurnoContext = { utenteId: utente?.id };
   if (allegato?.dataUrl) {
     const m = allegato.dataUrl.match(/^data:(.+?);base64,(.*)$/);
     if (m) {
@@ -145,6 +171,9 @@ export async function runConversation(
 
     return { testo, viste, errore };
   }
+
+  // Persisti la risposta di ORION (continuità tra sessioni + richiamo esatto).
+  if (testo) salvaMessaggio("assistant", testo, utente?.id);
 
   // Dedup per tipo (l'ultima vista di ogni tipo vince), mantenendo l'ordine d'apparizione.
   const perTipo = new Map<string, Vista>();

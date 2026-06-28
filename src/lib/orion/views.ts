@@ -11,6 +11,12 @@ import type {
   VoceAttesa,
   Segnalazione,
   Profilo,
+  Azienda,
+  Memoria,
+  MembroOrganico,
+  Compito,
+  Connessione,
+  EntitaEsterna,
   StatoAbbonamento,
 } from "../data";
 
@@ -45,6 +51,7 @@ export type Vista =
         comunicazioni: Comunicazione[];
         note: Nota[];
         totaleIncassato: number;
+        entitaEsterne?: EntitaEsterna[];
       };
     }
   | { tipo: "note"; dati: { note: Nota[] } }
@@ -153,7 +160,30 @@ export type Vista =
         partite: { data: string | null; titolo: string; punteggio: string | null; stato: string }[];
       };
     }
-  | { tipo: "profilo"; dati: { profilo: Profilo } };
+  | { tipo: "profilo"; dati: { profilo: Profilo; azienda?: Azienda | null; ruolo?: string | null } }
+  | { tipo: "memoria"; dati: { intuizioni: Memoria[] } }
+  | { tipo: "integrazioni"; dati: { connessioni: Connessione[] } }
+  | { tipo: "organico"; dati: { organico: MembroOrganico[] } }
+  | { tipo: "compiti"; titolo?: string; dati: { compiti: Compito[] } }
+  | {
+      tipo: "email";
+      dati: {
+        account: string | null;
+        messaggi: { uid: number; da: string; oggetto: string; data: string | null; letto: boolean; anteprima: string }[];
+        bozza?: { a: string; oggetto: string; corpo: string };
+      };
+    }
+  | { tipo: "email_connect"; dati: Record<string, never> }
+  | {
+      tipo: "verbale";
+      dati: {
+        titolo: string;
+        decisioni: { contenuto: string; motivo: string | null }[];
+        compiti: { titolo: string; assegnatario: string | null; scadenza: string | null }[];
+        scadenze: { cosa: string; quando: string | null }[];
+        note: string | null;
+      };
+    };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
 // siti, entrare in modalità appunti, aprire/zoomare un documento, ecc.
@@ -164,6 +194,8 @@ export type Azione =
   | { tipo: "zoom_documento"; verso: "avvicina" | "allontana" | "reset" }
   | { tipo: "cerca_documento"; testo: string }
   | { tipo: "apri_camera"; modo: "documento" | "descrizione" }
+  | { tipo: "apri_visione" }
+  | { tipo: "apri_gesti" }
   | { tipo: "chiudi_vista"; vista: string }
   | { tipo: "riposo" }
   // Solo ORION Desktop (controllo del computer):
@@ -172,7 +204,10 @@ export type Azione =
   | { tipo: "apri_app"; nome: string }
   | { tipo: "chiudi_app"; nome: string }
   | { tipo: "crea_file"; nome: string; tipoElemento: "file" | "cartella"; posizione?: string }
-  | { tipo: "rinomina_file"; da: string; a: string };
+  | { tipo: "rinomina_file"; da: string; a: string }
+  // Creative Workspace (solo Desktop): lavorare DENTRO i software.
+  | { tipo: "esegui_comando"; comando: string; cwd?: string; etichetta?: string; riporta?: boolean }
+  | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string };
 
 export type RisultatoConversazione = {
   testo: string;

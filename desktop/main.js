@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
-const { spawn } = require("node:child_process");
+const { spawn, exec } = require("node:child_process");
 const whisper = require("./whisper");
 
 // ORION live: l'app desktop carica lo stesso ORION del web (stessi dati/account)
@@ -304,6 +304,94 @@ ipcMain.handle("os:rinomina", async (_e, dati) => {
   try {
     fs.renameSync(trovato, nuovo);
     return { ok: true, da: path.basename(trovato), a };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// ── CREATIVE WORKSPACE: ORION lavora DENTRO i software (terminale + file) ─────
+// Capacità potente: esecuzione di comandi e scrittura file sul Mac dell'utente.
+// La CONFERMA per le azioni rischiose è gestita da ORION (prompt) PRIMA di
+// emettere il comando; qui c'è solo un backstop minimo contro i pattern
+// catastrofici, più timeout/limiti. Cartella di lavoro dedicata di default.
+
+const WORKSPACE = path.join(os.homedir(), "Documents", "ORION Workspace");
+
+function cartellaLavoro(cwd) {
+  const c = String(cwd || "").trim();
+  if (c && path.isAbsolute(c)) return c;
+  if (c) return path.join(WORKSPACE, c);
+  return WORKSPACE;
+}
+
+// Backstop di sicurezza: rifiuta i comandi palesemente distruttivi.
+const COMANDI_VIETATI = [
+  /rm\s+-rf?\s+(\/|~|\$HOME)(\s|$)/i,
+  /\bmkfs\b/i,
+  /\bdd\b[^|]*\bof=\/dev\//i,
+  /:\(\)\s*\{.*\};:/, // fork bomb
+  /\b(shutdown|reboot|halt)\b/i,
+  />\s*\/dev\/sd[a-z]/i,
+  /\bdiskutil\s+(erase|reformat)/i,
+];
+
+function comandoPericoloso(cmd) {
+  return COMANDI_VIETATI.some((re) => re.test(cmd));
+}
+
+function tronca(s, max = 4000) {
+  s = String(s || "");
+  return s.length > max ? s.slice(0, max) + "\n…[output troncato]" : s;
+}
+
+// Esegue un comando di shell. Ritorna { ok, code, stdout, stderr }.
+ipcMain.handle("os:esegui", async (_e, dati) => {
+  const comando = String((dati && dati.comando) || "").trim();
+  if (!comando) return { ok: false, errore: "comando mancante" };
+  if (comandoPericoloso(comando)) {
+    return { ok: false, errore: "comando bloccato per sicurezza", code: null, stdout: "", stderr: "Comando potenzialmente distruttivo: rifiutato." };
+  }
+  const cwd = cartellaLavoro(dati && dati.cwd);
+  try {
+    fs.mkdirSync(cwd, { recursive: true });
+  } catch {
+    /* ignora */
+  }
+  return new Promise((resolve) => {
+    exec(comando, { cwd, timeout: 120000, maxBuffer: 8 * 1024 * 1024, shell: "/bin/bash" }, (err, stdout, stderr) => {
+      resolve({
+        ok: !err,
+        code: err && typeof err.code === "number" ? err.code : err ? 1 : 0,
+        stdout: tronca(stdout),
+        stderr: tronca(stderr || (err && err.killed ? "Comando interrotto (timeout)." : "")),
+        cwd,
+      });
+    });
+  });
+});
+
+// Scrive un file (crea le cartelle). Path relativo → sotto la workspace.
+ipcMain.handle("os:scriviFile", async (_e, dati) => {
+  const rel = String((dati && dati.percorso) || "").trim();
+  if (!rel) return { ok: false, errore: "percorso mancante" };
+  const dest = path.isAbsolute(rel) ? rel : path.join(WORKSPACE, rel);
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, String((dati && dati.contenuto) || ""), "utf8");
+    return { ok: true, percorso: dest };
+  } catch (err) {
+    return { ok: false, errore: String(err) };
+  }
+});
+
+// Legge un file (capped) per far "vedere" a ORION il risultato.
+ipcMain.handle("os:leggiFile", async (_e, dati) => {
+  const rel = String((dati && dati.percorso) || "").trim();
+  if (!rel) return { ok: false, errore: "percorso mancante" };
+  const src = path.isAbsolute(rel) ? rel : path.join(WORKSPACE, rel);
+  try {
+    if (!fs.existsSync(src)) return { ok: false, errore: "non esiste" };
+    return { ok: true, percorso: src, contenuto: tronca(fs.readFileSync(src, "utf8"), 12000) };
   } catch (err) {
     return { ok: false, errore: String(err) };
   }

@@ -40,11 +40,56 @@ import {
   rimuoviAttesa,
   analisiProattiva,
   statoAbbonamento,
+  aggiornaMemoriaProfilo,
+  getAzienda,
+  configuraAzienda,
+  trovaAziendaPerCodice,
+  impara,
+  aggiornaApprendimento,
+  recallMemoria,
+  listMemoria,
+  logEvento,
+  scriviDiario,
+  cercaNeiMessaggi,
+  listOrganico,
+  aggiornaOrganico,
+  trovaMembro,
+  creaCompito,
+  aggiornaCompito,
+  listCompiti,
+  passaConsegne,
+  briefingAzienda,
+  registraConnessione,
+  listConnessioni,
+  getConnessione,
+  upsertEntitaEsterna,
+  listEntitaEsterne,
+  type VoceMemoria,
+  type Compito,
+  type EntitaEsterna,
 } from "../data";
+import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
+import {
+  setOnboardingUtente,
+  setPreferenzeUtente,
+  setNomeUtente,
+  collegaUtenteAdAzienda,
+  getUtente,
+} from "../auth";
 import { inviaMessaggioWhatsApp } from "../whatsapp";
 
-// Contesto del turno: dati extra disponibili agli strumenti (es. immagine allegata).
-export type TurnoContext = { allegato?: { dataUrl: string } };
+// Contesto del turno: dati extra disponibili agli strumenti (es. immagine
+// allegata) e identità dell'UTENTE che parla (per onboarding/preferenze/azienda
+// che sono per-utente, non per-tenant).
+export type TurnoContext = { allegato?: { dataUrl: string }; utenteId?: number };
+
+// Normalizza un array di voci di memoria provenienti dal modello.
+function leggiVoci(input: unknown): VoceMemoria[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .filter((v): v is VoceMemoria => !!v && typeof v.tema === "string" && typeof v.dettaglio === "string")
+    .map((v) => ({ tema: v.tema.trim(), dettaglio: v.dettaglio }));
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Strumenti che ORION può invocare. Ogni handler ritorna:
@@ -167,17 +212,28 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "aggiorna_profilo",
     description:
-      "Salva o aggiorna i dati del professionista nella memoria operativa (Chiamata 0 e oltre): come chiamarlo, professione, durata media visita, gestione cancellazioni, canale comunicazione, problemi che fanno perdere tempo, abitudini, e dati fiscali (P.IVA, codice fiscale, indirizzo, regime fiscale, PEC, SDI). Imposta onboarding_completo a 1 SOLO quando hai raccolto abbastanza per iniziare a lavorare.",
+      "Memoria operativa del SINGOLO (autonomo o uso personale). Usalo durante il colloquio iniziale e oltre per salvare ciò che apprendi. Campi fissi: nome (come chiamarlo), professione/settore, tipo_uso (personale|lavoro), tipo_lavoro (autonomo|azienda), e dati fiscali (piva, codice_fiscale, indirizzo, regime_fiscale, pec, sdi) — questi solo se pertinenti. Per TUTTO il resto che modella il modo di lavorare (orari, giorni con regole particolari, gestione urgenze, LIMITI DI AUTONOMIA cioè cosa puoi fare da solo e cosa va confermato, come essere aggiornato, priorità, struttura/elenchi specializzati del settore, ecc.) usa il campo libero 'memoria' come elenco di voci {tema, dettaglio}. NON inventare: salva solo ciò che l'utente ti dice. Imposta onboarding_completo a 1 SOLO quando hai raccolto abbastanza per iniziare a lavorare davvero. NON usare questo per le AZIENDE (usa configura_azienda) né per i dipendenti agganciati a un'azienda (usa salva_preferenze).",
     input_schema: {
       type: "object",
       properties: {
         nome: { type: "string", description: "Come l'utente vuole essere chiamato" },
-        professione: { type: "string" },
-        durata_visita_min: { type: "integer", description: "Durata media di una visita in minuti" },
-        gestione_cancellazioni: { type: "string" },
-        canale_comunicazione: { type: "string" },
-        problemi_tempo: { type: "string" },
-        abitudini: { type: "string", description: "Note libere sul metodo di lavoro" },
+        professione: { type: "string", description: "Professione o settore identificato" },
+        tipo_uso: { type: "string", enum: ["personale", "lavoro"] },
+        tipo_lavoro: { type: "string", enum: ["autonomo", "azienda"] },
+        memoria: {
+          type: "array",
+          description:
+            "Voci di memoria operativa flessibile: orari, regole, gestione urgenze, limiti di autonomia, come essere aggiornato, struttura del settore, ecc.",
+          items: {
+            type: "object",
+            properties: {
+              tema: { type: "string", description: "Etichetta breve, es. 'Orari', 'Urgenze', 'Autonomia'" },
+              dettaglio: { type: "string", description: "Il contenuto, in linguaggio naturale" },
+            },
+            required: ["tema", "dettaglio"],
+          },
+        },
+        durata_visita_min: { type: "integer", description: "Durata media di un appuntamento in minuti (se pertinente)" },
         piva: { type: "string" },
         codice_fiscale: { type: "string" },
         indirizzo: { type: "string" },
@@ -185,6 +241,351 @@ export const TOOLS: Anthropic.Tool[] = [
         pec: { type: "string" },
         sdi: { type: "string" },
         onboarding_completo: { type: "integer", enum: [0, 1] },
+      },
+    },
+  },
+  {
+    name: "configura_azienda",
+    description:
+      "Crea o aggiorna l'ambiente AZIENDA/TEAM (onboarding Caso B). Alla prima chiamata genera un CODICE AZIENDALE univoco (che poi i dipendenti useranno per agganciarsi): comunicalo all'utente a voce e mostralo nel pannello. Campi identità: nome, settore, dimensioni, sedi, e dati fiscali aziendali (piva, codice_fiscale, indirizzo, regime_fiscale, pec, sdi). Per organigramma, ruoli/gerarchie/responsabili e autorizzazioni, processi (come nasce una richiesta cliente, gestione progetti, flussi, attività ricorrenti), gestione informazioni (dati/documenti chiave, chi vede cosa), comunicazioni e REGOLE OPERATIVE (cosa ORION fa in autonomia e cosa richiede conferma, con eventuali soglie) usa il campo 'memoria' come elenco di voci {tema, dettaglio}. Imposta onboarding_completo a 1 quando l'azienda è abbastanza definita da iniziare.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "Nome dell'azienda" },
+        settore: { type: "string" },
+        dimensioni: { type: "string", description: "Es. numero di dipendenti / fascia" },
+        sedi: { type: "string" },
+        memoria: {
+          type: "array",
+          description: "Organigramma, processi, gestione informazioni, comunicazioni, regole operative.",
+          items: {
+            type: "object",
+            properties: {
+              tema: { type: "string" },
+              dettaglio: { type: "string" },
+            },
+            required: ["tema", "dettaglio"],
+          },
+        },
+        piva: { type: "string" },
+        codice_fiscale: { type: "string" },
+        indirizzo: { type: "string" },
+        regime_fiscale: { type: "string" },
+        pec: { type: "string" },
+        sdi: { type: "string" },
+        onboarding_completo: { type: "integer", enum: [0, 1] },
+      },
+    },
+  },
+  {
+    name: "collega_azienda",
+    description:
+      "Aggancia l'utente corrente a un'azienda già presente su ORION, tramite il CODICE AZIENDALE che gli ha dato il suo titolare/responsabile. Da quel momento vedrà clienti, agenda e memoria condivisi dell'azienda. Ti restituisce l'azienda riconosciuta: dopo l'aggancio chiedi SOLO le informazioni personali (come chiamarlo, eventuale ruolo/reparto se non già noto, come vuole essere aggiornato) e salvale con salva_preferenze. Usalo quando l'utente dice di far parte di un'azienda/team che già usa ORION.",
+    input_schema: {
+      type: "object",
+      properties: {
+        codice: { type: "string", description: "Il codice aziendale, es. ORION-AB12CD" },
+        ruolo: { type: "string", description: "Ruolo del dipendente, se lo dichiara" },
+        reparto: { type: "string", description: "Reparto, se lo dichiara" },
+      },
+      required: ["codice"],
+    },
+  },
+  {
+    name: "salva_preferenze",
+    description:
+      "Salva le informazioni e preferenze PERSONALI dell'utente corrente (vale soprattutto per un DIPENDENTE agganciato a un'azienda, le cui preferenze sono individuali e NON vanno nella memoria aziendale condivisa): come vuole essere chiamato, come vuole essere aggiornato durante la giornata, suoi limiti/abitudini individuali. Imposta onboarding_completo a 1 quando il suo onboarding personale è finito.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string", description: "Come l'utente vuole essere chiamato" },
+        ruolo: { type: "string" },
+        reparto: { type: "string" },
+        preferenze: {
+          type: "array",
+          description: "Preferenze personali come voci {tema, dettaglio}.",
+          items: {
+            type: "object",
+            properties: {
+              tema: { type: "string" },
+              dettaglio: { type: "string" },
+            },
+            required: ["tema", "dettaglio"],
+          },
+        },
+        onboarding_completo: { type: "integer", enum: [0, 1] },
+      },
+    },
+  },
+  {
+    name: "impara",
+    description:
+      "Memorizza un'INTUIZIONE durevole sul modo di lavorare dell'utente/azienda (il cuore della memoria viva). Usalo OGNI VOLTA che cogli qualcosa che varrà anche in futuro: una preferenza, un'abitudine, una decisione tipica, un'eccezione a una regola, una priorità, un flusso di lavoro, una procedura sempre seguita, un errore che l'utente tende a evitare, o un fatto importante su un cliente. Salva il COSA in 'contenuto' e, se lo deduci, il PERCHÉ in 'motivo'. Non inventare: salva solo ciò che hai davvero osservato. Se l'intuizione riguarda un cliente/entità, mettine il nome in 'soggetto'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        categoria: {
+          type: "string",
+          enum: ["preferenza", "abitudine", "decisione", "eccezione", "priorita", "flusso", "procedura", "errore_da_evitare", "contesto"],
+        },
+        soggetto: { type: "string", description: "Nome del cliente/entità a cui si riferisce, oppure ometti se è generale" },
+        contenuto: { type: "string", description: "COSA: l'intuizione, in linguaggio naturale" },
+        motivo: { type: "string", description: "PERCHÉ, se deducibile" },
+        confidenza: { type: "string", enum: ["basso", "medio", "alto"], description: "Quanto sei sicuro (default medio)" },
+      },
+      required: ["contenuto"],
+    },
+  },
+  {
+    name: "aggiorna_apprendimento",
+    description:
+      "Corregge o fa EVOLVERE un'intuizione già in memoria quando qualcosa cambia nel tempo. Passa l'id (lo trovi con ricorda/mostra_memoria) e: i campi da correggere, oppure superato=true se quell'intuizione non vale più. Usalo per tenere il modello dell'utente sempre aggiornato (es. un'abitudine cambia, una regola si modifica).",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "integer" },
+        contenuto: { type: "string" },
+        motivo: { type: "string" },
+        confidenza: { type: "string", enum: ["basso", "medio", "alto"] },
+        superato: { type: "boolean", description: "true = l'intuizione non vale più" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "ricorda",
+    description:
+      "Richiama dalla memoria ciò che sai su un argomento, un cliente o 'dove eravamo rimasti'. Cerca sia nelle intuizioni (memoria viva) sia nelle conversazioni passate. Usalo per 'cosa sai di Rossi', 'dove eravamo rimasti sul caso X', 'cosa avevamo detto su…'. Ti torna il materiale rilevante, che usi per rispondere con cognizione.",
+    input_schema: {
+      type: "object",
+      properties: {
+        argomento: { type: "string", description: "Cliente, tema o parola chiave da richiamare" },
+      },
+      required: ["argomento"],
+    },
+  },
+  {
+    name: "chiudi_giornata",
+    description:
+      "Lascia una breve nota di 'dove siamo rimasti' nel diario operativo (1-2 frasi): cosa è stato fatto oggi e cosa conta per la prossima volta. Usalo quando l'utente chiude/va in pausa e c'è stato qualcosa di rilevante, così alla prossima apertura riprendi il filo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        riassunto: { type: "string", description: "1-2 frasi: dove siamo rimasti e cosa conta per la prossima volta" },
+      },
+      required: ["riassunto"],
+    },
+  },
+  {
+    name: "mostra_memoria",
+    description:
+      "Mostra a schermo il MODELLO VIVO che hai dell'utente/azienda: ciò che hai imparato sul suo modo di lavorare (preferenze, abitudini, priorità, procedure, eccezioni, errori da evitare). Usalo per 'cosa sai di me', 'cosa hai imparato', 'mostrami la tua memoria del mio lavoro'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "aggiorna_organico",
+    description:
+      "AZIENDA. Registra o aggiorna una persona dell'organigramma (anche se NON usa ORION). Usalo quando scopri chi lavora in azienda e cosa fa. Salva il ruolo ma soprattutto le RESPONSABILITÀ concrete (es. 'supervisiona 12 operatori, controlla le scadenze delle lavorazioni, va avvisato subito per problemi sulle linee'), il reparto e chi riporta a chi. Se la persona esiste già (stesso nome) la arricchisci.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string" },
+        ruolo: { type: "string" },
+        reparto: { type: "string" },
+        responsabilita: { type: "string", description: "Cosa fa e di cosa risponde, in concreto" },
+        riporta_a: { type: "string", description: "Nome o ruolo del suo responsabile" },
+        contatti: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["nome"],
+    },
+  },
+  {
+    name: "mostra_organico",
+    description: "AZIENDA. Mostra a schermo l'organigramma: persone, ruoli, reparti, responsabilità, gerarchie. Usalo per 'chi lavora qui', 'mostrami l'organigramma', 'chi c'è nel reparto X'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "assegna_compito",
+    description:
+      "AZIENDA. Assegna un'attività a una persona e ne avvia il monitoraggio. Usalo per 'assegna questo progetto a Paolo', 'dai a Marco il compito di…'. Se l'utente chiede aggiornamenti periodici ('aggiornami ogni due giorni') imposta frequenza_giorni. Imposta la scadenza in ISO se indicata.",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string" },
+        descrizione: { type: "string" },
+        assegnatario: { type: "string", description: "Nome della persona a cui è assegnato" },
+        reparto: { type: "string" },
+        scadenza: { type: "string", description: "Data/ora ISO YYYY-MM-DD o YYYY-MM-DDTHH:MM" },
+        frequenza_giorni: { type: "integer", description: "Ogni quanti giorni vuole un aggiornamento" },
+        riferimento: { type: "string", description: "Es. ordine/progetto a cui collegarlo" },
+        cliente_nome: { type: "string" },
+      },
+      required: ["titolo"],
+    },
+  },
+  {
+    name: "aggiorna_compito",
+    description:
+      "AZIENDA. Aggiorna un compito assegnato: cambia stato (in_corso|completato|annullato), registra un avanzamento, sposta la scadenza o cambia assegnatario. Passa l'id (lo trovi con mostra_compiti).",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "integer" },
+        stato: { type: "string", enum: ["aperto", "in_corso", "completato", "annullato"] },
+        avanzamento: { type: "string", description: "Nota di avanzamento da aggiungere" },
+        scadenza: { type: "string" },
+        assegnatario: { type: "string" },
+      },
+      required: ["id"],
+    },
+  },
+  {
+    name: "mostra_compiti",
+    description:
+      "AZIENDA. Mostra i compiti assegnati, eventualmente filtrati. Usalo per 'cosa deve fare Paolo', 'compiti del reparto produzione', 'cosa è in ritardo' (filtro=da_seguire), 'cosa c'è da fare'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        assegnatario: { type: "string" },
+        reparto: { type: "string" },
+        stato: { type: "string", enum: ["aperto", "in_corso", "completato", "annullato"] },
+        filtro: { type: "string", enum: ["attivi", "da_seguire", "tutti"], description: "da_seguire = in ritardo o senza aggiornamenti dovuti" },
+      },
+    },
+  },
+  {
+    name: "passa_consegne",
+    description:
+      "AZIENDA. Registra il passaggio di consegne di fine turno: cosa è stato completato, cosa è rimasto in sospeso, i problemi riscontrati e i suggerimenti per chi subentra. Usalo quando l'utente dice 'sto chiudendo il turno', 'passo le consegne'. Al turno successivo ORION riprende da qui.",
+    input_schema: {
+      type: "object",
+      properties: {
+        reparto: { type: "string" },
+        completato: { type: "string" },
+        in_sospeso: { type: "string" },
+        problemi: { type: "string" },
+        suggerimenti: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "verbale_riunione",
+    description:
+      "AZIENDA. Formalizza una riunione: dalle decisioni prese, dalle attività e dalle scadenze emerse, ORION crea i compiti, registra le decisioni come know-how (con il loro perché) e fissa i promemoria, e mostra un riepilogo. Usalo a fine riunione dopo aver preso appunti.",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string" },
+        decisioni: {
+          type: "array",
+          items: { type: "object", properties: { contenuto: { type: "string" }, motivo: { type: "string" } }, required: ["contenuto"] },
+        },
+        compiti: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { titolo: { type: "string" }, assegnatario: { type: "string" }, scadenza: { type: "string" } },
+            required: ["titolo"],
+          },
+        },
+        scadenze: {
+          type: "array",
+          items: { type: "object", properties: { cosa: { type: "string" }, quando: { type: "string" } }, required: ["cosa"] },
+        },
+        note: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "collega_email",
+    description:
+      "Apre il pannello per collegare la casella email del tenant (IMAP/SMTP con app-password). Usalo quando l'utente vuole gestire le email da ORION ma non l'ha ancora collegata. Spiega che si aprirà un pannello dove inserire indirizzo e password (la password va scritta, non dettata, per sicurezza).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "mostra_email",
+    description:
+      "Mostra le ultime email della posta in arrivo e ne fa il triage (cosa è ordinario, cosa richiede risposta, cosa è urgente). Usalo per 'controlla le email', 'leggi la posta', 'cosa è arrivato'. Se l'email non è collegata, dillo e proponi collega_email.",
+    input_schema: { type: "object", properties: { quante: { type: "integer", description: "Quante email recenti (default 15)" } } },
+  },
+  {
+    name: "prepara_email",
+    description:
+      "Prepara la BOZZA di un'email (non la invia): mostra l'anteprima e legge il contenuto. L'utente detta il contenuto, tu lo formalizzi in un'email professionale. Dopo la conferma esplicita usa invia_email.",
+    input_schema: {
+      type: "object",
+      properties: {
+        a: { type: "string", description: "Destinatario (indirizzo email)" },
+        oggetto: { type: "string" },
+        corpo: { type: "string" },
+      },
+      required: ["a", "oggetto", "corpo"],
+    },
+  },
+  {
+    name: "invia_email",
+    description: "Invia DAVVERO un'email. Usalo SOLO dopo aver preparato la bozza con prepara_email e ottenuto un sì esplicito dall'utente.",
+    input_schema: {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        oggetto: { type: "string" },
+        corpo: { type: "string" },
+      },
+      required: ["a", "oggetto", "corpo"],
+    },
+  },
+  {
+    name: "collega_sistema",
+    description:
+      "ECOSISTEMA. Registra un software/strumento esterno che il professionista o l'azienda già usa (gestionale, CRM, ERP, software medico/legale/fiscale/HR, magazzino, ticketing, archivio…), così ORION ne comprende l'ambiente. Salva tipo, nome, COSA contiene e com'è strutturato (descrizione) e le eventuali regole (cosa puoi fare da solo, cosa va confermato). Se l'utente vuole che i dati di quel sistema confluiscano automaticamente in ORION, imposta modalita='ingest': verrà generato un token/URL da configurare nel suo sistema (es. via Zapier). Non sostituisce il software dell'utente: lo affianca.",
+    input_schema: {
+      type: "object",
+      properties: {
+        nome: { type: "string" },
+        tipo: {
+          type: "string",
+          enum: ["gestionale", "crm", "erp", "medico", "legale", "fiscale", "hr", "produzione", "magazzino", "ticketing", "cloud", "database", "archivio", "altro"],
+        },
+        descrizione: { type: "string", description: "Cosa contiene e com'è strutturato" },
+        regole: { type: "string", description: "Autorizzazioni: cosa ORION può fare da solo, cosa va confermato" },
+        modalita: { type: "string", enum: ["descritto", "ingest"], description: "ingest = genera un webhook per ricevere i dati" },
+      },
+      required: ["nome"],
+    },
+  },
+  {
+    name: "mostra_sistemi",
+    description: "ECOSISTEMA. Mostra a schermo i sistemi esterni collegati e cosa ORION ne sa. Usalo per 'quali software hai collegato', 'mostrami le integrazioni', 'cosa sai dei nostri sistemi'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "registra_dato_esterno",
+    description:
+      "ECOSISTEMA. Inserisce nel modello unificato di ORION un dato proveniente da un sistema esterno, quando l'utente lo racconta o lo incolla (es. 'nel gestionale l'ordine 245 di Rossi è in produzione'). ORION lo collega al cliente e alla catena (riferimento). Indica il sistema (nome) a cui appartiene.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sistema: { type: "string", description: "Nome del sistema esterno (deve essere già collegato con collega_sistema)" },
+        tipo: { type: "string", enum: ["cliente", "ordine", "pratica", "progetto", "documento", "ticket", "persona", "attivita", "altro"] },
+        titolo: { type: "string" },
+        chiave_esterna: { type: "string", description: "Id/codice del record nel sistema (per evitare duplicati)" },
+        cliente_nome: { type: "string", description: "Cliente a cui collegarlo" },
+        riferimento: { type: "string", description: "Chiave di catena, es. 'ordine 245'" },
+        dati: { type: "string", description: "Dettagli liberi" },
+      },
+      required: ["sistema", "titolo"],
+    },
+  },
+  {
+    name: "cerca_dato_esterno",
+    description: "ECOSISTEMA. Interroga il modello unificato: ciò che ORION ha raccolto dai sistemi esterni. Usalo per 'cosa risulta nel gestionale per Rossi', 'gli ordini aperti', 'le pratiche di X'. Puoi filtrare per cliente o testo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cliente_nome: { type: "string" },
+        testo: { type: "string", description: "Parola chiave da cercare (titolo/riferimento)" },
       },
     },
   },
@@ -702,7 +1103,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "chiudi_vista",
     description:
-      "Chiude un pannello/finestra che hai aperto. Usalo per 'chiudi l'agenda', 'chiudi la mappa', 'togli le notizie', 'via questo', 'chiudi tutto'. Passa in 'vista' il tipo di pannello da chiudere: agenda, mappa, notizie, finanza, sport, clienti, cliente, documento, documenti, lavagna, schema, abbonamento, pagamenti, whatsapp, promemoria, attesa, briefing, profilo — oppure 'tutto' per chiudere tutti i pannelli.",
+      "Chiude un pannello/finestra che hai aperto. Usalo per 'chiudi l'agenda', 'chiudi la mappa', 'togli le notizie', 'via questo', 'chiudi tutto'. Passa in 'vista' il tipo di pannello da chiudere: agenda, mappa, notizie, finanza, sport, clienti, cliente, documento, documenti, lavagna, schema, abbonamento, pagamenti, whatsapp, promemoria, attesa, briefing, profilo, memoria, organico, compiti, email, verbale, integrazioni, visione, gesti — oppure 'tutto' per chiudere tutti i pannelli.",
     input_schema: {
       type: "object",
       properties: { vista: { type: "string" } },
@@ -719,6 +1120,18 @@ export const TOOLS: Anthropic.Tool[] = [
     name: "scansiona_documento",
     description:
       "Apre la FOTOCAMERA (o caricamento immagine) per digitalizzare un documento fisico. Usalo SEMPRE quando l'utente dice 'scansiona/digitalizza un documento', 'porta questo foglio in digitale', 'archivia questo documento'. NON inventare un documento e NON chiamare archivia_documento finché non hai ricevuto l'immagine: prima apri la fotocamera con questo strumento, poi — quando ti arriva la foto — leggi il contenuto e chiamerai archivia_documento. A voce di' una frase tipo 'Inquadra pure il documento'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "attiva_visione",
+    description:
+      "Attiva la MODALITÀ VISIONE: la videocamera dal vivo con cui ORION ti guarda mentre fai un'attività pratica (montaggio PC, riparazione, elettronica, falegnameria, stampa 3D, cucina, manutenzione…) e ti assiste passo passo, riconoscendo gli oggetti, notando errori e suggerendo il prossimo passo, anche con evidenziazioni sull'inquadratura. Usalo quando l'utente dice 'attiva la videocamera/la visione', 'guarda cosa sto facendo', 'aiutami a montare/riparare/cucinare…'. È diverso da guarda_foto (uno scatto singolo) e da scansiona_documento. A voce di' una frase breve tipo 'Eccomi, ti guardo: avvia pure la telecamera'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "attiva_gesti",
+    description:
+      "Attiva la MODALITÀ GESTI: l'utente può manovrare i pannelli di ORION con le mani davanti alla telecamera (pinch pollice+indice per agganciare e spostare un pannello, due mani per ridimensionarlo, rilascio sulla × o in alto per chiuderlo). I pannelli diventano finestre fluttuanti e il layout si ricorda. Usalo quando l'utente dice 'modalità gesti', 'voglio spostare i pannelli con le mani', 'controllo a gesti', 'fammi sistemare le finestre a mano'. È diverso dalla modalità visione (che assiste le attività manuali). A voce di' una frase breve tipo 'Modalità gesti attiva: muovi pure i pannelli con le mani'.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -802,14 +1215,429 @@ export const TOOLS: Anthropic.Tool[] = [
       required: ["da", "a"],
     },
   },
+  {
+    name: "scrivi_file",
+    description:
+      "CREATIVE WORKSPACE (solo DESKTOP). Scrive un file con un contenuto che generi tu: codice, script, configurazioni, e in particolare gli script Python (bpy) per Blender. Il percorso relativo finisce nella cartella di lavoro 'ORION Workspace'; puoi usare sottocartelle (es. 'rest-api/src/index.js'). Usalo come parte del lavorare dentro i software (scaffolding di progetti, scrittura del codice, script da eseguire).",
+    input_schema: {
+      type: "object",
+      properties: {
+        percorso: { type: "string", description: "Percorso del file (relativo alla workspace o assoluto)" },
+        contenuto: { type: "string", description: "Il contenuto completo del file" },
+        etichetta: { type: "string", description: "Breve descrizione di cosa stai scrivendo (per l'utente)" },
+      },
+      required: ["percorso", "contenuto"],
+    },
+  },
+  {
+    name: "esegui_comando",
+    description:
+      "CREATIVE WORKSPACE (solo DESKTOP). Esegue un comando nel terminale del computer, nella cartella di lavoro (o in 'cwd'). È così che LAVORI DENTRO i software: scaffolding (es. npm init, create-next-app), installazioni, build/test/run, aprire un progetto in VS Code ('code <cartella>'), usare Claude Code ('claude -p \"<task>\"'), eseguire uno script Blender ('blender --python <script.py>'). L'esito (output) ti torna così puoi proseguire/correggere. REGOLA DI SICUREZZA: prima di eseguire, DI' A VOCE in breve cosa stai per lanciare; per azioni RISCHIOSE (cancellazioni, installazioni globali, comandi distruttivi, sovrascritture importanti) CHIEDI prima conferma esplicita e procedi solo dopo un sì.",
+    input_schema: {
+      type: "object",
+      properties: {
+        comando: { type: "string", description: "Il comando di shell da eseguire" },
+        cwd: { type: "string", description: "Cartella di lavoro (relativa alla workspace o assoluta); default = la workspace" },
+        etichetta: { type: "string", description: "Breve descrizione di cosa fa il comando (per l'utente)" },
+      },
+      required: ["comando"],
+    },
+  },
 ];
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
 const handlers: Record<string, Handler> = {
-  aggiorna_profilo: (input) => {
-    const profilo = aggiornaProfilo(input);
+  aggiorna_profilo: (input, ctx) => {
+    let profilo = aggiornaProfilo(input);
+    const voci = leggiVoci(input.memoria);
+    if (voci.length) profilo = aggiornaMemoriaProfilo(voci);
+    // L'onboarding è PER-UTENTE: il flag va sull'utente che sta parlando.
+    if (input.onboarding_completo !== undefined && ctx.utenteId) {
+      setOnboardingUtente(ctx.utenteId, Number(input.onboarding_completo) === 1);
+    }
     return { result: { ok: true, profilo } };
+  },
+
+  configura_azienda: (input, ctx) => {
+    const voci = leggiVoci(input.memoria);
+    const azienda = configuraAzienda(input, voci);
+    // Il fondatore diventa il titolare e l'ambiente è di tipo "azienda".
+    aggiornaProfilo({ tipo_uso: "lavoro", tipo_lavoro: "azienda" });
+    if (ctx.utenteId) {
+      collegaUtenteAdAzienda(ctx.utenteId, {
+        tenantId: azienda.tenant_id,
+        aziendaId: azienda.tenant_id,
+        ruolo: "titolare",
+        reparto: null,
+      });
+      if (input.onboarding_completo !== undefined) {
+        setOnboardingUtente(ctx.utenteId, Number(input.onboarding_completo) === 1);
+      }
+    }
+    const profilo = getProfilo();
+    return {
+      result: { ok: true, codice_aziendale: azienda.codice_aziendale, azienda },
+      vista: { tipo: "profilo", dati: { profilo, azienda, ruolo: "titolare" } },
+    };
+  },
+
+  collega_azienda: (input, ctx) => {
+    const azienda = trovaAziendaPerCodice(String(input.codice ?? ""));
+    if (!azienda) {
+      return {
+        result: {
+          ok: false,
+          errore: "codice_non_valido",
+          messaggio: "Non trovo nessuna azienda con questo codice. Verifica con il titolare.",
+        },
+      };
+    }
+    if (ctx.utenteId) {
+      collegaUtenteAdAzienda(ctx.utenteId, {
+        tenantId: azienda.tenant_id,
+        aziendaId: azienda.tenant_id,
+        ruolo: input.ruolo ? String(input.ruolo) : null,
+        reparto: input.reparto ? String(input.reparto) : null,
+      });
+    }
+    // NB: l'aggancio vale dal prossimo turno (il tenant del turno corrente è già
+    // fissato). ORION conferma a voce e procede con le sole preferenze personali.
+    return {
+      result: {
+        ok: true,
+        azienda: {
+          nome: azienda.nome,
+          settore: azienda.settore,
+          ruolo: input.ruolo ?? null,
+          reparto: input.reparto ?? null,
+        },
+      },
+    };
+  },
+
+  salva_preferenze: (input, ctx) => {
+    if (!ctx.utenteId) return { result: { ok: false, errore: "nessun_utente" } };
+    if (input.nome) setNomeUtente(ctx.utenteId, String(input.nome));
+    const voci = leggiVoci(input.preferenze);
+    const prefs: Record<string, unknown> = {};
+    for (const v of voci) prefs[v.tema] = v.dettaglio;
+    if (input.ruolo) prefs["ruolo"] = String(input.ruolo);
+    if (input.reparto) prefs["reparto"] = String(input.reparto);
+    if (Object.keys(prefs).length) setPreferenzeUtente(ctx.utenteId, JSON.stringify(prefs));
+    if (input.ruolo || input.reparto) {
+      const u = getUtente(ctx.utenteId);
+      if (u?.azienda_id) {
+        collegaUtenteAdAzienda(ctx.utenteId, {
+          tenantId: u.tenant_id,
+          aziendaId: u.azienda_id,
+          ruolo: input.ruolo ? String(input.ruolo) : u.ruolo,
+          reparto: input.reparto ? String(input.reparto) : u.reparto,
+        });
+      }
+    }
+    if (input.onboarding_completo !== undefined) {
+      setOnboardingUtente(ctx.utenteId, Number(input.onboarding_completo) === 1);
+    }
+    return { result: { ok: true } };
+  },
+
+  // ── Memoria di contesto vivente ─────────────────────────────────────────────
+  impara: (input) => {
+    let cliente_id: number | null = null;
+    if (input.soggetto) {
+      const found = cercaCliente(String(input.soggetto));
+      if (found.length === 1) cliente_id = found[0].id;
+    }
+    const m = impara({
+      categoria: input.categoria,
+      soggetto: input.soggetto ?? null,
+      cliente_id,
+      contenuto: String(input.contenuto ?? ""),
+      motivo: input.motivo ?? null,
+      confidenza: input.confidenza,
+    });
+    return { result: { ok: true, id: m.id, confidenza: m.confidenza, evidenze: m.evidenze } };
+  },
+
+  aggiorna_apprendimento: (input) => {
+    const m = aggiornaApprendimento(Number(input.id), {
+      contenuto: input.contenuto,
+      motivo: input.motivo,
+      confidenza: input.confidenza,
+      superato: input.superato === true,
+    });
+    if (!m) return { result: { ok: false, errore: "intuizione_non_trovata" } };
+    return { result: { ok: true, id: m.id, stato: m.stato } };
+  },
+
+  ricorda: (input) => {
+    const arg = String(input.argomento ?? "").trim();
+    let cliente_id: number | undefined;
+    const found = arg ? cercaCliente(arg) : [];
+    if (found.length === 1) cliente_id = found[0].id;
+    const intuizioni = recallMemoria({ soggetto: arg || undefined, cliente_id, limite: 15 }).map((m) => ({
+      id: m.id,
+      categoria: m.categoria,
+      soggetto: m.soggetto,
+      contenuto: m.contenuto,
+      motivo: m.motivo,
+      confidenza: m.confidenza,
+    }));
+    const conversazioni = arg
+      ? cercaNeiMessaggi(arg, 6).map((m) => ({ quando: m.created_at.slice(0, 16).replace("T", " "), ruolo: m.ruolo, testo: m.contenuto }))
+      : [];
+    return { result: { ok: true, intuizioni, conversazioni } };
+  },
+
+  chiudi_giornata: (input) => {
+    const r = scriviDiario(String(input.riassunto ?? "").trim() || "Sessione conclusa.");
+    return { result: { ok: true, data: r.data } };
+  },
+
+  mostra_memoria: () => {
+    const intuizioni = listMemoria();
+    return {
+      result: { ok: true, totale: intuizioni.length },
+      vista: { tipo: "memoria", dati: { intuizioni } },
+    };
+  },
+
+  // ── Modalità azienda ────────────────────────────────────────────────────────
+  aggiorna_organico: (input) => {
+    const m = aggiornaOrganico(input);
+    logEvento({ tipo: "organico", descrizione: `Aggiornato organigramma: ${m.nome}${m.ruolo ? ` (${m.ruolo})` : ""}`, soggetto: m.nome });
+    return { result: { ok: true, membro: m }, vista: { tipo: "organico", dati: { organico: listOrganico() } } };
+  },
+
+  mostra_organico: () => {
+    const organico = listOrganico();
+    return { result: { ok: true, totale: organico.length }, vista: { tipo: "organico", dati: { organico } } };
+  },
+
+  assegna_compito: (input, ctx) => {
+    let cliente_id: number | null = null;
+    if (input.cliente_nome) {
+      const found = cercaCliente(String(input.cliente_nome));
+      if (found.length === 1) cliente_id = found[0].id;
+    }
+    const assegnatoDa = ctx.utenteId ? getUtente(ctx.utenteId)?.nome ?? null : null;
+    const compito = creaCompito({
+      titolo: input.titolo,
+      descrizione: input.descrizione ?? null,
+      assegnatario: input.assegnatario ?? null,
+      assegnato_da: assegnatoDa,
+      reparto: input.reparto ?? null,
+      cliente_id,
+      riferimento: input.riferimento ?? null,
+      scadenza: input.scadenza ?? null,
+      frequenza_giorni: input.frequenza_giorni ?? null,
+    });
+    logEvento({
+      tipo: "compito_assegnato",
+      descrizione: `Assegnato "${compito.titolo}"${compito.assegnatario ? ` a ${compito.assegnatario}` : ""}${compito.scadenza ? ` (scad. ${compito.scadenza.slice(0, 10)})` : ""}`,
+      soggetto: compito.assegnatario ?? null,
+      riferimento: compito.riferimento ?? null,
+      cliente_id,
+    });
+    return { result: { ok: true, compito }, vista: { tipo: "compiti", titolo: "Compito assegnato", dati: { compiti: listCompiti({ soloAttivi: true }) } } };
+  },
+
+  aggiorna_compito: (input) => {
+    const compito = aggiornaCompito(Number(input.id), {
+      stato: input.stato,
+      avanzamento: input.avanzamento,
+      scadenza: input.scadenza,
+      assegnatario: input.assegnatario,
+    });
+    if (!compito) return { result: { ok: false, errore: "compito_non_trovato" } };
+    logEvento({
+      tipo: "compito_aggiornato",
+      descrizione: `Compito "${compito.titolo}" → ${compito.stato}${input.avanzamento ? `: ${input.avanzamento}` : ""}`,
+      soggetto: compito.assegnatario ?? null,
+      riferimento: compito.riferimento ?? null,
+    });
+    return { result: { ok: true, compito }, vista: { tipo: "compiti", titolo: "Compiti", dati: { compiti: listCompiti({ soloAttivi: true }) } } };
+  },
+
+  mostra_compiti: (input) => {
+    let compiti;
+    let titolo = "Compiti";
+    if (input.filtro === "da_seguire") {
+      compiti = listCompiti({ soloAttivi: true }).filter((c) => c.in_ritardo);
+      titolo = "Compiti da seguire";
+    } else {
+      compiti = listCompiti({
+        assegnatario: input.assegnatario,
+        reparto: input.reparto,
+        stato: input.stato,
+        soloAttivi: input.filtro !== "tutti" && !input.stato,
+      });
+      if (input.assegnatario) titolo = `Compiti di ${input.assegnatario}`;
+      else if (input.reparto) titolo = `Compiti — ${input.reparto}`;
+    }
+    return { result: { ok: true, compiti }, vista: { tipo: "compiti", titolo, dati: { compiti } } };
+  },
+
+  passa_consegne: (input, ctx) => {
+    const daNome = ctx.utenteId ? getUtente(ctx.utenteId)?.nome ?? null : null;
+    const reparto = input.reparto ?? (ctx.utenteId ? getUtente(ctx.utenteId)?.reparto ?? null : null);
+    const consegna = passaConsegne({
+      reparto,
+      da_nome: daNome,
+      completato: input.completato ?? null,
+      in_sospeso: input.in_sospeso ?? null,
+      problemi: input.problemi ?? null,
+      suggerimenti: input.suggerimenti ?? null,
+    });
+    logEvento({ tipo: "consegne", descrizione: `Passaggio di consegne${reparto ? ` (${reparto})` : ""}${daNome ? ` da ${daNome}` : ""}`, soggetto: daNome });
+    return { result: { ok: true, consegna } };
+  },
+
+  verbale_riunione: (input) => {
+    const decisioni = Array.isArray(input.decisioni) ? input.decisioni : [];
+    const compitiIn = Array.isArray(input.compiti) ? input.compiti : [];
+    const scadenze = Array.isArray(input.scadenze) ? input.scadenze : [];
+    for (const d of decisioni) {
+      if (d?.contenuto) impara({ categoria: "decisione", contenuto: String(d.contenuto), motivo: d.motivo ?? null, confidenza: "alto" });
+    }
+    const compitiCreati = compitiIn
+      .filter((c: { titolo?: string }) => c?.titolo)
+      .map((c: { titolo: string; assegnatario?: string; scadenza?: string }) =>
+        creaCompito({ titolo: c.titolo, assegnatario: c.assegnatario ?? null, scadenza: c.scadenza ?? null })
+      );
+    for (const s of scadenze) {
+      if (s?.cosa) creaPromemoria({ testo: String(s.cosa), categoria: "scadenza", scadenza: s.quando ?? null, cliente_id: null });
+    }
+    logEvento({
+      tipo: "riunione",
+      descrizione: `Verbale "${input.titolo ?? "riunione"}": ${decisioni.length} decisioni, ${compitiCreati.length} compiti, ${scadenze.length} scadenze`,
+    });
+    return {
+      result: { ok: true, decisioni: decisioni.length, compiti: compitiCreati.length, scadenze: scadenze.length },
+      vista: {
+        tipo: "verbale",
+        dati: {
+          titolo: input.titolo ?? "Riunione",
+          decisioni: decisioni.map((d: { contenuto: string; motivo?: string }) => ({ contenuto: d.contenuto, motivo: d.motivo ?? null })),
+          compiti: compitiCreati.map((c: Compito) => ({ titolo: c.titolo, assegnatario: c.assegnatario, scadenza: c.scadenza })),
+          scadenze: scadenze.map((s: { cosa: string; quando?: string }) => ({ cosa: s.cosa, quando: s.quando ?? null })),
+          note: input.note ?? null,
+        },
+      },
+    };
+  },
+
+  // ── Email (IMAP/SMTP, gated) ────────────────────────────────────────────────
+  collega_email: () => ({
+    result: { ok: true, configurato: emailConfigurato() },
+    vista: { tipo: "email_connect", dati: {} },
+  }),
+
+  mostra_email: async (input): Promise<Esito> => {
+    if (!emailConfigurato()) {
+      return {
+        result: { ok: false, errore: "non_configurato", messaggio: "La casella email non è ancora collegata." },
+        vista: { tipo: "email_connect", dati: {} },
+      };
+    }
+    const esito = await leggiInbox(Number(input.quante) || 15);
+    if (!esito.ok) {
+      return { result: { ok: false, errore: esito.errore }, vista: { tipo: "email_connect", dati: {} } };
+    }
+    const nonLette = esito.messaggi.filter((m) => !m.letto).length;
+    return {
+      result: { ok: true, totale: esito.messaggi.length, non_lette: nonLette, messaggi: esito.messaggi },
+      vista: { tipo: "email", dati: { account: getEmailAccount()?.email ?? null, messaggi: esito.messaggi } },
+    };
+  },
+
+  prepara_email: (input): Esito => {
+    if (!emailConfigurato()) {
+      return { result: { ok: false, errore: "non_configurato" }, vista: { tipo: "email_connect", dati: {} } };
+    }
+    return {
+      result: { ok: true, anteprima: { a: input.a, oggetto: input.oggetto, corpo: input.corpo } },
+      vista: { tipo: "email", dati: { account: getEmailAccount()?.email ?? null, messaggi: [], bozza: { a: input.a, oggetto: input.oggetto, corpo: input.corpo } } },
+    };
+  },
+
+  invia_email: async (input) => {
+    const esito = await inviaEmail(String(input.a), String(input.oggetto), String(input.corpo));
+    if (!esito.ok) {
+      return { result: { ok: false, errore: esito.errore === "non_configurato" ? "Email non collegata" : esito.errore } };
+    }
+    logEvento({ tipo: "email_inviata", descrizione: `Inviata email a ${input.a}: ${input.oggetto}` });
+    return { result: { ok: true, inviata: true } };
+  },
+
+  // ── Ecosistema: sistemi esterni ─────────────────────────────────────────────
+  collega_sistema: (input) => {
+    const conn = registraConnessione(input);
+    logEvento({ tipo: "sistema_collegato", descrizione: `Collegato sistema "${conn.nome}" (${conn.tipo})`, soggetto: conn.nome });
+    return {
+      result: {
+        ok: true,
+        sistema: { id: conn.id, nome: conn.nome, tipo: conn.tipo, modalita: conn.modalita },
+        // Se è in modalità ingest, l'utente configura questo endpoint nel suo sistema.
+        ingest: conn.token ? { endpoint: "/api/integrazioni/ingest", token: conn.token } : null,
+      },
+      vista: { tipo: "integrazioni", dati: { connessioni: listConnessioni() } },
+    };
+  },
+
+  mostra_sistemi: () => {
+    const connessioni = listConnessioni();
+    return { result: { ok: true, totale: connessioni.length }, vista: { tipo: "integrazioni", dati: { connessioni } } };
+  },
+
+  registra_dato_esterno: (input) => {
+    const conn = listConnessioni().find((c) => c.nome.toLowerCase() === String(input.sistema ?? "").toLowerCase())
+      ?? listConnessioni().find((c) => c.nome.toLowerCase().includes(String(input.sistema ?? "").toLowerCase()));
+    if (!conn) {
+      return { result: { ok: false, errore: "sistema_non_collegato", messaggio: `Il sistema "${input.sistema}" non è ancora collegato: usa prima collega_sistema.` } };
+    }
+    const ent = upsertEntitaEsterna({
+      connessione_id: conn.id,
+      tipo: input.tipo,
+      chiave_esterna: input.chiave_esterna ?? null,
+      titolo: input.titolo,
+      dati: input.dati ?? null,
+      cliente_nome: input.cliente_nome ?? null,
+      riferimento: input.riferimento ?? null,
+    });
+    logEvento({
+      tipo: "dato_esterno",
+      descrizione: `Da "${conn.nome}": ${input.tipo ?? "dato"} ${input.titolo}`,
+      soggetto: input.cliente_nome ?? conn.nome,
+      cliente_id: ent.cliente_id,
+      riferimento: ent.riferimento,
+    });
+    return { result: { ok: true, entita: { id: ent.id, collegato_a_cliente: !!ent.cliente_id } } };
+  },
+
+  cerca_dato_esterno: (input) => {
+    let entita: EntitaEsterna[];
+    if (input.cliente_nome) {
+      const ris = risolvi({ cliente_nome: input.cliente_nome });
+      if ("chiedi" in ris) return ris.chiedi;
+      entita = ris.cliente ? listEntitaEsterne(200).filter((e) => e.cliente_id === ris.cliente!.id) : [];
+    } else {
+      entita = listEntitaEsterne(200);
+    }
+    if (input.testo) {
+      const q = String(input.testo).toLowerCase();
+      entita = entita.filter(
+        (e) => (e.titolo ?? "").toLowerCase().includes(q) || (e.riferimento ?? "").toLowerCase().includes(q) || (e.tipo ?? "").toLowerCase().includes(q)
+      );
+    }
+    return {
+      result: {
+        ok: true,
+        totale: entita.length,
+        risultati: entita.slice(0, 30).map((e) => ({ sistema: e.sistema_nome, tipo: e.tipo, titolo: e.titolo, riferimento: e.riferimento, dati: e.dati })),
+      },
+    };
   },
 
   mostra_agenda: (input) => {
@@ -854,6 +1682,12 @@ const handlers: Record<string, Handler> = {
     });
     const giorno = inizio.slice(0, 10);
     const appuntamenti = listAppuntamenti(giorno, giorno);
+    logEvento({
+      tipo: "appuntamento_creato",
+      descrizione: `Creato appuntamento "${app.titolo}"${cliente ? ` con ${cliente.nome}` : ""} il ${inizio.slice(0, 16).replace("T", " ")}`,
+      soggetto: cliente?.nome ?? null,
+      cliente_id: cliente?.id ?? null,
+    });
     return {
       result: {
         ok: true,
@@ -977,6 +1811,12 @@ const handlers: Record<string, Handler> = {
     });
     const { da, a } = rangeFromPreset("mese");
     const dati = analisiEconomica(da, a);
+    logEvento({
+      tipo: "pagamento_registrato",
+      descrizione: `Registrato pagamento di ${Number(input.importo).toFixed(2)} € (${input.metodo})${cliente ? ` da ${cliente.nome}` : ""}`,
+      soggetto: cliente?.nome ?? null,
+      cliente_id: cliente?.id ?? null,
+    });
     return {
       result: { ok: true, pagamento },
       vista: { tipo: "pagamenti", titolo: "Pagamento registrato — mese in corso", dati },
@@ -1034,6 +1874,12 @@ const handlers: Record<string, Handler> = {
       tipo: "testo",
       contenuto: input.contenuto,
       stato: "inviato",
+    });
+    logEvento({
+      tipo: "whatsapp_inviato",
+      descrizione: `Inviato WhatsApp${cliente ? ` a ${cliente.nome}` : ""}`,
+      soggetto: cliente?.nome ?? null,
+      cliente_id: cliente?.id ?? null,
     });
     const messaggi = cliente ? listComunicazioni(cliente.id) : listComunicazioni();
     return {
@@ -1111,6 +1957,12 @@ const handlers: Record<string, Handler> = {
       descrizione: input.descrizione ?? null,
       stato: "emessa",
     }) as { numero: string; data: string };
+    logEvento({
+      tipo: "fattura_emessa",
+      descrizione: `Emessa fattura ${fattura.numero} a ${datiCliente.nome} di ${Number(input.importo).toFixed(2)} €`,
+      soggetto: datiCliente.nome,
+      cliente_id: cliente.id,
+    });
     return {
       result: { ok: true, fattura },
       vista: {
@@ -1141,8 +1993,16 @@ const handlers: Record<string, Handler> = {
     };
   },
 
-  briefing: () => {
+  briefing: (_input, ctx) => {
     const dati = briefingOggi();
+    // In azienda il briefing PARLATO è role-aware (operatore/responsabile/titolare/
+    // amministrativo): aggiungo i dati scoped al result, il pannello resta generico.
+    const azienda = getAzienda();
+    if (azienda && ctx.utenteId) {
+      const u = getUtente(ctx.utenteId);
+      const az = briefingAzienda(u?.ruolo ?? null, u?.reparto ?? null);
+      return { result: { ...dati, azienda: az }, vista: { tipo: "briefing", dati } };
+    }
     return { result: dati, vista: { tipo: "briefing", dati } };
   },
 
@@ -1200,6 +2060,12 @@ const handlers: Record<string, Handler> = {
       testo: input.testo ?? null,
       immagine: ctx.allegato?.dataUrl ?? null,
     });
+    logEvento({
+      tipo: "documento_archiviato",
+      descrizione: `Archiviato documento "${input.titolo}"${cliente ? ` per ${cliente.nome}` : ""}`,
+      soggetto: cliente?.nome ?? null,
+      cliente_id: cliente?.id ?? null,
+    });
     return { result: { ok: true, id: documento.id }, vista: { tipo: "documento", dati: { documento } } };
   },
 
@@ -1233,9 +2099,11 @@ const handlers: Record<string, Handler> = {
     return { result: { ok }, vista: { tipo: "attesa", dati: { voci } } };
   },
 
-  mostra_profilo: () => {
+  mostra_profilo: (_input, ctx) => {
     const profilo = getProfilo();
-    return { result: { profilo }, vista: { tipo: "profilo", dati: { profilo } } };
+    const azienda = getAzienda() ?? null;
+    const ruolo = ctx.utenteId ? getUtente(ctx.utenteId)?.ruolo ?? null : null;
+    return { result: { profilo, azienda }, vista: { tipo: "profilo", dati: { profilo, azienda, ruolo } } };
   },
 
   collega_whatsapp: () => ({
@@ -1397,6 +2265,16 @@ const handlers: Record<string, Handler> = {
   scansiona_documento: () => ({
     result: { ok: true, fotocamera: "aperta", nota: "Aspetta l'immagine: poi leggi il testo e chiama archivia_documento." },
     azione: { tipo: "apri_camera", modo: "documento" },
+  }),
+
+  attiva_visione: () => ({
+    result: { ok: true, visione: "aperta", nota: "Da qui in poi guidi tu dal vivo nel pannello visione: di' una frase breve di avvio." },
+    azione: { tipo: "apri_visione" },
+  }),
+
+  attiva_gesti: () => ({
+    result: { ok: true, gesti: "attivi", nota: "L'utente può ora spostare/ridimensionare/chiudere i pannelli con le mani." },
+    azione: { tipo: "apri_gesti" },
   }),
 
   chiudi_vista: (input) => {
@@ -2132,6 +3010,27 @@ const handlers: Record<string, Handler> = {
   rinomina_file_locale: (input) => ({
     result: { ok: true, da: input.da, a: input.a },
     azione: { tipo: "rinomina_file", da: String(input.da ?? ""), a: String(input.a ?? "") },
+  }),
+
+  scrivi_file: (input) => ({
+    result: { ok: true, percorso: input.percorso },
+    azione: {
+      tipo: "scrivi_file",
+      percorso: String(input.percorso ?? ""),
+      contenuto: String(input.contenuto ?? ""),
+      etichetta: input.etichetta ? String(input.etichetta) : undefined,
+    },
+  }),
+
+  esegui_comando: (input) => ({
+    result: { ok: true, comando: input.comando, nota: "Eseguo sul computer; l'esito ti tornerà per proseguire." },
+    azione: {
+      tipo: "esegui_comando",
+      comando: String(input.comando ?? ""),
+      cwd: input.cwd ? String(input.cwd) : undefined,
+      etichetta: input.etichetta ? String(input.etichetta) : undefined,
+      riporta: true,
+    },
   }),
 };
 

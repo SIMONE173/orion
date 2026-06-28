@@ -35,8 +35,15 @@ import { DocumentiPanel } from "./panels/DocumentiPanel";
 import { AttesaPanel } from "./panels/AttesaPanel";
 import { ChiamataPanel } from "./panels/ChiamataPanel";
 import { ProfiloPanel } from "./panels/ProfiloPanel";
+import { MemoriaPanel } from "./panels/MemoriaPanel";
+import { OrganicoPanel } from "./panels/OrganicoPanel";
+import { CompitiPanel } from "./panels/CompitiPanel";
+import { EmailPanel } from "./panels/EmailPanel";
+import { EmailConnectPanel } from "./panels/EmailConnectPanel";
+import { VerbalePanel } from "./panels/VerbalePanel";
+import { IntegrazioniPanel } from "./panels/IntegrazioniPanel";
 
-function renderPanel(v: Vista) {
+export function renderPanel(v: Vista) {
   switch (v.tipo) {
     case "agenda":
       return <AgendaPanel titolo={v.titolo} dati={v.dati} />;
@@ -84,6 +91,20 @@ function renderPanel(v: Vista) {
       return <ChiamataPanel dati={v.dati} />;
     case "profilo":
       return <ProfiloPanel dati={v.dati} />;
+    case "memoria":
+      return <MemoriaPanel dati={v.dati} />;
+    case "organico":
+      return <OrganicoPanel dati={v.dati} />;
+    case "compiti":
+      return <CompitiPanel dati={v.dati} titolo={v.titolo} />;
+    case "email":
+      return <EmailPanel dati={v.dati} />;
+    case "email_connect":
+      return <EmailConnectPanel />;
+    case "verbale":
+      return <VerbalePanel dati={v.dati} />;
+    case "integrazioni":
+      return <IntegrazioniPanel dati={v.dati} />;
     default:
       return null;
   }
