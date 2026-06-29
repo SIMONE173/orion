@@ -68,9 +68,7 @@ export default function GestiOverlay() {
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
     let grab: { tipo: string; offX: number; offY: number } | null = null;
     let resize: { tipo: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
-    let selezionata: string | null = null; // finestra "attiva" (bordo illuminato)
-    let traccia: { x: number; y: number; t: number }[] = []; // storia cursore per gli swipe
-    let swipeCooldown = 0;
+    let selezionata: string | null = null; // finestra sotto il cursore (pallino che pulsa)
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -97,19 +95,6 @@ export default function GestiOverlay() {
       return found;
     };
     const rectDi = (tipo: string) => bounds.finestre.find((f) => f.tipo === tipo) || null;
-    // Aggancia una finestra a metà schermo (lato sinistro/destro).
-    const snap = (tipo: string, lato: "sx" | "dx") => {
-      const o = bounds.origin;
-      const W = window.innerWidth;
-      const H = window.innerHeight;
-      const top = 30; // sotto la barra dei menu
-      const bot = 12;
-      const w = Math.round(W / 2);
-      const h = H - top - bot;
-      const x = lato === "sx" ? o.x : o.x + (W - w);
-      od.gestiRidimensiona({ tipo, w, h });
-      od.gestiSposta({ tipo, x, y: o.y + top });
-    };
 
     const disegna = (mani: Mano[]) => {
       const cv = canvasRef.current;
@@ -150,17 +135,17 @@ export default function GestiOverlay() {
       }
     };
 
-    const gestisci = (mani: Mano[], now: number) => {
+    const gestisci = (mani: Mano[]) => {
       const pin = mani.filter((m) => m.pinch);
       const cursore = pin[0] ?? mani[0] ?? null;
-      // SELEZIONE (sticky): la finestra sotto il cursore diventa "attiva" (bordo illuminato).
+      // Pallino di selezione: la finestra sotto il cursore (quella che pinchando agganci).
       if (cursore) {
         const f = sotto(cursore.sx, cursore.sy);
         if (f) selezionata = f.tipo;
       }
 
       if (pin.length >= 2) {
-        // DUE MANI → ridimensiona (ancorato al centro).
+        // DUE MANI (allarga/restringi) → ridimensiona, ancorato al centro.
         const [a, b] = pin;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
@@ -178,13 +163,12 @@ export default function GestiOverlay() {
           od.gestiSposta({ tipo: resize.tipo, x: resize.cx - w / 2, y: resize.cy - h / 2 });
         }
         grab = null;
-        traccia = [];
         return;
       }
       resize = null;
 
       if (pin.length === 1) {
-        // PINCH → aggancia e sposta liberamente la finestra.
+        // PINCH (una mano) → aggancia e sposta liberamente la finestra.
         const m = pin[0];
         if (!grab) {
           const f = sotto(m.sx, m.sy);
@@ -196,35 +180,8 @@ export default function GestiOverlay() {
         } else {
           od.gestiSposta({ tipo: grab.tipo, x: m.sx - grab.offX, y: m.sy - grab.offY });
         }
-        traccia = [];
-        swipeCooldown = now + 300; // grazia dopo aver lasciato il pinch
       } else {
         grab = null;
-        // MANO APERTA → swipe sulla finestra SELEZIONATA: sx/dx = aggancia a metà, giù = chiudi.
-        if (cursore) {
-          traccia.push({ x: cursore.cx, y: cursore.cy, t: now });
-          while (traccia.length && now - traccia[0].t > 220) traccia.shift();
-          if (now >= swipeCooldown && traccia.length >= 3 && selezionata) {
-            const a = traccia[0];
-            const b = traccia[traccia.length - 1];
-            const dt = b.t - a.t;
-            const dx = b.x - a.x;
-            const dy = b.y - a.y;
-            const dist = Math.hypot(dx, dy);
-            if (dt > 0 && dist > 240 && dist / dt > 1.3) {
-              if (Math.abs(dx) > Math.abs(dy) * 1.3) {
-                snap(selezionata, dx < 0 ? "sx" : "dx");
-                swipeCooldown = now + 900;
-                traccia = [];
-              } else if (dy > Math.abs(dx) * 1.1) {
-                od.gestiChiudi({ tipo: selezionata });
-                selezionata = null;
-                swipeCooldown = now + 900;
-                traccia = [];
-              }
-            }
-          }
-        }
       }
     };
 
@@ -260,7 +217,7 @@ export default function GestiOverlay() {
         mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, pinch: ora });
       }
       disegna(mani);
-      gestisci(mani, t);
+      gestisci(mani);
     };
 
     (async () => {
