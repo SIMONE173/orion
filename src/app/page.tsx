@@ -75,8 +75,6 @@ export default function Home() {
   const visioneRef = useRef<VisioneHandle>(null);
   // Modalità gesti (manipolazione spaziale dei pannelli con le mani). Opt-in.
   const [gestiAttivi, setGestiAttivi] = useState(false);
-  const gestiAttiviRef = useRef(gestiAttivi);
-  gestiAttiviRef.current = gestiAttivi;
   const [layout, setLayout] = useState<Layout>({});
   const [attivoPan, setAttivoPan] = useState<string | null>(null);
   const zMax = useRef(20);
@@ -142,11 +140,10 @@ export default function Home() {
         }
         if (Array.isArray(data.viste) && data.viste.length) {
           const d = desktopBridge();
-          if (d?.apriVista && !gestiAttiviRef.current) {
-            // Desktop (gesti SPENTI): ogni vista in una finestra a parte; la principale resta sul nucleo.
+          if (d?.apriVista) {
+            // Desktop: ogni vista in una finestra SEPARATA (sempre, anche coi gesti).
             data.viste.forEach((v) => d.apriVista!(v));
           } else {
-            // Web, o modalità GESTI: pannelli DENTRO la finestra (manovrabili a mano).
             setViste(data.viste);
           }
         }
@@ -457,16 +454,6 @@ export default function Home() {
     },
     []
   );
-
-  // Desktop: entrando nei gesti chiudo le finestre-pannello SEPARATE (così i
-  // pannelli vivono dentro la finestra principale e la mano può manovrarli);
-  // uscendo pulisco i pannelli in-finestra usati durante i gesti.
-  useEffect(() => {
-    const d = desktopBridge();
-    if (!d) return;
-    if (gestiAttivi) d.chiudiVista?.("tutto");
-    else setViste([]);
-  }, [gestiAttivi]);
 
   // Assegna una posizione iniziale (a cascata) ai pannelli nuovi in modalità gesti.
   useEffect(() => {
