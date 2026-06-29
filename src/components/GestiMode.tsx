@@ -15,7 +15,9 @@ class OneEuro {
   private xPrev: number | null = null;
   private dxPrev = 0;
   private tPrev = 0;
-  constructor(private minCutoff = 1.2, private beta = 0.02, private dCutoff = 1.0) {}
+  // minCutoff basso = movimento molto più fluido a riposo (meno tremolii); beta
+  // tiene la reattività quando la mano si muove in fretta.
+  constructor(private minCutoff = 0.4, private beta = 0.02, private dCutoff = 1.0) {}
   private alpha(cutoff: number, dt: number) {
     const tau = 1 / (2 * Math.PI * cutoff);
     return 1 / (1 + tau / dt);
