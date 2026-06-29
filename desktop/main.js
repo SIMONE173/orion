@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session, screen, globalShortcut } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -106,6 +106,117 @@ function apriFinestraVista(vista) {
   return win;
 }
 
+// ── GESTURE MODE: overlay NATIVO a tutto schermo per manovrare le finestre ────
+// Finestra trasparente, sempre sopra tutto e TRASPARENTE AI CLIC (i clic passano
+// sotto → non blocca mai l'uso normale). Esiste solo a gesti accesi. Muove SOLO
+// le finestre-pannello di ORION (finestreViste), mai altre app.
+let finestraGesti = null;
+
+function finestreVistePulite() {
+  return finestreViste.filter((f) => f.win && !f.win.isDestroyed());
+}
+function finestraDiTipo(tipo) {
+  const f = finestreVistePulite().find((x) => x.tipo === tipo);
+  return f ? f.win : null;
+}
+
+function apriOverlayGesti() {
+  if (finestraGesti && !finestraGesti.isDestroyed()) return;
+  const b = screen.getPrimaryDisplay().bounds;
+  finestraGesti = new BrowserWindow({
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
+    transparent: true,
+    backgroundColor: "#00000000",
+    frame: false,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false, // non ruba mai il focus
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    fullscreenable: false,
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false },
+  });
+  finestraGesti.setAlwaysOnTop(true, "screen-saver");
+  finestraGesti.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  finestraGesti.setIgnoreMouseEvents(true, { forward: true }); // i clic passano SEMPRE sotto
+  finestraGesti.loadURL(`${ORION_URL}/gesti`);
+  finestraGesti.on("closed", () => {
+    finestraGesti = null;
+  });
+}
+
+function chiudiOverlayGesti() {
+  if (finestraGesti && !finestraGesti.isDestroyed()) {
+    try {
+      finestraGesti.close();
+    } catch {
+      /* già chiusa */
+    }
+  }
+  finestraGesti = null;
+}
+
+ipcMain.on("os:gestiOn", () => apriOverlayGesti());
+ipcMain.on("os:gestiOff", () => chiudiOverlayGesti());
+ipcMain.handle("os:gestiFinestre", () => {
+  const origin = screen.getPrimaryDisplay().bounds;
+  return {
+    origin: { x: origin.x, y: origin.y },
+    finestre: finestreVistePulite().map((f) => {
+      const r = f.win.getBounds();
+      return { tipo: f.tipo, x: r.x, y: r.y, w: r.width, h: r.height };
+    }),
+  };
+});
+ipcMain.on("os:gestiSposta", (_e, d) => {
+  const w = finestraDiTipo(d && d.tipo);
+  if (w) {
+    try {
+      w.setPosition(Math.round(d.x), Math.round(d.y));
+    } catch {
+      /* noop */
+    }
+  }
+});
+ipcMain.on("os:gestiRidimensiona", (_e, d) => {
+  const w = finestraDiTipo(d && d.tipo);
+  if (w) {
+    try {
+      w.setSize(Math.max(320, Math.round(d.w)), Math.max(220, Math.round(d.h)));
+    } catch {
+      /* noop */
+    }
+  }
+});
+ipcMain.on("os:gestiChiudi", (_e, d) => {
+  const w = finestraDiTipo(d && d.tipo);
+  if (w) {
+    try {
+      w.close();
+    } catch {
+      /* noop */
+    }
+  }
+});
+ipcMain.on("os:gestiAvanti", (_e, d) => {
+  const w = finestraDiTipo(d && d.tipo);
+  if (w) {
+    try {
+      w.moveTop();
+      w.focus();
+    } catch {
+      /* noop */
+    }
+  }
+  if (finestraGesti && !finestraGesti.isDestroyed()) finestraGesti.setAlwaysOnTop(true, "screen-saver");
+});
+
 ipcMain.on("os:apriVista", (_e, vista) => {
   apriFinestraVista(vista);
 });
@@ -136,6 +247,20 @@ app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) creaFinestra();
   });
+  // Via di FUGA: chiude sempre l'overlay gesti, anche se desse problemi.
+  try {
+    globalShortcut.register("CommandOrControl+Shift+G", () => chiudiOverlayGesti());
+  } catch {
+    /* shortcut non registrabile */
+  }
+});
+
+app.on("will-quit", () => {
+  try {
+    globalShortcut.unregisterAll();
+  } catch {
+    /* noop */
+  }
 });
 
 app.on("window-all-closed", () => {

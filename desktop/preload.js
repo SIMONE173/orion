@@ -24,6 +24,14 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   esegui: (dati) => ipcRenderer.invoke("os:esegui", dati),
   scriviFile: (dati) => ipcRenderer.invoke("os:scriviFile", dati),
   leggiFile: (dati) => ipcRenderer.invoke("os:leggiFile", dati),
+  // Gesture Mode nativa: overlay che manovra le finestre-pannello con le mani.
+  gestiOn: () => ipcRenderer.send("os:gestiOn"),
+  gestiOff: () => ipcRenderer.send("os:gestiOff"),
+  gestiFinestre: () => ipcRenderer.invoke("os:gestiFinestre"),
+  gestiSposta: (dati) => ipcRenderer.send("os:gestiSposta", dati),
+  gestiRidimensiona: (dati) => ipcRenderer.send("os:gestiRidimensiona", dati),
+  gestiChiudi: (dati) => ipcRenderer.send("os:gestiChiudi", dati),
+  gestiAvanti: (dati) => ipcRenderer.send("os:gestiAvanti", dati),
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra: () => ipcRenderer.send("os:mostraFinestra"),
   onFinestra: (cb) => ipcRenderer.on("orion:finestra", (_e, stato) => cb(stato)),

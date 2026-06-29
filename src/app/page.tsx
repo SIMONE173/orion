@@ -43,6 +43,9 @@ type OrionDesktop = {
   esegui?: (d: { comando: string; cwd?: string }) => Promise<{ ok: boolean; code?: number | null; stdout?: string; stderr?: string; errore?: string }>;
   scriviFile?: (d: { percorso: string; contenuto: string }) => Promise<{ ok: boolean; percorso?: string; errore?: string }>;
   leggiFile?: (d: { percorso: string }) => Promise<{ ok: boolean; percorso?: string; contenuto?: string; errore?: string }>;
+  // Gesture Mode nativa: overlay che manovra le finestre-pannello con le mani.
+  gestiOn?: () => void;
+  gestiOff?: () => void;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
   // Solo desktop: chiude le finestre-pannello (per tipo, o "tutto").
@@ -416,6 +419,15 @@ export default function Home() {
     setViste((vs) => vs.filter((v) => v.tipo !== tipo));
     if (tipo === "documento" || tipo === "documenti") setDocView(null);
   }, []);
+
+  // Desktop: la modalità gesti usa l'OVERLAY NATIVO (manovra le finestre reali).
+  // Su web resta la gesture-mode DOM (vedi render più sotto). Additivo, opt-in.
+  useEffect(() => {
+    const d = desktopBridge();
+    if (!d?.gestiOn) return; // solo desktop
+    if (gestiAttivi) d.gestiOn!();
+    else d.gestiOff!();
+  }, [gestiAttivi]);
 
   // ── Snap ai bordi/metà schermo (affiancare i pannelli con un gesto) ────────
   const [snapHint, setSnapHint] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -1066,7 +1078,7 @@ export default function Home() {
         />
       )}
 
-      {gestiAttivi && (
+      {gestiAttivi && !desktopBridge()?.gestiOn && (
         <>
           {snapHint && (
             <div
