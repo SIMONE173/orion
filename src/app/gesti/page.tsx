@@ -7,8 +7,11 @@ import { useEffect, useRef } from "react";
 // le FINESTRE-pannello reali via il bridge window.orionDesktop.gesti*. Disegna solo
 // il cursore (sfondo trasparente). In un browser normale (senza bridge) è no-op.
 
-const PINCH_ON = 0.05;
-const PINCH_OFF = 0.09;
+// Pinch misurato come RAPPORTO (distanza pollice-indice / dimensione della mano):
+// così è indipendente da quanto la mano è lontana/piccola nell'inquadratura → una
+// mano aperta non viene più scambiata per un pinch. Isteresi per stabilità.
+const PINCH_ON = 0.4; // sotto questo rapporto = pinch
+const PINCH_OFF = 0.62; // sopra = mano aperta
 const SENSIBILITA = 2.4; // zona centrale della camera → tutto lo schermo
 const VERSIONE_WASM = "0.10.35";
 
@@ -240,9 +243,11 @@ export default function GestiOverlay() {
       const lms = res.landmarks ?? [];
       for (let i = 0; i < Math.min(2, lms.length); i++) {
         const lm = lms[i];
-        const dist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+        // rapporto pinch = distanza pollice(4)-indice(8) / dimensione mano (polso 0 → nocca media 9)
+        const ref = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y) || 0.0001;
+        const ratio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref;
         const era = pinchStato[i];
-        const ora = era ? dist < PINCH_OFF : dist < PINCH_ON;
+        const ora = era ? ratio < PINCH_OFF : ratio < PINCH_ON;
         pinchStato[i] = ora;
         const ax = 0.5 + ((lm[4].x + lm[8].x) / 2 - 0.5) * SENSIBILITA;
         const ay = 0.5 + ((lm[4].y + lm[8].y) / 2 - 0.5) * SENSIBILITA;

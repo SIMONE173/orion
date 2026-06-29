@@ -41,8 +41,10 @@ class OneEuro {
   }
 }
 
-const PINCH_ON = 0.05; // distanza normalizzata pollice↔indice per "chiudere"
-const PINCH_OFF = 0.09; // soglia di rilascio (isteresi → niente sfarfallio)
+// Pinch come RAPPORTO (dist pollice-indice / dimensione mano): indipendente dalla
+// distanza dalla camera → una mano aperta non viene scambiata per pinch. Isteresi.
+const PINCH_ON = 0.4; // sotto = pinch
+const PINCH_OFF = 0.62; // sopra = mano aperta
 // Sensibilità del movimento: solo una zona CENTRALE dell'inquadratura copre tutto
 // lo schermo, così il dito non deve mai uscire dall'obiettivo per raggiungere i bordi.
 const SENSIBILITA = 2.4;
@@ -138,10 +140,12 @@ export function GestiMode({
         const lm = lms[i];
         const pollice = lm[4];
         const indice = lm[8];
-        const dist = Math.hypot(pollice.x - indice.x, pollice.y - indice.y);
+        // rapporto pinch = dist pollice-indice / dimensione mano (polso 0 → nocca media 9)
+        const ref = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y) || 0.0001;
+        const ratio = Math.hypot(pollice.x - indice.x, pollice.y - indice.y) / ref;
         // isteresi
         const era = pinchStato.current[i];
-        const ora = era ? dist < PINCH_OFF : dist < PINCH_ON;
+        const ora = era ? ratio < PINCH_OFF : ratio < PINCH_ON;
         pinchStato.current[i] = ora;
         // punto = midpoint, AMPLIFICATO attorno al centro (sensibilità), specchiato.
         const cx = 0.5 + ((pollice.x + indice.x) / 2 - 0.5) * SENSIBILITA;
