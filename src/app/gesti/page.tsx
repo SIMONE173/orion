@@ -65,7 +65,9 @@ export default function GestiOverlay() {
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
     let grab: { tipo: string; offX: number; offY: number } | null = null;
     let resize: { tipo: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
-    let ultimo: { sx: number; sy: number } | null = null;
+    let selezionata: string | null = null; // finestra "attiva" (bordo illuminato)
+    let traccia: { x: number; y: number; t: number }[] = []; // storia cursore per gli swipe
+    let swipeCooldown = 0;
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -92,10 +94,18 @@ export default function GestiOverlay() {
       return found;
     };
     const rectDi = (tipo: string) => bounds.finestre.find((f) => f.tipo === tipo) || null;
-    const vicinoBordo = (sx: number, sy: number): boolean => {
+    // Aggancia una finestra a metà schermo (lato sinistro/destro).
+    const snap = (tipo: string, lato: "sx" | "dx") => {
       const o = bounds.origin;
-      const m = 26;
-      return sx < o.x + m || sx > o.x + window.innerWidth - m || sy < o.y + m || sy > o.y + window.innerHeight - m;
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const top = 30; // sotto la barra dei menu
+      const bot = 12;
+      const w = Math.round(W / 2);
+      const h = H - top - bot;
+      const x = lato === "sx" ? o.x : o.x + (W - w);
+      od.gestiRidimensiona({ tipo, w, h });
+      od.gestiSposta({ tipo, x, y: o.y + top });
     };
 
     const disegna = (mani: Mano[]) => {
@@ -105,6 +115,21 @@ export default function GestiOverlay() {
       cv.height = window.innerHeight;
       const ctx = cv.getContext("2d")!;
       ctx.clearRect(0, 0, cv.width, cv.height);
+      // Bordo ILLUMINATO della finestra selezionata (a cui si applicano gli swipe).
+      if (selezionata) {
+        const f = rectDi(selezionata);
+        if (f) {
+          const x = f.x - bounds.origin.x;
+          const y = f.y - bounds.origin.y;
+          ctx.save();
+          ctx.strokeStyle = "#22d3ee";
+          ctx.lineWidth = 3;
+          ctx.shadowColor = "#22d3ee";
+          ctx.shadowBlur = 26;
+          ctx.strokeRect(x + 1.5, y + 1.5, f.w - 3, f.h - 3);
+          ctx.restore();
+        }
+      }
       for (const m of mani) {
         ctx.beginPath();
         ctx.arc(m.cx, m.cy, m.pinch ? 11 : 17, 0, Math.PI * 2);
@@ -118,15 +143,24 @@ export default function GestiOverlay() {
       }
     };
 
-    const gestisci = (mani: Mano[]) => {
+    const gestisci = (mani: Mano[], now: number) => {
       const pin = mani.filter((m) => m.pinch);
+      const cursore = pin[0] ?? mani[0] ?? null;
+      // SELEZIONE (sticky): la finestra sotto il cursore diventa "attiva" (bordo illuminato).
+      if (cursore) {
+        const f = sotto(cursore.sx, cursore.sy);
+        if (f) selezionata = f.tipo;
+      }
+
       if (pin.length >= 2) {
+        // DUE MANI → ridimensiona (ancorato al centro).
         const [a, b] = pin;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
-          const f = grab ? rectDi(grab.tipo) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
+          const f = grab ? rectDi(grab.tipo) : selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
           if (f) {
             resize = { tipo: f.tipo, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
+            selezionata = f.tipo;
             od.gestiAvanti({ tipo: f.tipo });
           }
         } else {
@@ -137,26 +171,53 @@ export default function GestiOverlay() {
           od.gestiSposta({ tipo: resize.tipo, x: resize.cx - w / 2, y: resize.cy - h / 2 });
         }
         grab = null;
+        traccia = [];
         return;
       }
       resize = null;
 
       if (pin.length === 1) {
+        // PINCH → aggancia e sposta liberamente la finestra.
         const m = pin[0];
-        ultimo = { sx: m.sx, sy: m.sy };
         if (!grab) {
           const f = sotto(m.sx, m.sy);
           if (f) {
             grab = { tipo: f.tipo, offX: m.sx - f.x, offY: m.sy - f.y };
+            selezionata = f.tipo;
             od.gestiAvanti({ tipo: f.tipo });
           }
         } else {
           od.gestiSposta({ tipo: grab.tipo, x: m.sx - grab.offX, y: m.sy - grab.offY });
         }
+        traccia = [];
+        swipeCooldown = now + 300; // grazia dopo aver lasciato il pinch
       } else {
-        // rilascio: chiusura se il cursore è al bordo dello schermo.
-        if (grab && ultimo && vicinoBordo(ultimo.sx, ultimo.sy)) od.gestiChiudi({ tipo: grab.tipo });
         grab = null;
+        // MANO APERTA → swipe sulla finestra SELEZIONATA: sx/dx = aggancia a metà, giù = chiudi.
+        if (cursore) {
+          traccia.push({ x: cursore.cx, y: cursore.cy, t: now });
+          while (traccia.length && now - traccia[0].t > 220) traccia.shift();
+          if (now >= swipeCooldown && traccia.length >= 3 && selezionata) {
+            const a = traccia[0];
+            const b = traccia[traccia.length - 1];
+            const dt = b.t - a.t;
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const dist = Math.hypot(dx, dy);
+            if (dt > 0 && dist > 240 && dist / dt > 1.3) {
+              if (Math.abs(dx) > Math.abs(dy) * 1.3) {
+                snap(selezionata, dx < 0 ? "sx" : "dx");
+                swipeCooldown = now + 900;
+                traccia = [];
+              } else if (dy > Math.abs(dx) * 1.1) {
+                od.gestiChiudi({ tipo: selezionata });
+                selezionata = null;
+                swipeCooldown = now + 900;
+                traccia = [];
+              }
+            }
+          }
+        }
       }
     };
 
@@ -190,7 +251,7 @@ export default function GestiOverlay() {
         mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, pinch: ora });
       }
       disegna(mani);
-      gestisci(mani);
+      gestisci(mani, t);
     };
 
     (async () => {
