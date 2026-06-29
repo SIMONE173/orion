@@ -115,18 +115,22 @@ export default function GestiOverlay() {
       cv.height = window.innerHeight;
       const ctx = cv.getContext("2d")!;
       ctx.clearRect(0, 0, cv.width, cv.height);
-      // Bordo ILLUMINATO della finestra selezionata (a cui si applicano gli swipe).
+      // PALLINO che pulsa (si illumina e si spegne) nell'angolo della finestra
+      // SELEZIONATA: indica quale pannello riceve gli swipe, senza bordi invadenti.
       if (selezionata) {
         const f = rectDi(selezionata);
         if (f) {
-          const x = f.x - bounds.origin.x;
-          const y = f.y - bounds.origin.y;
+          const x = f.x - bounds.origin.x + f.w - 16;
+          const y = f.y - bounds.origin.y + 16;
+          const pulse = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
           ctx.save();
-          ctx.strokeStyle = "#22d3ee";
-          ctx.lineWidth = 3;
+          ctx.globalAlpha = pulse;
+          ctx.fillStyle = "#22d3ee";
           ctx.shadowColor = "#22d3ee";
-          ctx.shadowBlur = 26;
-          ctx.strokeRect(x + 1.5, y + 1.5, f.w - 3, f.h - 3);
+          ctx.shadowBlur = 14;
+          ctx.beginPath();
+          ctx.arc(x, y, 5, 0, Math.PI * 2);
+          ctx.fill();
           ctx.restore();
         }
       }
