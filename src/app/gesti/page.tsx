@@ -265,6 +265,9 @@ export default function GestiOverlay() {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "transparent" }}>
+      {/* Trasparenza garantita dal PRIMO paint (SSR): l'overlay nativo non mostra
+          mai il velo scuro di globals.css prima che parta l'effetto. */}
+      <style>{`html,body{background:transparent !important;overflow:hidden}`}</style>
       <video ref={videoRef} muted playsInline style={{ position: "fixed", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
       <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, pointerEvents: "none" }} />
     </div>

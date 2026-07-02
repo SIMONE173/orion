@@ -424,7 +424,19 @@ export default function Home() {
   // Su web resta la gesture-mode DOM (vedi render più sotto). Additivo, opt-in.
   useEffect(() => {
     const d = desktopBridge();
-    if (!d?.gestiOn) return; // solo desktop
+    if (!d) return; // web: se ne occupa l'overlay DOM (render più sotto)
+    if (!d.gestiOn) {
+      // Desktop senza overlay nativo (app non ancora ricostruita): NON accendere
+      // l'overlay DOM pesante (camera+MediaPipe in finestra) — bloccherebbe lo
+      // schermo. Rispegni e avvisa. Così ✋ non resta acceso a vuoto.
+      if (gestiAttivi) {
+        setGestiAttivi(false);
+        speakRef.current?.(
+          "Per i comandi gestuali serve aggiornare l'app desktop. Per ora li ho lasciati spenti."
+        );
+      }
+      return;
+    }
     if (gestiAttivi) d.gestiOn!();
     else d.gestiOff!();
   }, [gestiAttivi]);
@@ -1078,7 +1090,7 @@ export default function Home() {
         />
       )}
 
-      {gestiAttivi && !desktopBridge()?.gestiOn && (
+      {gestiAttivi && !desktopBridge() && (
         <>
           {snapHint && (
             <div
