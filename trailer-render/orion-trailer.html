@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1920, initial-scale=1" />
+<title>ORION — Trailer ufficiale</title>
+<style>
+  /* ════════════════════════════════════════════════════════════════════
+     ORION — TRAILER UFFICIALE (identità REALE, testi in italiano).
+     Tutto è funzione di un solo orologio T (ms): render deterministico
+     frame-by-frame + sync audio. Identità 1:1: #05070d, nucleo cyan, glass.
+     ════════════════════════════════════════════════════════════════════ */
+  :root { color-scheme: dark; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1920px; height: 1080px; overflow: hidden; background: #05070d; color: #e6edf6;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+  #ambient { position: absolute; inset: 0; pointer-events: none;
+    background:
+      radial-gradient(1200px 800px at 50% -10%, rgba(56,232,255,0.10), transparent 60%),
+      radial-gradient(900px 700px at 100% 110%, rgba(99,102,241,0.10), transparent 55%),
+      #05070d; }
+  #world { position: absolute; inset: 0; }
+  .scene { position: absolute; inset: 0; display: grid; place-items: center; will-change: opacity; }
+  .cam { position: absolute; inset: 0; display: grid; place-items: center; will-change: transform; }
+
+  /* nucleo (riproduzione fedele di OrionCore) */
+  .orion-core { position: relative; display: grid; place-items: center; border-radius: 9999px; }
+  .orion-core .ring { position: absolute; inset: 0; border-radius: 9999px; border: 1px solid rgba(56,232,255,0.35); }
+  .orion-core .ring.r2 { inset: 10%; opacity: 0.6; } .orion-core .ring.r3 { inset: 18%; opacity: 0.4; }
+  .orion-core .halo { position: absolute; inset: -12%; border-radius: 9999px;
+    background: radial-gradient(circle, rgba(56,232,255,0.18), transparent 65%); }
+  .orion-core .nucleus { position: absolute; inset: 22%; border-radius: 9999px;
+    background: radial-gradient(circle at 35% 30%, #9af4ff, #38e8ff 35%, #0b7d92 75%, #053842);
+    box-shadow: 0 0 30px rgba(56,232,255,0.55), 0 0 80px rgba(56,232,255,0.25), inset 0 0 24px rgba(255,255,255,0.35); }
+
+  .glass { background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); border-radius: 18px; }
+  .label { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.3em; color: rgba(125,228,255,0.72); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .cine-text { text-align: center; line-height: 1.12; }
+  .cine-text .l1 { font-size: 62px; font-weight: 200; letter-spacing: -0.01em; color: #eaf6ff; }
+  .cine-text .l2 { font-size: 62px; font-weight: 200; letter-spacing: -0.01em; color: #7fe9ff; }
+
+  .bar { position: absolute; left: 0; right: 0; height: 88px; background: #000; z-index: 50; pointer-events: none; }
+  .bar.top { top: 0; } .bar.bot { bottom: 0; }
+  #vignette { position: absolute; inset: 0; z-index: 45; pointer-events: none;
+    background: radial-gradient(120% 120% at 50% 50%, transparent 55%, rgba(0,0,0,0.55) 100%); }
+  #grain { position: absolute; inset: -50px; z-index: 46; pointer-events: none; opacity: 0.05; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"); }
+
+  .panel { padding: 26px 28px; }
+  .panel h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: #c9f3ff; margin-bottom: 16px; }
+  .chip { border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); padding: 12px 14px; }
+  .chip .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.14em; color: #6f7d92; }
+  .chip .v { margin-top: 4px; font-size: 15px; color: #d6e2f0; }
+  .sweep { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; overflow: hidden; }
+  .sweep > i { position: absolute; top: -10%; bottom: -10%; width: 40%;
+    background: linear-gradient(105deg, transparent, rgba(255,255,255,0.10), transparent); }
+
+  /* ── barra comando vocale (come si usa: parli → ORION agisce) ── */
+  .voice { display: inline-flex; align-items: center; gap: 16px; padding: 12px 22px; border-radius: 9999px;
+    background: rgba(8,18,26,0.6); border: 1px solid rgba(56,232,255,0.28); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+  .voice .vmic { width: 26px; height: 26px; flex: none; }
+  .voice .wave { display: flex; align-items: center; gap: 3px; height: 26px; }
+  .voice .wave i { width: 3px; border-radius: 3px; background: #7fe9ff; height: 6px; }
+  .voice .vtext { font-size: 20px; color: #dff1fb; font-weight: 300; white-space: nowrap; }
+  .voice .caret { display: inline-block; width: 2px; height: 20px; margin-left: 2px; background: #7fe9ff; vertical-align: -3px; }
+
+  /* ── desktop (scena gesti) ── */
+  .desk { position: absolute; inset: 0; overflow: hidden;
+    background: radial-gradient(1100px 700px at 30% 20%, rgba(56,232,255,0.08), transparent 60%),
+                radial-gradient(900px 800px at 85% 90%, rgba(99,102,241,0.10), transparent 60%),
+                linear-gradient(160deg, #060a12, #04060c); }
+  .menubar { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; gap: 20px;
+    padding: 0 22px; font-size: 13px; color: rgba(220,232,245,0.75);
+    background: rgba(8,12,20,0.55); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .menubar .mi { opacity: 0.8; } .menubar .right { margin-left: auto; display: flex; gap: 16px; opacity: 0.8; }
+  .dock { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); display: flex; gap: 14px; padding: 10px 16px;
+    border-radius: 22px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+  .dock .di { width: 48px; height: 48px; border-radius: 13px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 6px 16px rgba(0,0,0,0.4); }
+  .win { position: absolute; border-radius: 14px; overflow: hidden; will-change: transform;
+    background: rgba(16,22,32,0.72); border: 1px solid rgba(255,255,255,0.10); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5); }
+  .win .tb { height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 12px; background: rgba(255,255,255,0.05); }
+  .win .tb .d { width: 11px; height: 11px; border-radius: 9px; }
+  .win .tb .t { margin-left: 8px; font-size: 12px; color: #b9c6d6; letter-spacing: .02em; }
+  .win .body { padding: 16px; }
+  .win .ln { height: 9px; border-radius: 6px; background: rgba(255,255,255,0.08); margin: 11px 0; }
+  .hand { position: absolute; width: 46px; height: 46px; transform: translate(-50%,-50%); pointer-events: none; z-index: 40;
+    filter: drop-shadow(0 0 14px rgba(56,232,255,0.55)); }
+  .ghint { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 12px;
+    padding: 11px 20px; border-radius: 9999px; background: rgba(8,18,26,0.66); border: 1px solid rgba(56,232,255,0.3); font-size: 19px; color: #dff1fb; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="ambient"></div>
+  <div id="world"></div>
+  <div id="grain"></div>
+  <div id="vignette"></div>
+  <div class="bar top"></div>
+  <div class="bar bot"></div>
+</div>
+
+<script>
+const W = 1920, H = 1080;
+const world = document.getElementById('world');
+const grain = document.getElementById('grain');
+const clamp01 = x => x < 0 ? 0 : x > 1 ? 1 : x;
+const lerp = (a,b,t) => a + (b-a)*t;
+const smooth = t => { t = clamp01(t); return t*t*(3-2*t); };
+const ease = t => { t = clamp01(t); return 1-Math.pow(1-t,3); };
+const easeIO = t => { t = clamp01(t); return t<0.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; };
+const seg = (p,a,b) => clamp01((p-a)/(b-a));
+const PI = Math.PI;
+
+function coreHTML(){ return `<div class="orion-core" style="width:100%;height:100%"><div class="halo"></div>
+  <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="nucleus"></div></div>`; }
+function driveCore(el, T, intensity, ignite){
+  intensity = clamp01(intensity); ignite = clamp01(ignite||0);
+  const halo = el.querySelector('.halo'), nuc = el.querySelector('.nucleus'), rings = el.querySelectorAll('.ring');
+  const breathe = 1 + (0.045 + 0.075*intensity) * Math.sin(T/(700 - 300*intensity));
+  const sz = el.offsetWidth || 240;
+  nuc.style.transform = `scale(${breathe})`;
+  const glow = 0.55 + 0.5*intensity + 1.4*ignite;
+  nuc.style.boxShadow = `0 0 ${30*(sz/240)*(1+0.6*ignite)}px rgba(56,232,255,${glow}), 0 0 ${80*(sz/240)*(1+1.2*ignite)}px rgba(56,232,255,${0.25+0.45*intensity+0.7*ignite}), inset 0 0 24px rgba(255,255,255,${0.35+0.4*ignite})`;
+  nuc.style.filter = `brightness(${1+0.9*ignite}) saturate(${1+0.3*ignite})`;
+  halo.style.opacity = (0.5 + 0.4*intensity + 0.6*ignite).toFixed(3);
+  halo.style.transform = `scale(${1+0.12*intensity+0.5*ignite})`;
+  const s = T/120 * (0.5 + intensity);
+  rings[0].style.transform = `rotate(${s}deg)`; rings[1].style.transform = `rotate(${-s*0.7}deg)`; rings[2].style.transform = `rotate(${s*1.3}deg)`;
+  rings.forEach(r=>{ r.style.borderColor = `rgba(56,232,255,${0.30+0.4*intensity})`; });
+}
+function reveal(el, lp){ lp = clamp01(lp); const e = ease(lp); const b = el.dataset.base ? el.dataset.base+' ' : '';
+  el.style.opacity = smooth(lp/0.6); el.style.transform = `${b}translateY(${(1-e)*22}px) scale(${0.94+0.06*e})`; el.style.filter = `blur(${(1-smooth(lp/0.55))*8}px)`; }
+function base(el, t){ el.dataset.base = t; return el; }
+function sweep(el, lp){ const i = el.querySelector('.sweep > i'); if(!i) return;
+  const x = lerp(-50, 150, ease(clamp01((lp-0.05)/0.5))); i.style.transform = `translateX(${x*4}px) skewX(-12deg)`; i.style.opacity = lp>0.02 && lp<0.65 ? 1 : 0; }
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; }
+function glassPanel(title, inner){ const p=el('div','glass panel'); p.innerHTML = `<div class="sweep"><i></i></div>` + (title?`<h3>${title}</h3>`:'') + inner; return p; }
+function cineText(l1, l2){ const c=el('div','cine-text'); c.dataset.base='translateX(-50%)'; c.innerHTML = `<div class="l1">${l1}</div>` + (l2?`<div class="l2">${l2}</div>`:''); return c; }
+
+// barra comando vocale: micro + onda + testo che si "scrive"
+const MIC = `<svg class="vmic" viewBox="0 0 24 24" fill="none" stroke="#7fe9ff" stroke-width="1.6"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0"/><line x1="12" y1="17" x2="12" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/></svg>`;
+function voiceBar(text){ const w=el('div','voice'); w._text=text; w.innerHTML = MIC + `<div class="wave">${Array.from({length:16}).map(()=>'<i></i>').join('')}</div><div class="vtext"></div><span class="caret"></span>`; return w; }
+function driveVoice(w, lp, T){
+  const bars = w.querySelectorAll('.wave i');
+  bars.forEach((b,i)=>{ const a = (lp>0.02 && lp<0.98) ? 1 : 0.25; b.style.height = (6 + a*16*Math.abs(Math.sin(T/130 + i*0.7))).toFixed(1)+'px'; b.style.opacity = 0.5+0.5*a; });
+  const n = Math.floor(clamp01((lp-0.05)/0.45) * w._text.length);
+  w.querySelector('.vtext').textContent = w._text.slice(0, n);
+  w.querySelector('.caret').style.opacity = (Math.floor(T/420)%2 && lp<0.98) ? 1 : 0;
+}
+
+// ── TIMELINE ───────────────────────────────────────────────────────────────
+const FADE = 750; let cursor = 0; const SC = {};
+function scene(name, dur, build){
+  const t0 = cursor, t1 = cursor + dur;
+  const root = el('div','scene'); root.style.opacity=0; root.style.display='none';
+  const cam = el('div','cam'); root.appendChild(cam);
+  const api = build(cam); world.appendChild(root);
+  SC[name] = { t0, t1, dur, root, cam, update: api && api.update };
+  cursor = t1 - FADE; return SC[name];
+}
+let NOW = 0;
+const opOf = s => { const T=NOW; if (T<=s.t0-FADE || T>=s.t1+FADE) return 0; if (T<s.t0) return smooth((T-(s.t0-FADE))/FADE); if (T>s.t1) return smooth(1-(T-s.t1)/FADE); return 1; };
+const prOf = s => clamp01((NOW - s.t0)/(s.t1 - s.t0));
+
+// ════════════════════════════════════════════════════════════════════════
+//  SCENE
+// ════════════════════════════════════════════════════════════════════════
+
+/* 1 · IL CAOS */
+scene('chaos', 14000, (cam)=>{
+  const field = el('div'); field.style.cssText='position:absolute;inset:0;'; cam.appendChild(field);
+  const apps = ['Mail','Calendario','Fattura_04.pdf','CRM','Slack','Foglio.xlsx','Contratto.docx','Zoom','Drive','Note','Attività','Report.pdf','Banca','ERP','Chat','Preventivo'];
+  const R = (s)=>{ let x = Math.sin(s*99.13)*43758.5453; return x-Math.floor(x); };
+  const wins = [];
+  for(let i=0;i<16;i++){ const w = el('div','glass'); const ww=230+R(i)*150, hh=150+R(i+9)*120;
+    const cx=lerp(160,W-160-ww,R(i+1)), cy=lerp(150,H-200-hh,R(i+2));
+    w.style.cssText=`position:absolute;width:${ww}px;height:${hh}px;left:${cx}px;top:${cy}px;border-radius:12px;overflow:hidden;`;
+    w.innerHTML=`<div style="height:26px;background:rgba(255,255,255,0.05);display:flex;align-items:center;gap:6px;padding:0 10px;">
+      <span style="width:8px;height:8px;border-radius:9px;background:#ff5f57"></span><span style="width:8px;height:8px;border-radius:9px;background:#febc2e"></span><span style="width:8px;height:8px;border-radius:9px;background:#28c840"></span>
+      <span style="margin-left:8px;font-size:11px;color:#8a98ad;letter-spacing:.04em">${apps[i]}</span></div>
+      <div style="padding:12px;">${Array.from({length:3+Math.floor(R(i+5)*3)}).map((_,k)=>`<div style="height:7px;border-radius:6px;margin:9px 0;background:rgba(255,255,255,${0.05+0.04*R(i+k)});width:${40+R(i+k+3)*55}%"></div>`).join('')}</div>`;
+    field.appendChild(w); wins.push({el:w,x:cx,y:cy}); }
+  const badges=[]; for(let i=0;i<10;i++){ const b=el('div'); b.style.cssText=`position:absolute;min-width:22px;height:22px;border-radius:11px;background:#ff3b30;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;box-shadow:0 4px 14px rgba(255,59,48,.5);padding:0 6px;`; b.textContent=1+Math.floor(R(i+20)*9); field.appendChild(b); badges.push(b); }
+  const cap = cineText('Il lavoro è diventato','troppo complicato.'); cap.style.cssText='position:absolute;left:50%;bottom:140px;transform:translateX(-50%);z-index:5;'; cam.appendChild(cap);
+  return { update(p,T){
+    wins.forEach((w,i)=>{ const ap=clamp01((p*16-i)*1.4); const jx=Math.sin(T/90+i)*1.6*ap, jy=Math.cos(T/110+i*2)*1.4*ap; w.el.style.opacity=ap; w.el.style.transform=`translate(${jx}px,${jy}px) scale(${0.9+0.1*ease(ap)})`; });
+    badges.forEach((b,i)=>{ const w=wins[(i+3)%wins.length]; const pop=clamp01((p*16-(i+4))*2.2); b.style.left=(w.x+w.el.offsetWidth-14)+'px'; b.style.top=(w.y-8)+'px'; b.style.opacity=pop; b.style.transform=`scale(${pop*(1+0.15*Math.abs(Math.sin(T/200+i)))})`; });
+    cam.style.transform=`scale(${1.0+0.06*p}) translateY(${-6*p}px)`;
+    reveal(cap,(p-0.45)/0.18);
+  }};
+});
+
+/* 2 · ARRIVA ORION */
+scene('arrive', 15000, (cam)=>{
+  const line=el('div'); line.style.cssText=`position:absolute;left:0;top:50%;height:2px;width:100%;background:#9af4ff;box-shadow:0 0 40px 8px rgba(56,232,255,0.85);transform-origin:50% 50%;`; cam.appendChild(line);
+  const coreWrap=el('div'); coreWrap.style.cssText='width:300px;height:300px;'; coreWrap.innerHTML=coreHTML(); cam.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  const verbs=['osserva','analizza','capisce'];
+  const vEls=verbs.map((v)=>{ const e=el('div','label',v); e.style.cssText=`position:absolute;left:50%;top:50%;font-size:20px;letter-spacing:.32em;`; cam.appendChild(e); return e; });
+  const cap=cineText('Capisce.','Prima di agire.'); cap.style.cssText='position:absolute;left:50%;bottom:140px;transform:translateX(-50%);'; cam.appendChild(cap);
+  return { update(p,T){
+    const flash=p<0.14; line.style.opacity=flash?smooth(p/0.05)*(1-smooth((p-0.06)/0.06)):0; line.style.transform=`scaleX(${ease(clamp01(p/0.08))})`;
+    const born=clamp01((p-0.07)/0.16); coreWrap.style.opacity=born; coreWrap.style.transform=`scale(${lerp(0.55,1,ease(born))})`;
+    driveCore(core,T, lerp(0,0.55,clamp01((p-0.18)/0.3))+(p>0.55?0.25:0), p<0.2?ease(clamp01((p-0.07)/0.08)):0);
+    vEls.forEach((e,i)=>{ const s0=0.30+i*0.13; const lp=clamp01((p-s0)/0.16); const ang=-PI/2+i*(2*PI/3)+T/2200; const rad=lerp(330,70,ease(lp));
+      e.style.transform=`translate(-50%,-50%) translate(${Math.cos(ang)*rad}px,${Math.sin(ang)*rad}px) scale(${lerp(1,0.4,ease(lp))})`; e.style.opacity=smooth(lp/0.25)*(1-smooth((lp-0.7)/0.3)); e.style.color=`rgba(125,228,255,${0.6+0.4*lp})`; });
+    cam.style.transform=`scale(${1.05-0.05*ease(p)})`; reveal(cap,(p-0.7)/0.16);
+  }};
+});
+
+/* 3 · COME SI USA — BRIEFING A VOCE (parli → ORION agisce) */
+scene('briefing', 16000, (cam)=>{
+  const vb=voiceBar('«Ehi ORION, com’è la mia giornata?»'); vb.style.cssText='position:absolute;left:50%;top:120px;transform:translateX(-50%);'; cam.appendChild(vb);
+  const grid=el('div'); grid.style.cssText='display:grid;grid-template-columns:auto 1fr;align-items:center;gap:70px;width:1280px;margin-top:60px;'; cam.appendChild(grid);
+  const coreWrap=el('div'); coreWrap.style.cssText='width:180px;height:180px;'; coreWrap.innerHTML=coreHTML(); grid.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  const right=el('div'); right.style.cssText='max-width:760px;'; grid.appendChild(right);
+  right.appendChild(el('div','label','BUONGIORNO · OGGI'));
+  const head=el('div'); head.style.cssText='margin-top:6px;font-size:30px;font-weight:200;color:#eaf6ff;'; head.textContent='Tre cose, prima di iniziare.'; right.appendChild(head);
+  const list=el('div'); list.style.cssText='margin-top:22px;display:flex;flex-direction:column;gap:12px;'; right.appendChild(list);
+  const items=[['09:00','Bianchi aspetta da 5 giorni — meglio rispondere oggi.'],['11:30','Riunione di domani — materiale già pronto.'],['VEN','Conflitto in agenda venerdì — soluzione pronta.']];
+  const cards=items.map(([t,m])=>{ const c=el('div','glass'); c.style.cssText='display:flex;align-items:center;gap:16px;padding:16px 20px;border-radius:14px;'; c.innerHTML=`<div class="sweep"><i></i></div><div class="mono" style="font-size:13px;color:#7fe9ff;width:48px;flex:none">${t}</div><div style="font-size:18px;color:#d9e6f4">${m}</div>`; list.appendChild(c); return c; });
+  const btn=el('div'); btn.style.cssText='margin-top:24px;display:inline-block;background:rgba(34,211,238,0.9);color:#04222b;font-weight:600;font-size:16px;padding:13px 26px;border-radius:13px;'; btn.textContent='Conferma'; right.appendChild(btn);
+  return { update(p,T){
+    driveVoice(vb, seg(p,0.02,0.30), T); vb.style.opacity = smooth(seg(p,0.02,0.1))*(1-smooth(seg(p,0.85,1)));
+    driveCore(core,T, p>0.32?0.8:0.4, 0);
+    reveal(right.children[0],(p-0.30)/0.1); reveal(head,(p-0.36)/0.12);
+    cards.forEach((c,i)=>{ const lp=(p-(0.44+i*0.12))/0.14; reveal(c,lp); sweep(c,lp); });
+    reveal(btn,(p-0.84)/0.14);
+    cam.style.transform=`scale(${1.0+0.03*ease(p)})`;
+  }};
+});
+
+/* 4 · MEMORIA */
+scene('memory', 14000, (cam)=>{
+  const wrap=el('div'); wrap.style.cssText='position:relative;width:1320px;height:620px;'; cam.appendChild(wrap);
+  const center=el('div','glass'); center.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:18px 26px;border-radius:16px;text-align:center;z-index:3;border-color:rgba(56,232,255,0.3);background:rgba(34,211,238,0.06);';
+  center.innerHTML=`<div class="sweep"><i></i></div><div class="label">CLIENTE</div><div style="margin-top:6px;font-size:26px;font-weight:300;color:#eaf6ff">Marco Rossi</div>`; base(center,'translate(-50%,-50%)'); wrap.appendChild(center);
+  const nodes=[['STORICO','7 interazioni · dal 2024'],['DOCUMENTI','Contratto · 3 fatture · brief'],['ATTIVITÀ','2 task aperti · 1 scade ven'],['CONVERSAZIONI','Email · WhatsApp · note'],['DECISIONI','Sconto 15% sul rinnovo'],['PROMEMORIA','Follow-up programmato']];
+  const ang0=-PI/2;
+  const nEls=nodes.map(([k,v],i)=>{ const a=ang0+i*(2*PI/6); const x=660+Math.cos(a)*520, y=310+Math.sin(a)*235;
+    const n=el('div','glass'); n.style.cssText=`position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-50%);width:300px;padding:14px 16px;border-radius:14px;`;
+    n.innerHTML=`<div class="sweep"><i></i></div><div class="label">${k}</div><div style="margin-top:5px;font-size:16px;color:#d6e2f0">${v}</div>`; base(n,'translate(-50%,-50%)'); wrap.appendChild(n); return {n,x,y}; });
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.setAttribute('width','1320'); svg.setAttribute('height','620'); svg.style.cssText='position:absolute;inset:0;z-index:1;overflow:visible;';
+  const lines=nEls.map(({x,y})=>{ const l=document.createElementNS('http://www.w3.org/2000/svg','line'); l.setAttribute('x1',660);l.setAttribute('y1',310);l.setAttribute('x2',x);l.setAttribute('y2',y);l.setAttribute('stroke','rgba(56,232,255,0.35)');l.setAttribute('stroke-width','1.5'); svg.appendChild(l); return l;}); wrap.appendChild(svg);
+  const cap=cineText('Tutto.','Nel contesto.'); cap.style.cssText='position:absolute;left:50%;bottom:110px;transform:translateX(-50%);'; cam.appendChild(cap);
+  return { update(p,T){
+    reveal(center,(p-0.04)/0.12);
+    nEls.forEach(({n},i)=>{ const lp=(p-(0.18+i*0.075))/0.14; reveal(n,lp); sweep(n,lp); });
+    lines.forEach((l,i)=>{ const lp=clamp01((p-(0.18+i*0.075))/0.18); l.style.opacity=lp; l.setAttribute('stroke-dasharray','600'); l.setAttribute('stroke-dashoffset',600*(1-ease(lp))); });
+    wrap.style.transform=`rotate(${Math.sin(T/4000)*0.4}deg)`; cam.style.transform=`scale(${lerp(0.96,1.04,ease(p))})`; reveal(cap,(p-0.74)/0.16);
+  }};
+});
+
+/* 5 · ECOSISTEMA — comando vocale apre i programmi e porta avanti il lavoro */
+scene('ecosystem', 21000, (cam)=>{
+  const vb=voiceBar('«Ehi ORION, apri i programmi e porta avanti il lavoro di oggi.»'); vb.style.cssText='position:absolute;left:50%;top:96px;transform:translateX(-50%);'; cam.appendChild(vb);
+  const stageW=el('div'); stageW.style.cssText='position:relative;width:1480px;height:660px;margin-top:40px;'; cam.appendChild(stageW);
+  const coreWrap=el('div'); coreWrap.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:150px;height:150px;z-index:4;'; coreWrap.innerHTML=coreHTML(); stageW.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  const apps=[{n:'Blender',c:'#e87d0d',a:'sto modellando la casa…'},{n:'VS Code',c:'#3b9eff',a:'sto scrivendo il sito…'},{n:'Finder',c:'#7fd1ff',a:'rinomino il contratto…'},{n:'Numbers',c:'#34c759',a:'analizzo i dati…'},{n:'Mail',c:'#22d3ee',a:'preparo la risposta…'},{n:'Calendario',c:'#ff6b6b',a:'risolvo il conflitto…'}];
+  const ang0=-PI/2;
+  const aEls=apps.map((ap,i)=>{ const a=ang0+i*(2*PI/6); const x=740+Math.cos(a)*560, y=330+Math.sin(a)*260;
+    const card=el('div','glass'); card.style.cssText=`position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-50%);width:250px;border-radius:16px;overflow:hidden;`;
+    card.innerHTML=`<div class="sweep"><i></i></div><div style="height:30px;display:flex;align-items:center;gap:8px;padding:0 12px;background:rgba(255,255,255,0.05)"><span style="width:9px;height:9px;border-radius:9px;background:${ap.c};box-shadow:0 0 8px ${ap.c}"></span><span style="font-size:12px;color:#c7d3e3">${ap.n}</span></div>
+      <div style="padding:14px 14px 16px"><div class="mono act" style="font-size:12px;color:#7fe9ff">${ap.a}</div><div style="margin-top:10px;height:6px;border-radius:6px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="bar2" style="height:100%;width:0;background:${ap.c}"></div></div><div class="done" style="margin-top:10px;font-size:12px;color:rgba(110,231,183,0.9);opacity:0">✓ fatto</div></div>`;
+    base(card,'translate(-50%,-50%)'); stageW.appendChild(card); return {card,...ap,x,y}; });
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'); svg.setAttribute('width','1480'); svg.setAttribute('height','660'); svg.style.cssText='position:absolute;inset:0;z-index:2;overflow:visible;';
+  const conns=aEls.map(({x,y})=>{ const l=document.createElementNS('http://www.w3.org/2000/svg','line'); l.setAttribute('x1',740);l.setAttribute('y1',330);l.setAttribute('x2',x);l.setAttribute('y2',y);l.setAttribute('stroke','rgba(56,232,255,0.4)');l.setAttribute('stroke-width','1.5'); svg.appendChild(l); return l;});
+  const pulses=aEls.map(()=>{ const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); c.setAttribute('r','4');c.setAttribute('fill','#9af4ff');c.style.filter='drop-shadow(0 0 6px #38e8ff)'; svg.appendChild(c); return c; }); stageW.appendChild(svg);
+  const lab=el('div','label','ECOSISTEMA'); lab.style.cssText='position:absolute;left:50%;top:150px;transform:translateX(-50%);'; base(lab,'translateX(-50%)'); cam.appendChild(lab);
+  const cap=cineText('Non sostituisce i tuoi programmi.','Li usa per te.'); cap.style.cssText='position:absolute;left:50%;bottom:96px;transform:translateX(-50%);'; cam.appendChild(cap);
+  return { update(p,T){
+    driveVoice(vb, seg(p,0.02,0.22), T); vb.style.opacity = smooth(seg(p,0.02,0.08))*(1-smooth(seg(p,0.82,0.95)));
+    driveCore(core,T,0.85,0.15*Math.abs(Math.sin(T/500)));
+    reveal(lab,(p-0.16)/0.1);
+    aEls.forEach((ap,i)=>{ const ap0=(p-(0.22+i*0.05))/0.12; reveal(ap.card,ap0); sweep(ap.card,ap0);
+      const start=0.26+i*0.07; const travel=clamp01((p-start)/0.10); const c=pulses[i], l=conns[i];
+      l.style.opacity=clamp01((p-start+0.02)/0.06); c.setAttribute('cx',lerp(740,ap.x,ease(travel))); c.setAttribute('cy',lerp(330,ap.y,ease(travel))); c.style.opacity=travel>0.02&&travel<0.99?1:0;
+      const work=clamp01((p-(start+0.10))/0.12); ap.card.querySelector('.bar2').style.width=(100*ease(work))+'%'; ap.card.querySelector('.done').style.opacity=work>0.96?1:0; ap.card.querySelector('.act').style.opacity=work>0.96?0.4:1; });
+    stageW.style.transform=`scale(${lerp(0.95,1.04,ease(p))})`; reveal(cap,(p-0.8)/0.14);
+  }};
+});
+
+/* 6 · AZIENDA */
+scene('company', 14000, (cam)=>{
+  const wrap=el('div'); wrap.style.cssText='width:1280px;'; cam.appendChild(wrap);
+  wrap.appendChild(el('div','label','MODALITÀ AZIENDA'));
+  const panel=el('div','glass panel'); panel.style.cssText='margin-top:14px;padding:30px 34px;'; wrap.appendChild(panel);
+  panel.innerHTML=`<div class="sweep"><i></i></div><div style="display:flex;align-items:center;gap:14px;margin-bottom:20px"><div style="width:42px;height:42px"></div><div><div style="font-size:22px;font-weight:300;color:#eaf6ff">Rossi S.r.l.</div><div style="font-size:13px;color:#7d8aa0">Un cervello. Ogni ruolo allineato.</div></div></div>`;
+  const coreMini=el('div'); coreMini.style.cssText='position:absolute;left:34px;top:30px;width:42px;height:42px;'; coreMini.innerHTML=coreHTML(); panel.appendChild(coreMini); const core=coreMini.firstElementChild;
+  const grid=el('div'); grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:14px;'; panel.appendChild(grid);
+  const team=[['Produzione','Marco · 12 operatori','3 task oggi'],['Commerciale','Paolo','briefing pronto'],['Amministrazione','Giulia','2 fatture in scadenza'],['Cantiere','Luca','consegna inviata']];
+  const tiles=team.map(([r,who,st])=>{ const c=el('div','chip'); c.innerHTML=`<div class="k">${r}</div><div class="v">${who}</div><div style="margin-top:8px;font-size:12px;color:#7fe9ff">${st}</div>`; grid.appendChild(c); return c; });
+  const code=el('div'); code.style.cssText='margin-top:16px;border:1px solid rgba(56,232,255,0.25);background:rgba(34,211,238,0.06);border-radius:14px;padding:14px 18px;';
+  code.innerHTML=`<div class="k" style="color:rgba(125,228,255,0.7)">CODICE AZIENDALE</div><div class="mono" style="margin-top:4px;font-size:24px;letter-spacing:.18em;color:#bdf3ff">ORION-RSSI7F</div><div style="margin-top:4px;font-size:13px;color:#8a98ad">Un dipendente lo inserisce → ruolo e ambiente riconosciuti.</div>`; panel.appendChild(code);
+  return { update(p,T){ driveCore(core,T,0.7,0); reveal(wrap.children[0],(p-0.03)/0.1); reveal(panel,(p-0.10)/0.14); sweep(panel,(p-0.10)/0.5);
+    tiles.forEach((c,i)=>reveal(c,(p-(0.30+i*0.08))/0.14)); reveal(code,(p-0.66)/0.16); cam.style.transform=`scale(${lerp(0.97,1.03,ease(p))})`; }};
+});
+
+/* 7 · VISIONE */
+scene('vision', 9000, (cam)=>{
+  const visor=el('div','glass'); visor.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:1020px;height:600px;border-radius:22px;overflow:hidden;';
+  visor.innerHTML=`<div class="sweep"><i></i></div><div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 58%, #16242f, #070b11)"></div>
+    <div style="position:absolute;left:24px;top:20px;display:flex;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:9px;background:#ff5f57;box-shadow:0 0 10px #ff5f57"></span><span class="label" style="color:#cdd9e8">VISIONE · LIVE</span></div>`;
+  base(visor,'translate(-50%,-50%)'); cam.appendChild(visor);
+  function box(x,y,w,h,lab,alert){ const b=el('div'); const c=alert?'#fbbf24':'#22d3ee'; b.style.cssText=`position:absolute;left:${x};top:${y};width:${w}px;height:${h}px;transform:translate(-50%,-50%);`; b.innerHTML=`<div style="width:100%;height:100%;border:2px solid ${c};border-radius:10px;box-shadow:0 0 18px ${c}66"></div><span style="position:absolute;top:-26px;left:0;background:rgba(0,0,0,.6);color:${c};font-size:12px;padding:2px 8px;border-radius:6px">${lab}</span>`; visor.appendChild(b); return b; }
+  const b1=box('40%','46%',150,100,'controlla il collegamento',false), b2=box('64%','60%',84,84,'questa vite',true);
+  const subt=el('div'); subt.style.cssText='position:absolute;left:24px;bottom:22px;background:rgba(0,0,0,.55);color:#cdeffb;font-size:15px;padding:8px 14px;border-radius:10px'; subt.textContent='«Prima di procedere, controlla il collegamento sul lato destro.»'; visor.appendChild(subt);
+  const cap=cineText('Non solo sullo schermo.','Accanto a te.'); cap.style.cssText='position:absolute;left:50%;bottom:120px;transform:translateX(-50%);'; cam.appendChild(cap);
+  return { update(p,T){ visor.style.opacity=smooth((p-0.04)/0.12); visor.style.transform=`translate(-50%,-50%) scale(${lerp(0.95,1.02,ease(p))})`;
+    [b1,b2].forEach((b,i)=>{ const lp=clamp01((p-(0.18+i*0.1))/0.12); b.style.opacity=lp; b.querySelector('div').style.boxShadow=`0 0 ${14+8*Math.abs(Math.sin(T/300+i))}px ${i?'#fbbf24':'#22d3ee'}88`; });
+    subt.style.opacity=smooth((p-0.32)/0.1); reveal(cap,(p-0.5)/0.16); }};
+});
+
+/* 8 · DESKTOP & GESTI — un desktop reale dove le mani spostano i pannelli */
+scene('desktop', 23000, (cam)=>{
+  const desk=el('div','desk'); cam.appendChild(desk);
+  // menu bar
+  const mb=el('div','menubar'); mb.innerHTML=`<span style="display:inline-flex;align-items:center;gap:8px"><span style="width:11px;height:11px;border-radius:9px;background:radial-gradient(circle at 35% 30%,#9af4ff,#38e8ff 60%,#0b7d92);box-shadow:0 0 8px #38e8ff"></span><b style="color:#dfeefb;font-weight:600;letter-spacing:.06em">ORION</b></span><span class="mi">File</span><span class="mi">Modifica</span><span class="mi">Vista</span><span class="mi">Vai</span><span class="right"><span>Ven 30 giu</span><span>12:30</span></span>`; desk.appendChild(mb);
+  // dock
+  const dock=el('div','dock'); const dcol=['#22d3ee','#6366f1','#e87d0d','#34c759','#ff5f57','#e879f9','#3b9eff','#eaeaea'];
+  dock.innerHTML=dcol.map(c=>`<div class="di" style="background:linear-gradient(160deg,${c},${c}99)"></div>`).join(''); desk.appendChild(dock);
+  // finestre
+  function mkwin(x,y,w,h,title,col,lines){ const e=el('div','win'); e.style.cssText=`left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+    e.innerHTML=`<div class="tb"><span class="d" style="background:#ff5f57"></span><span class="d" style="background:#febc2e"></span><span class="d" style="background:#28c840"></span><span class="t">${title}</span></div><div class="body">${Array.from({length:lines}).map((_,i)=>`<div class="ln" style="width:${[92,70,84,55,76][i%5]}%"></div>`).join('')}</div>`;
+    desk.appendChild(e); return {e,x,y,w,h}; }
+  const wAgenda=mkwin(170,210,360,300,'Agenda','#22d3ee',5);
+  const wWa=mkwin(760,330,420,320,'WhatsApp','#34c759',5);
+  const wDoc=mkwin(1290,180,470,360,'Preventivo Rossi.pdf','#3b9eff',6);
+  const wMail=mkwin(360,580,440,280,'Mail','#22d3ee',4);
+  const wins=[wAgenda,wWa,wDoc,wMail];
+  // nucleo presenza (in basso a destra)
+  const coreWrap=el('div'); coreWrap.style.cssText='position:absolute;right:90px;bottom:120px;width:96px;height:96px;z-index:6;'; coreWrap.innerHTML=coreHTML(); desk.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  // mani
+  function mkhand(){ const h=el('div','hand'); h.innerHTML=`<svg viewBox="0 0 46 46"><circle cx="23" cy="23" r="20" fill="rgba(34,211,238,0.16)" stroke="#7fe9ff" stroke-width="2"/><circle class="pp" cx="23" cy="23" r="5" fill="#9af4ff"/></svg>`; h.style.opacity=0; desk.appendChild(h); return h; }
+  const hand=mkhand(), hand2=mkhand();
+  const hint=el('div','ghint'); hint.style.opacity=0; cam.appendChild(hint);
+  const lab=el('div','label','DESKTOP · GESTI'); lab.style.cssText='position:absolute;left:50%;top:120px;transform:translateX(-50%);z-index:7;'; base(lab,'translateX(-50%)'); cam.appendChild(lab);
+  const setHand=(h,x,y,pinch,op)=>{ h.style.left=x+'px'; h.style.top=y+'px'; h.style.opacity=op; const r=h.querySelector('svg>circle'); r.setAttribute('r', pinch?14:20); h.querySelector('.pp').setAttribute('r', pinch?7:5); };
+  const setHint=(txt,op)=>{ hint.textContent=txt; hint.style.opacity=op; };
+  function reset(){ wins.forEach(w=>{ w.dx=0;w.dy=0;w.sc=1;w.lift=0;w.dim=0;w.up=0;w.sel=0; }); }
+  reset();
+  return { update(p,T){
+    desk.style.opacity=1; driveCore(core,T,0.85,0);
+    reveal(lab,(p-0.02)/0.08);
+    // A · comparsa desktop
+    const appear=seg(p,0.0,0.14); mb.style.transform=`translateY(${lerp(-30,0,ease(appear))}px)`; dock.style.transform=`translateX(-50%) translateY(${lerp(80,0,ease(appear))}px)`;
+    reset();
+    wins.forEach((w,i)=>{ const a=clamp01((p*7 - i)*2.0 + (appear<1?0:5)); w.e.style.opacity=clamp01(appear<1? (p>0.02? clamp01((appear*7)-i):0) :1); });
+    // mostra tutte le finestre dopo la comparsa
+    if(p>0.14) wins.forEach(w=>w.e.style.opacity=1);
+    // default mani spente
+    setHand(hand,0,0,false,0); setHand(hand2,0,0,false,0); setHint('',0);
+
+    // B · PINCH per SPOSTARE WhatsApp (0.16→0.40)
+    if(p>=0.16 && p<0.42){ const q=seg(p,0.16,0.42); setHint('Pinch · sposta',smooth(q/0.1)*(1-smooth((q-0.9)/0.1)));
+      const grab=q<0.18, pinch=q>=0.18;
+      const hx=lerp(1500, wWa.x+wWa.w/2, ease(seg(q,0,0.18)));
+      const path=seg(q,0.22,0.85); wWa.dx=lerp(0,150,easeIO(path)); wWa.dy=lerp(0,-120,easeIO(path)); wWa.lift=smooth(seg(q,0.18,0.3))*(1-smooth(seg(q,0.85,1))); wWa.sel=wWa.lift;
+      setHand(hand, (wWa.x+wWa.w/2)+wWa.dx, (wWa.y+wWa.h/2)+wWa.dy, pinch, smooth(q/0.08)); }
+
+    // C · DUE MANI per RIDIMENSIONARE il Preventivo (0.42→0.64)
+    else if(p>=0.42 && p<0.66){ const q=seg(p,0.42,0.66); setHint('Due mani · ridimensiona',smooth(q/0.1)*(1-smooth((q-0.9)/0.1)));
+      const spread=easeIO(seg(q,0.2,0.85)); wDoc.sc=lerp(1,1.22,spread); wDoc.sel=smooth(seg(q,0.15,0.3))*(1-smooth(seg(q,0.85,1)));
+      const cx=wDoc.x+wDoc.w/2, cy=wDoc.y+wDoc.h/2; const off=lerp(120,250,spread);
+      setHand(hand, cx-off, cy-off*0.7, true, smooth(q/0.1)); setHand(hand2, cx+off, cy+off*0.7, true, smooth(q/0.1)); }
+
+    // D · PINCH AVANTI per portare l'Agenda in primo piano (0.66→0.84)
+    else if(p>=0.66 && p<0.85){ const q=seg(p,0.66,0.85); setHint('Pinch avanti · primo piano',smooth(q/0.12)*(1-smooth((q-0.85)/0.15)));
+      const fwd=easeIO(seg(q,0.2,0.8)); wAgenda.sc=lerp(1,1.18,fwd); wAgenda.lift=fwd; wAgenda.sel=smooth(seg(q,0.15,0.3));
+      wins.forEach(w=>{ if(w!==wAgenda) w.dim=0.5*fwd; });
+      setHand(hand, wAgenda.x+wAgenda.w/2, wAgenda.y+wAgenda.h/2, q>0.25, smooth(q/0.1)*(1-smooth((q-0.85)/0.15))); }
+
+    // E · APRI LA MANO · su per CHIUDERE Mail (0.85→1.0)
+    else if(p>=0.85){ const q=seg(p,0.85,1.0); setHint('Su · chiudi',smooth(q/0.12)*(1-smooth((q-0.8)/0.2)));
+      const fly=ease(seg(q,0.25,0.9)); wMail.up=fly; wMail.sel=smooth(seg(q,0.1,0.25))*(1-smooth(seg(q,0.6,1)));
+      setHand(hand, wMail.x+wMail.w/2, lerp(wMail.y+wMail.h/2, 120, fly), q<0.25, smooth(q/0.1)*(1-fly*0.4)); }
+
+    // applica gli stati alle finestre
+    wins.forEach(w=>{ w.dx=w.dx||0; w.dy=w.dy||0; w.sc=w.sc||1; w.lift=w.lift||0; w.dim=w.dim||0; w.up=w.up||0; w.sel=w.sel||0;
+      const ty=(w.dy) - 80*w.up; const op=(1-w.up)* (w.e.style.opacity===''?1:parseFloat(w.e.style.opacity||1));
+      w.e.style.zIndex = 3 + Math.round((w.lift+w.sel)*5) + (w===wAgenda? Math.round(w.sc>1?4:0):0);
+      w.e.style.transform=`translate(${w.dx}px,${ty}px) scale(${w.sc*(1-0.15*w.up)})`;
+      w.e.style.opacity = String(clamp01((1-w.up)));
+      w.e.style.filter = w.dim? `brightness(${1-w.dim})` : 'none';
+      w.e.style.outline = w.sel>0.05? `2px solid rgba(56,232,255,${0.6*w.sel})` : 'none';
+      w.e.style.boxShadow = w.lift>0.05? `0 ${28+30*w.lift}px ${60+40*w.lift}px rgba(0,0,0,0.6)` : '0 24px 60px rgba(0,0,0,0.5)';
+    });
+    cam.style.transform=`scale(${lerp(1.0,1.03,ease(p))})`;
+  }};
+});
+
+/* 9 · IL FUTURO DEL LAVORO */
+scene('future', 13000, (cam)=>{
+  const wrap=el('div'); wrap.style.cssText='position:relative;width:1500px;height:700px;'; cam.appendChild(wrap);
+  const coreWrap=el('div'); coreWrap.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:200px;height:200px;z-index:5;'; coreWrap.innerHTML=coreHTML(); wrap.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  const fns=['Coordina','Ricorda','Analizza','Apre','Organizza','Opera','Decide','Anticipa'];
+  const orb=fns.map((f)=>{ const e=el('div'); e.style.cssText='position:absolute;left:50%;top:50%;font-size:17px;letter-spacing:.16em;color:#cfe6f5;white-space:nowrap;'; e.textContent=f; wrap.appendChild(e); return e; });
+  const mini=Array.from({length:8}).map(()=>{ const e=el('div','glass'); e.style.cssText='position:absolute;left:50%;top:50%;width:120px;height:78px;border-radius:12px;'; wrap.appendChild(e); return e; });
+  const cap=cineText('Non è un software.','È un nuovo modo di lavorare.'); cap.style.cssText='position:absolute;left:50%;bottom:110px;transform:translateX(-50%);'; cam.appendChild(cap);
+  return { update(p,T){
+    driveCore(core,T,0.9,0.2*p); const spin=T/3000;
+    orb.forEach((e,i)=>{ const a=spin+i*(2*PI/fns.length); const r=lerp(120,300,smooth(clamp01(p/0.5))); e.style.transform=`translate(-50%,-50%) translate(${Math.cos(a)*r}px,${Math.sin(a)*r*0.62}px)`; e.style.opacity=clamp01((p-(0.06+i*0.04))/0.12)*(0.7+0.3*Math.sin(a)); });
+    mini.forEach((e,i)=>{ const a=-spin*0.6+i*(2*PI/8)+0.4; const r=lerp(160,470,smooth(clamp01(p/0.55))); e.style.transform=`translate(-50%,-50%) translate(${Math.cos(a)*r}px,${Math.sin(a)*r*0.6}px) scale(${0.8+0.2*Math.sin(a)})`; e.style.opacity=clamp01((p-(0.1+i*0.03))/0.12)*(0.25+0.25*Math.sin(a+1)); });
+    wrap.style.transform=`scale(${lerp(0.95,1.0,ease(p)) * (p>0.82? lerp(1,0.86,(p-0.82)/0.18):1)})`; cam.style.transform=`scale(${lerp(1,1.05,ease(p))})`;
+    reveal(cap,(p-0.55)/0.16); if(p>0.82) cap.style.opacity=lerp(1,0,(p-0.82)/0.18);
+  }};
+});
+
+/* FINALE */
+scene('finale', 17000, (cam)=>{
+  const coreWrap=el('div'); coreWrap.style.cssText='width:190px;height:190px;'; coreWrap.innerHTML=coreHTML(); cam.appendChild(coreWrap); const core=coreWrap.firstElementChild;
+  const logo=el('div'); logo.style.cssText='position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;'; cam.appendChild(logo);
+  logo.innerHTML=`<div style="font-size:84px;font-weight:600;letter-spacing:0.42em;color:#eaf6ff;text-indent:0.42em;opacity:0" class="L1">ORION</div>
+    <div style="margin-top:18px;font-size:20px;font-weight:300;letter-spacing:0.06em;color:#bcd0e2;opacity:0" class="L2">Il sistema operativo del lavoro moderno.</div>`;
+  const L1=logo.querySelector('.L1'), L2=logo.querySelector('.L2');
+  return { update(p,T){
+    const ignite=smooth((p-0.16)/0.2)*(1-smooth((p-0.42)/0.12)*0.4); driveCore(core,T,0.5+0.5*smooth(p/0.3),ignite);
+    const dis=smooth((p-0.40)/0.14); coreWrap.style.opacity=lerp(1,0,dis); coreWrap.style.transform=`scale(${lerp(1,0.4,dis)})`;
+    L1.style.opacity=smooth((p-0.46)/0.14); L1.style.transform=`scale(${lerp(1.06,1,ease(clamp01((p-0.46)/0.2)))})`; L1.style.letterSpacing=`${lerp(0.62,0.42,ease(clamp01((p-0.46)/0.3)))}em`;
+    L2.style.opacity=smooth((p-0.62)/0.14);
+    const end=smooth((p-0.9)/0.1); logo.style.filter=`brightness(${lerp(1,0,end)})`; coreWrap.style.filter=`brightness(${lerp(1,0,end)})`;
+    cam.style.transform=`scale(${lerp(1,1.02,ease(p))})`;
+  }};
+});
+
+const TOTAL = cursor + FADE; window.__total = TOTAL;
+
+const flash=el('div'); flash.style.cssText='position:absolute;inset:0;z-index:48;background:#dffaff;opacity:0;pointer-events:none;'; document.getElementById('stage').appendChild(flash);
+
+function render(T){
+  NOW=T;
+  for(const k in SC){ const s=SC[k]; const op=opOf(s);
+    if(op<=0){ if(s.root.style.display!=='none') s.root.style.display='none'; continue; }
+    if(s.root.style.display==='none') s.root.style.display='grid';
+    s.root.style.opacity=op; if(s.update) s.update(prOf(s),T); }
+  const gj=(Math.sin(T*12.9898)*43758.5453); grain.style.transform=`translate(${(gj%1)*20-10}px, ${((gj*1.3)%1)*20-10}px)`;
+  let fl=0; const a=SC.arrive, f=SC.finale;
+  if(T>a.t0 && T<a.t0+1600){ const x=(T-a.t0-900)/250; fl=Math.max(fl,Math.exp(-x*x)*0.5); }
+  if(T>f.t0){ const c=(T-(f.t0+f.dur*0.30))/220; fl=Math.max(fl,Math.exp(-c*c)*0.85); }
+  flash.style.opacity=fl;
+}
+window.__setT=(T)=>{ render(Math.max(0,Math.min(TOTAL,T))); };
+window.__t=0;
+if(!new URLSearchParams(location.search).has('still')){
+  let start=null; function loop(ts){ if(start==null)start=ts; const T=(ts-start)%(TOTAL+1500); window.__t=T; render(T); requestAnimationFrame(loop); } requestAnimationFrame(loop);
+} else { render(0); }
+console.log('ORION trailer ready · total', (TOTAL/1000).toFixed(1),'s');
+</script>
+</body>
+</html>
