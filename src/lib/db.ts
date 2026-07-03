@@ -399,6 +399,79 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_entita_tenant ON entita_esterne(tenant_id, connessione_id);
     CREATE INDEX IF NOT EXISTS idx_entita_cliente ON entita_esterne(tenant_id, cliente_id);
     CREATE INDEX IF NOT EXISTS idx_entita_chiave ON entita_esterne(connessione_id, chiave_esterna);
+
+    -- ── CENTRALINO AI (telefono) ────────────────────────────────────────────
+    -- Registro delle chiamate gestite dall'assistente telefonico. La trascrizione
+    -- è il JSON dei turni (caller/orion) accumulati durante la chiamata; l'esito
+    -- è la sintesi finale ("prenotato appuntamento martedì 15:00").
+    CREATE TABLE IF NOT EXISTS chiamate (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      call_sid TEXT UNIQUE,
+      da_numero TEXT,
+      stato TEXT NOT NULL DEFAULT 'in_corso',
+      esito TEXT,
+      trascrizione TEXT,
+      appuntamento_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chiamate_tenant ON chiamate(tenant_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_chiamate_sid ON chiamate(call_sid);
+
+    -- Numero di telefono dello studio collegato al centralino (Twilio). Il tenant
+    -- si risolve dal numero chiamato (To); fallback: primo tenant (sviluppo).
+    CREATE TABLE IF NOT EXISTS telefono_accounts (
+      tenant_id INTEGER PRIMARY KEY,
+      numero TEXT UNIQUE,
+      messaggio_benvenuto TEXT,
+      attivo INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_telefono_numero ON telefono_accounts(numero);
+
+    -- ── AUDIT (fiducia / AI Act) ────────────────────────────────────────────
+    -- Registro immutabile delle AZIONI eseguite (da ORION o in automatico):
+    -- chi/cosa/quando/canale/esito. È la tracciabilità richiesta a un deployer
+    -- di AI che agisce verso il pubblico (promemoria, telefono, email, fatture).
+    CREATE TABLE IF NOT EXISTS audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      utente_id INTEGER,
+      canale TEXT NOT NULL DEFAULT 'voce',
+      azione TEXT NOT NULL,
+      dettaglio TEXT,
+      esito TEXT NOT NULL DEFAULT 'ok',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit(tenant_id, created_at);
+
+    -- ── CALENDARIO ESTERNO (Google) ─────────────────────────────────────────
+    -- Account Google Calendar collegato dal professionista (OAuth2). Il refresh
+    -- token è cifrato a riposo (crypto.ts). sync_token = sync incrementale.
+    CREATE TABLE IF NOT EXISTS calendar_accounts (
+      tenant_id INTEGER PRIMARY KEY,
+      provider TEXT NOT NULL DEFAULT 'google',
+      email TEXT,
+      refresh_token TEXT,
+      calendar_id TEXT NOT NULL DEFAULT 'primary',
+      sync_token TEXT,
+      ultimo_sync TEXT,
+      stato TEXT NOT NULL DEFAULT 'collegato',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    -- Lapidi degli appuntamenti eliminati su ORION ma ancora presenti su Google:
+    -- il cron le processa (cancella l'evento remoto) e le rimuove.
+    CREATE TABLE IF NOT EXISTS gcal_tombstones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      gcal_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
@@ -437,6 +510,29 @@ function migrate(d: Database.Database) {
     "ALTER TABLE profili ADD COLUMN ultima_consolidazione TEXT",
     // Modalità azienda: collega gli eventi in CATENE (es. "ordine 245").
     "ALTER TABLE eventi ADD COLUMN riferimento TEXT",
+    // Fatturazione elettronica (SDI): XML FatturaPA, stato di trasmissione
+    // ('da_trasmettere' | 'trasmessa' | 'consegnata' | 'scartata'), id presso il
+    // provider e bollo virtuale (importo, se dovuto).
+    "ALTER TABLE fatture ADD COLUMN xml TEXT",
+    "ALTER TABLE fatture ADD COLUMN stato_sdi TEXT",
+    "ALTER TABLE fatture ADD COLUMN sdi_id TEXT",
+    "ALTER TABLE fatture ADD COLUMN bollo REAL",
+    // Indirizzo strutturato per FatturaPA (CAP/comune/provincia), lato emittente
+    // (profilo/azienda) e lato cliente.
+    "ALTER TABLE profili ADD COLUMN cap TEXT",
+    "ALTER TABLE profili ADD COLUMN comune TEXT",
+    "ALTER TABLE profili ADD COLUMN provincia TEXT",
+    "ALTER TABLE aziende ADD COLUMN cap TEXT",
+    "ALTER TABLE aziende ADD COLUMN comune TEXT",
+    "ALTER TABLE aziende ADD COLUMN provincia TEXT",
+    "ALTER TABLE clienti ADD COLUMN cap TEXT",
+    "ALTER TABLE clienti ADD COLUMN comune TEXT",
+    "ALTER TABLE clienti ADD COLUMN provincia TEXT",
+    // Anti no-show: quando il promemoria WhatsApp dell'appuntamento è partito.
+    "ALTER TABLE appuntamenti ADD COLUMN promemoria_inviato INTEGER NOT NULL DEFAULT 0",
+    // Sync Google Calendar: id evento remoto + flag "da riallineare".
+    "ALTER TABLE appuntamenti ADD COLUMN gcal_id TEXT",
+    "ALTER TABLE appuntamenti ADD COLUMN gcal_dirty INTEGER NOT NULL DEFAULT 0",
   ];
   for (const sql of alters) {
     try {

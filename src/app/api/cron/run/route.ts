@@ -4,13 +4,78 @@ import {
   segnaPromemoriaNotificati,
   compitiDaNotificare,
   segnaCompitiNotificati,
+  appuntamentiDaRicordare,
+  segnaPromemoriaAppuntamento,
+  logCommunication,
+  logEvento,
+  logAudit,
 } from "@/lib/data";
+import { inviaMessaggioWhatsApp } from "@/lib/whatsapp";
+import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+
+// "2026-07-03T15:00" → "venerdì 3 luglio alle 15:00"
+function quandoLeggibile(iso: string): string {
+  const d = new Date(iso);
+  const MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${GIORNI[d.getDay()]} ${d.getDate()} ${MESI[d.getMonth()]} alle ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+// ── ANTI NO-SHOW ────────────────────────────────────────────────────────────
+// Promemoria WhatsApp automatico prima di ogni appuntamento (finestra ore da
+// ORION_REMINDER_ORE, default 24). Il cliente risponde SÌ/NO: il webhook
+// WhatsApp interpreta la risposta (conferma / segnala la disdetta).
+// Disclosure AI Act: il messaggio si dichiara automatico.
+async function promemoriaAppuntamenti(): Promise<number> {
+  const ora = new Date().getHours();
+  if (ora < 8 || ora >= 21) return 0; // orario di cortesia
+
+  const oreAnticipo = Number(process.env.ORION_REMINDER_ORE || 24);
+  const candidati = appuntamentiDaRicordare(oreAnticipo);
+  let inviati = 0;
+
+  for (const app of candidati) {
+    const nome = app.cliente_nome ?? "";
+    const testo =
+      `Gentile ${nome}, le ricordiamo l'appuntamento di ${quandoLeggibile(app.inizio)}. ` +
+      `Risponda SÌ per confermare, oppure NO se ha bisogno di spostarlo.\n\n` +
+      `(Messaggio automatico dell'assistente dello studio)`;
+
+    const esito = await inviaMessaggioWhatsApp(app.cliente_telefono ?? "", testo);
+    if (esito.ok) {
+      segnaPromemoriaAppuntamento(app.id);
+      logCommunication({
+        cliente_id: app.cliente_id,
+        direzione: "out",
+        contenuto: testo,
+        stato: esito.simulato ? "simulato" : "inviato",
+      });
+      logEvento({
+        tipo: "promemoria_appuntamento",
+        soggetto: nome,
+        cliente_id: app.cliente_id,
+        descrizione: `Promemoria automatico inviato a ${nome} per ${quandoLeggibile(app.inizio)}`,
+      });
+      logAudit({
+        canale: "cron",
+        azione: "promemoria_appuntamento",
+        dettaglio: `${nome} — ${app.inizio}${esito.simulato ? " (simulato)" : ""}`,
+      });
+      inviati++;
+    } else {
+      logAudit({ canale: "cron", azione: "promemoria_appuntamento", dettaglio: `${nome} — ${app.inizio}`, esito: `errore: ${esito.errore ?? ""}` });
+    }
+  }
+  return inviati;
+}
 
 // Eseguito dallo scheduler interno (o da un cron esterno). Protetto da segreto.
 // Gira per OGNI tenant: i promemoria e le iscrizioni push sono separati per account.
@@ -22,6 +87,7 @@ export async function POST(req: NextRequest) {
 
   let totDovuti = 0;
   let totInviati = 0;
+  let totPromemoriaApp = 0;
 
   for (const tenantId of tuttiITenant()) {
     await runWithTenant(tenantId, async () => {
@@ -59,7 +125,25 @@ export async function POST(req: NextRequest) {
         totInviati += r.inviati;
       }
     });
+
+    // Anti no-show: promemoria WhatsApp automatici degli appuntamenti imminenti.
+    await runWithTenant(tenantId, async () => {
+      try {
+        totPromemoriaApp += await promemoriaAppuntamenti();
+      } catch (e) {
+        console.error("[cron] promemoria appuntamenti:", e instanceof Error ? e.message : e);
+      }
+    });
+
+    // Google Calendar: riallinea (lapidi → push → pull). Silenzioso se non collegato.
+    await runWithTenant(tenantId, async () => {
+      try {
+        await sincronizzaCalendario();
+      } catch (e) {
+        console.error("[cron] sync calendario:", e instanceof Error ? e.message : e);
+      }
+    });
   }
 
-  return NextResponse.json({ ok: true, dovuti: totDovuti, inviati: totInviati });
+  return NextResponse.json({ ok: true, dovuti: totDovuti, inviati: totInviati, promemoriaAppuntamenti: totPromemoriaApp });
 }

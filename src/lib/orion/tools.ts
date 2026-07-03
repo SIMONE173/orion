@@ -64,11 +64,17 @@ import {
   getConnessione,
   upsertEntitaEsterna,
   listEntitaEsterne,
+  aggiornaFatturaSdi,
+  logAudit,
+  listChiamate,
+  getCalendarAccount,
   type VoceMemoria,
   type Compito,
   type EntitaEsterna,
 } from "../data";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
+import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
+import { trasmettiFattura, sdiConfigurato } from "../sdi";
 import {
   setOnboardingUtente,
   setPreferenzeUtente,
@@ -206,6 +212,37 @@ function rangeFromPreset(preset?: string, da?: string, a?: string): { da: string
   }
 }
 
+// I dati fiscali dell'EMITTENTE della fattura: l'azienda se il tenant è un
+// ambiente aziendale, altrimenti il profilo del professionista.
+function emittenteFattura(): { emittente: ParteFattura; profilo: ReturnType<typeof getProfilo> } {
+  const profilo = getProfilo();
+  const azienda = getAzienda();
+  const emittente: ParteFattura = azienda
+    ? {
+        denominazione: azienda.nome,
+        piva: azienda.piva,
+        codice_fiscale: azienda.codice_fiscale,
+        indirizzo: azienda.indirizzo,
+        cap: azienda.cap,
+        comune: azienda.comune,
+        provincia: azienda.provincia,
+        pec: azienda.pec,
+        regime_fiscale: azienda.regime_fiscale,
+      }
+    : {
+        denominazione: profilo.nome,
+        piva: profilo.piva,
+        codice_fiscale: profilo.codice_fiscale,
+        indirizzo: profilo.indirizzo,
+        cap: profilo.cap,
+        comune: profilo.comune,
+        provincia: profilo.provincia,
+        pec: profilo.pec,
+        regime_fiscale: profilo.regime_fiscale,
+      };
+  return { emittente, profilo };
+}
+
 // ── Definizioni degli strumenti (schema) ────────────────────────────────────
 
 export const TOOLS: Anthropic.Tool[] = [
@@ -236,8 +273,11 @@ export const TOOLS: Anthropic.Tool[] = [
         durata_visita_min: { type: "integer", description: "Durata media di un appuntamento in minuti (se pertinente)" },
         piva: { type: "string" },
         codice_fiscale: { type: "string" },
-        indirizzo: { type: "string" },
-        regime_fiscale: { type: "string" },
+        indirizzo: { type: "string", description: "Via e numero civico (per la fattura elettronica)" },
+        cap: { type: "string", description: "CAP a 5 cifre (serve per la fattura elettronica)" },
+        comune: { type: "string" },
+        provincia: { type: "string", description: "Sigla, es. MI" },
+        regime_fiscale: { type: "string", description: "es. 'forfettario' oppure 'ordinario'" },
         pec: { type: "string" },
         sdi: { type: "string" },
         onboarding_completo: { type: "integer", enum: [0, 1] },
@@ -690,7 +730,8 @@ export const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "crea_cliente",
-    description: "Crea un nuovo cliente.",
+    description:
+      "Crea un nuovo cliente. Per poter fatturare elettronicamente servono anche codice fiscale (o P.IVA) e indirizzo completo (via, CAP, comune, provincia): se l'utente li ha, salvali subito.",
     input_schema: {
       type: "object",
       properties: {
@@ -701,6 +742,9 @@ export const TOOLS: Anthropic.Tool[] = [
         piva: { type: "string" },
         codice_fiscale: { type: "string" },
         indirizzo: { type: "string" },
+        cap: { type: "string" },
+        comune: { type: "string" },
+        provincia: { type: "string" },
       },
       required: ["nome"],
     },
@@ -792,7 +836,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "prepara_fattura",
     description:
-      "Prepara l'ANTEPRIMA di una fattura usando i dati fiscali del profilo e del cliente. NON emette. Segnala i campi mancanti.",
+      "Prepara l'ANTEPRIMA di una fattura ELETTRONICA usando i dati fiscali del profilo e del cliente. NON emette. Ti dice: campi mancanti (chiedili), destino ('sdi' = fattura elettronica via Sistema di Interscambio; 'sanitaria_no_sdi' = prestazione sanitaria a persona fisica, per legge fuori SDI), IVA, bollo. importo = imponibile/compenso. aliquota_iva solo per regime ordinario se diversa dal 22%.",
     input_schema: {
       type: "object",
       properties: {
@@ -800,13 +844,15 @@ export const TOOLS: Anthropic.Tool[] = [
         cliente_id: { type: "integer" },
         importo: { type: "number" },
         descrizione: { type: "string" },
+        aliquota_iva: { type: "number" },
       },
       required: ["importo"],
     },
   },
   {
     name: "emetti_fattura",
-    description: "Emette la fattura. Usalo SOLO dopo conferma finale dell'utente.",
+    description:
+      "Emette la fattura. Usalo SOLO dopo conferma finale dell'utente. Se il destino è 'sdi' genera l'XML FatturaPA e, se il provider SDI è collegato, la trasmette; se mancano dati obbligatori si ferma e te li elenca (chiedili e riprova). Se 'sanitaria_no_sdi', emette il documento fuori SDI (flusso Sistema TS).",
     input_schema: {
       type: "object",
       properties: {
@@ -814,6 +860,7 @@ export const TOOLS: Anthropic.Tool[] = [
         cliente_id: { type: "integer" },
         importo: { type: "number" },
         descrizione: { type: "string" },
+        aliquota_iva: { type: "number" },
       },
       required: ["importo"],
     },
@@ -871,6 +918,18 @@ export const TOOLS: Anthropic.Tool[] = [
         numero: { type: "string" },
       },
     },
+  },
+  {
+    name: "mostra_chiamate",
+    description:
+      "Le telefonate gestite dal CENTRALINO AI dello studio (chi ha chiamato, esito, appuntamenti prenotati, messaggi lasciati). Usalo per 'chi ha chiamato', 'telefonate di oggi', 'com'è andata la chiamata di X'. Riassumi a voce le più rilevanti.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "collega_calendario",
+    description:
+      "Collega Google Calendar (sync bidirezionale: ciò che prenoto qui appare su Google e viceversa). Usalo quando l'utente dice 'collega il mio calendario/Google Calendar', 'sincronizza il calendario'. Apre la pagina di consenso Google. Se è GIÀ collegato te lo dice il risultato (riferisci lo stato).",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "archivia_documento",
@@ -1568,6 +1627,7 @@ const handlers: Record<string, Handler> = {
       return { result: { ok: false, errore: esito.errore === "non_configurato" ? "Email non collegata" : esito.errore } };
     }
     logEvento({ tipo: "email_inviata", descrizione: `Inviata email a ${input.a}: ${input.oggetto}` });
+    logAudit({ canale: "email", azione: "invia_email", dettaglio: `${input.a} — ${String(input.oggetto).slice(0, 120)}` });
     return { result: { ok: true, inviata: true } };
   },
 
@@ -1881,6 +1941,11 @@ const handlers: Record<string, Handler> = {
       soggetto: cliente?.nome ?? null,
       cliente_id: cliente?.id ?? null,
     });
+    logAudit({
+      canale: "whatsapp",
+      azione: "invia_whatsapp",
+      dettaglio: `${cliente?.nome ?? numero} — ${String(input.contenuto).slice(0, 120)}${esito.simulato ? " (simulato)" : ""}`,
+    });
     const messaggi = cliente ? listComunicazioni(cliente.id) : listComunicazioni();
     return {
       result: { ok: true, inviato: true, simulato: esito.simulato ?? false },
@@ -1903,17 +1968,55 @@ const handlers: Record<string, Handler> = {
     const ris = risolvi(input);
     if ("chiedi" in ris) return ris.chiedi;
     const cliente = ris.cliente;
-    const profilo = getProfilo();
     const datiCliente = cliente ? getCliente(cliente.id) : null;
+    const { emittente, profilo } = emittenteFattura();
+
+    const parteCliente: ParteFattura = {
+      denominazione: datiCliente?.nome ?? input.cliente_nome ?? null,
+      piva: datiCliente?.piva ?? null,
+      codice_fiscale: datiCliente?.codice_fiscale ?? null,
+      indirizzo: datiCliente?.indirizzo ?? null,
+      cap: datiCliente?.cap ?? null,
+      comune: datiCliente?.comune ?? null,
+      provincia: datiCliente?.provincia ?? null,
+    };
+    const destino = destinoFattura(profilo.professione, parteCliente);
+
+    // Prova "a secco": stessa validazione dell'emissione, così i campi mancanti
+    // emergono ADESSO (e ORION li chiede), non al momento della conferma.
+    const esito = generaFatturaPA({
+      numero: prossimoNumeroFattura(),
+      data: oggi(),
+      importo: Number(input.importo),
+      descrizione: input.descrizione ?? "Prestazione professionale",
+      emittente,
+      cliente: parteCliente,
+      aliquotaIva: input.aliquota_iva != null ? Number(input.aliquota_iva) : undefined,
+    });
     const campiMancanti: string[] = [];
     if (!cliente) campiMancanti.push("cliente");
-    if (!profilo.piva) campiMancanti.push("P.IVA emittente");
-    if (datiCliente && !datiCliente.codice_fiscale && !datiCliente.piva)
-      campiMancanti.push("codice fiscale/P.IVA del cliente");
+    // Per le prestazioni sanitarie a persone fisiche (niente SDI) bastano i dati base.
+    if (destino === "sdi") campiMancanti.push(...esito.campiMancanti);
+    else {
+      if (!emittente.piva) campiMancanti.push("P.IVA emittente");
+      if (datiCliente && !datiCliente.codice_fiscale && !datiCliente.piva)
+        campiMancanti.push("codice fiscale/P.IVA del cliente");
+    }
+
     return {
       result: {
         ok: true,
         numero: prossimoNumeroFattura(),
+        destino,
+        nota_destino:
+          destino === "sanitaria_no_sdi"
+            ? "Prestazione sanitaria a persona fisica: per legge NON si trasmette allo SDI (va nel flusso Sistema TS). Verrà emesso il documento con PDF."
+            : sdiConfigurato()
+            ? "Alla conferma verrà trasmessa allo SDI."
+            : "Provider SDI non ancora collegato: alla conferma l'XML FatturaPA viene generato e conservato, pronto da trasmettere.",
+        bollo: esito.bollo,
+        iva: esito.iva,
+        totale: esito.totale,
         campiMancanti,
       },
       vista: {
@@ -1928,10 +2031,10 @@ const handlers: Record<string, Handler> = {
             indirizzo: datiCliente?.indirizzo ?? null,
           },
           emittente: {
-            nome: profilo.nome,
-            piva: profilo.piva,
-            indirizzo: profilo.indirizzo,
-            regime_fiscale: profilo.regime_fiscale,
+            nome: emittente.denominazione,
+            piva: emittente.piva,
+            indirizzo: emittente.indirizzo,
+            regime_fiscale: emittente.regime_fiscale ?? null,
             pec: profilo.pec,
             sdi: profilo.sdi,
           },
@@ -1939,32 +2042,121 @@ const handlers: Record<string, Handler> = {
           descrizione: input.descrizione ?? null,
           data: oggi(),
           campiMancanti,
+          destino,
+          bollo: esito.bollo,
+          iva: esito.iva,
+          totale: esito.totale,
         },
       },
     };
   },
 
-  emetti_fattura: (input) => {
+  emetti_fattura: async (input) => {
     const ris = risolvi(input);
     if ("chiedi" in ris) return ris.chiedi;
     const cliente = ris.cliente;
     if (!cliente) return { result: { ok: false, errore: "Serve un cliente per emettere la fattura" } };
-    const profilo = getProfilo();
     const datiCliente = getCliente(cliente.id)!;
+    const { emittente, profilo } = emittenteFattura();
+
+    const parteCliente: ParteFattura = {
+      denominazione: datiCliente.nome,
+      piva: datiCliente.piva,
+      codice_fiscale: datiCliente.codice_fiscale,
+      indirizzo: datiCliente.indirizzo,
+      cap: datiCliente.cap,
+      comune: datiCliente.comune,
+      provincia: datiCliente.provincia,
+    };
+    const destino = destinoFattura(profilo.professione, parteCliente);
+
+    let xml: string | null = null;
+    let statoSdi: string;
+    let bollo: number | null = null;
+    let iva = 0;
+    let totale = Number(input.importo);
+
+    if (destino === "sdi") {
+      const esito = generaFatturaPA({
+        numero: prossimoNumeroFattura(),
+        data: oggi(),
+        importo: Number(input.importo),
+        descrizione: input.descrizione ?? "Prestazione professionale",
+        emittente,
+        cliente: parteCliente,
+        aliquotaIva: input.aliquota_iva != null ? Number(input.aliquota_iva) : undefined,
+      });
+      if (!esito.ok) {
+        // Meglio fermarsi e chiedere che emettere una fattura non trasmissibile.
+        return {
+          result: {
+            ok: false,
+            errore: "Mancano dati obbligatori per la fattura elettronica",
+            campiMancanti: esito.campiMancanti,
+            suggerimento: "Chiedi all'utente i dati mancanti (o aggiorna la scheda cliente / il profilo), poi riprova.",
+          },
+        };
+      }
+      xml = esito.xml;
+      bollo = esito.bollo;
+      iva = esito.iva;
+      totale = esito.totale;
+      statoSdi = "da_trasmettere";
+    } else {
+      statoSdi = "non_applicabile"; // sanitaria verso persona fisica: niente SDI (Sistema TS)
+    }
+
     const fattura = creaFattura({
       cliente_id: cliente.id,
       importo: Number(input.importo),
       descrizione: input.descrizione ?? null,
       stato: "emessa",
-    }) as { numero: string; data: string };
+      xml,
+      stato_sdi: statoSdi,
+      bollo,
+    });
+
+    // Trasmissione (se c'è un provider collegato e la fattura va allo SDI).
+    let trasmissione: { ok: boolean; simulato?: boolean; stato: string; errore?: string } | null = null;
+    if (destino === "sdi" && xml) {
+      trasmissione = await trasmettiFattura(xml);
+      aggiornaFatturaSdi(fattura.id, {
+        stato_sdi: trasmissione.stato,
+        sdi_id: "sdi_id" in trasmissione ? ((trasmissione as { sdi_id?: string | null }).sdi_id ?? null) : null,
+      });
+      statoSdi = trasmissione.stato;
+    }
+
     logEvento({
       tipo: "fattura_emessa",
-      descrizione: `Emessa fattura ${fattura.numero} a ${datiCliente.nome} di ${Number(input.importo).toFixed(2)} €`,
+      descrizione: `Emessa fattura ${fattura.numero} a ${datiCliente.nome} di ${Number(input.importo).toFixed(2)} € (${
+        destino === "sanitaria_no_sdi" ? "sanitaria, fuori SDI" : `SDI: ${statoSdi}`
+      })`,
       soggetto: datiCliente.nome,
       cliente_id: cliente.id,
     });
+    logAudit({
+      canale: "voce",
+      azione: "emetti_fattura",
+      dettaglio: `n. ${fattura.numero} — ${datiCliente.nome} — ${Number(input.importo).toFixed(2)} € — destino ${destino} — stato ${statoSdi}`,
+      esito: trasmissione && !trasmissione.ok ? "errore" : "ok",
+    });
+
     return {
-      result: { ok: true, fattura },
+      result: {
+        ok: true,
+        fattura: { numero: fattura.numero, data: fattura.data, stato_sdi: statoSdi, bollo, iva, totale },
+        destino,
+        trasmissione: trasmissione
+          ? trasmissione.simulato
+            ? "Provider SDI non collegato: XML generato e conservato, da trasmettere."
+            : trasmissione.ok
+            ? "Trasmessa allo SDI."
+            : `Trasmissione fallita: ${trasmissione.errore ?? "errore"} — la fattura resta da trasmettere.`
+          : destino === "sanitaria_no_sdi"
+          ? "Prestazione sanitaria a persona fisica: emessa fuori SDI (flusso Sistema TS)."
+          : null,
+      },
       vista: {
         tipo: "fattura",
         dati: {
@@ -1977,10 +2169,10 @@ const handlers: Record<string, Handler> = {
             indirizzo: datiCliente.indirizzo,
           },
           emittente: {
-            nome: profilo.nome,
-            piva: profilo.piva,
-            indirizzo: profilo.indirizzo,
-            regime_fiscale: profilo.regime_fiscale,
+            nome: emittente.denominazione,
+            piva: emittente.piva,
+            indirizzo: emittente.indirizzo,
+            regime_fiscale: emittente.regime_fiscale ?? null,
             pec: profilo.pec,
             sdi: profilo.sdi,
           },
@@ -1988,6 +2180,11 @@ const handlers: Record<string, Handler> = {
           descrizione: input.descrizione ?? null,
           data: fattura.data,
           campiMancanti: [],
+          destino,
+          stato_sdi: statoSdi,
+          bollo,
+          iva,
+          totale,
         },
       },
     };
@@ -2113,6 +2310,47 @@ const handlers: Record<string, Handler> = {
     },
     vista: { tipo: "whatsapp_connect", dati: {} },
   }),
+
+  mostra_chiamate: () => {
+    const chiamate = listChiamate().map((ch) => ({
+      quando: ch.created_at,
+      da: ch.cliente_nome ?? ch.da_numero ?? "sconosciuto",
+      stato: ch.stato,
+      esito: ch.esito,
+      ha_prenotato: !!ch.appuntamento_id,
+    }));
+    return {
+      result: {
+        chiamate,
+        nota: chiamate.length
+          ? "Riassumi a voce le chiamate più rilevanti (prenotazioni e messaggi urgenti prima)."
+          : "Nessuna chiamata registrata dal centralino. Se il numero Twilio non è ancora collegato, la guida è in TELEFONO.md.",
+      },
+    };
+  },
+
+  collega_calendario: () => {
+    const acc = getCalendarAccount();
+    if (acc?.stato === "collegato") {
+      return {
+        result: {
+          ok: true,
+          gia_collegato: true,
+          email: acc.email,
+          ultimo_sync: acc.ultimo_sync,
+          nota: "Google Calendar è già collegato: dillo all'utente (con l'email, se c'è).",
+        },
+      };
+    }
+    return {
+      result: {
+        ok: true,
+        azione:
+          "Apro la pagina di consenso Google. Spiega con calma: si sceglie l'account, si autorizza il calendario, e da lì in poi ORION e Google Calendar restano allineati nei due sensi (entro un quarto d'ora).",
+      },
+      azione: { tipo: "apri_url", url: "/api/calendario/connect", etichetta: "Collega Google Calendar" },
+    };
+  },
 
   mostra_abbonamento: () => {
     const stato = statoAbbonamento();

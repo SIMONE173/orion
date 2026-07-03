@@ -95,6 +95,14 @@ export type Vista =
         descrizione: string | null;
         data: string;
         campiMancanti: string[];
+        // Fatturazione elettronica: dove va la fattura e a che punto è.
+        // destino: 'sdi' | 'sanitaria_no_sdi'; stato_sdi: 'da_trasmettere' |
+        // 'trasmessa' | 'consegnata' | 'scartata' | 'non_applicabile'.
+        destino?: string;
+        stato_sdi?: string | null;
+        bollo?: number | null;
+        iva?: number;
+        totale?: number;
       };
     }
   | { tipo: "promemoria"; dati: { promemoria: Promemoria[] } }

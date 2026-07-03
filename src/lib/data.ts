@@ -21,6 +21,9 @@ export type Profilo = {
   piva: string | null;
   codice_fiscale: string | null;
   indirizzo: string | null;
+  cap: string | null;
+  comune: string | null;
+  provincia: string | null;
   regime_fiscale: string | null;
   pec: string | null;
   sdi: string | null;
@@ -49,6 +52,9 @@ export type Azienda = {
   piva: string | null;
   codice_fiscale: string | null;
   indirizzo: string | null;
+  cap: string | null;
+  comune: string | null;
+  provincia: string | null;
   regime_fiscale: string | null;
   pec: string | null;
   sdi: string | null;
@@ -65,6 +71,9 @@ export type Cliente = {
   piva: string | null;
   codice_fiscale: string | null;
   indirizzo: string | null;
+  cap: string | null;
+  comune: string | null;
+  provincia: string | null;
   ultima_visita: string | null;
   created_at: string;
 };
@@ -73,11 +82,14 @@ export type Appuntamento = {
   id: number;
   cliente_id: number | null;
   cliente_nome?: string | null;
+  cliente_telefono?: string | null;
   titolo: string;
   inizio: string;
   fine: string;
   stato: string;
   note: string | null;
+  promemoria_inviato?: number;
+  gcal_id?: string | null;
   created_at: string;
 };
 
@@ -194,7 +206,7 @@ export function getProfilo(): Profilo {
 const CAMPI_PROFILO = [
   "nome", "professione", "durata_visita_min", "gestione_cancellazioni",
   "canale_comunicazione", "problemi_tempo", "abitudini", "piva", "codice_fiscale",
-  "indirizzo", "regime_fiscale", "pec", "sdi",
+  "indirizzo", "cap", "comune", "provincia", "regime_fiscale", "pec", "sdi",
   "tipo_uso", "tipo_lavoro", "onboarding_completo",
 ] as const;
 
@@ -1081,18 +1093,19 @@ export function getClienteByTelefono(telefono: string): Cliente | undefined {
 export function creaCliente(c: Partial<Cliente> & { nome: string }): Cliente {
   const r = db()
     .prepare(
-      `INSERT INTO clienti (tenant_id, nome, telefono, email, note, piva, codice_fiscale, indirizzo, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clienti (tenant_id, nome, telefono, email, note, piva, codice_fiscale, indirizzo, cap, comune, provincia, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       T(), c.nome, c.telefono ?? null, c.email ?? null, c.note ?? null,
-      c.piva ?? null, c.codice_fiscale ?? null, c.indirizzo ?? null, nowISO()
+      c.piva ?? null, c.codice_fiscale ?? null, c.indirizzo ?? null,
+      c.cap ?? null, c.comune ?? null, c.provincia ?? null, nowISO()
     );
   return getCliente(Number(r.lastInsertRowid))!;
 }
 
 export function aggiornaCliente(id: number, c: Partial<Cliente>): Cliente | undefined {
-  const campi = ["nome", "telefono", "email", "note", "piva", "codice_fiscale", "indirizzo"] as const;
+  const campi = ["nome", "telefono", "email", "note", "piva", "codice_fiscale", "indirizzo", "cap", "comune", "provincia"] as const;
   const updates: string[] = [];
   const values: unknown[] = [];
   for (const k of campi) {
@@ -1135,7 +1148,7 @@ export function schedaCliente(id: number) {
 // ── Agenda ────────────────────────────────────────────────────────────────
 
 const APP_JOIN = `
-  SELECT a.*, c.nome AS cliente_nome
+  SELECT a.*, c.nome AS cliente_nome, c.telefono AS cliente_telefono
   FROM appuntamenti a LEFT JOIN clienti c ON c.id = a.cliente_id
 `;
 
@@ -1182,7 +1195,12 @@ export function creaAppuntamento(a: {
 }
 
 export function spostaAppuntamento(id: number, inizio: string, fine: string): Appuntamento | undefined {
-  db().prepare("UPDATE appuntamenti SET inizio = ?, fine = ? WHERE id = ? AND tenant_id = ?").run(inizio, fine, id, T());
+  // gcal_dirty: se l'appuntamento vive anche su Google Calendar, il cron lo riallinea.
+  db()
+    .prepare(
+      "UPDATE appuntamenti SET inizio = ?, fine = ?, promemoria_inviato = 0, gcal_dirty = CASE WHEN gcal_id IS NULL THEN gcal_dirty ELSE 1 END WHERE id = ? AND tenant_id = ?"
+    )
+    .run(inizio, fine, id, T());
   return getAppuntamento(id);
 }
 
@@ -1192,10 +1210,57 @@ export function aggiornaStatoAppuntamento(id: number, stato: string): Appuntamen
 }
 
 export function eliminaAppuntamento(id: number): boolean {
+  // Lapide per Google Calendar: se l'evento esiste anche là, il cron lo cancella.
+  const app = getAppuntamento(id);
+  if (app?.gcal_id) {
+    db()
+      .prepare("INSERT INTO gcal_tombstones (tenant_id, gcal_id, created_at) VALUES (?, ?, ?)")
+      .run(T(), app.gcal_id, nowISO());
+  }
   return (
     db().prepare("UPDATE appuntamenti SET stato = 'cancellato' WHERE id = ? AND tenant_id = ?").run(id, T())
       .changes > 0
   );
+}
+
+// ── Anti no-show: promemoria automatici degli appuntamenti ──────────────────
+
+// Appuntamenti nelle prossime `ore` ore, non cancellati, con promemoria non
+// ancora inviato e cliente con numero di telefono → candidati al promemoria.
+export function appuntamentiDaRicordare(ore = 24): Appuntamento[] {
+  const da = new Date();
+  const a = new Date(da.getTime() + ore * 3600_000);
+  const iso = (d: Date) => {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  return db()
+    .prepare(
+      `${APP_JOIN}
+       WHERE a.tenant_id = ? AND a.stato NOT IN ('cancellato','annullato')
+         AND a.promemoria_inviato = 0
+         AND a.inizio > ? AND a.inizio <= ?
+         AND c.telefono IS NOT NULL AND c.telefono != ''
+       ORDER BY a.inizio`
+    )
+    .all(T(), iso(da), iso(a)) as Appuntamento[];
+}
+
+export function segnaPromemoriaAppuntamento(id: number) {
+  db().prepare("UPDATE appuntamenti SET promemoria_inviato = 1 WHERE id = ? AND tenant_id = ?").run(id, T());
+}
+
+// Il prossimo appuntamento futuro di un cliente (per interpretare "SÌ confermo"
+// / "devo disdire" che arrivano via WhatsApp).
+export function prossimoAppuntamentoDiCliente(clienteId: number): Appuntamento | undefined {
+  const adesso = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const iso = `${adesso.getFullYear()}-${p(adesso.getMonth() + 1)}-${p(adesso.getDate())}T${p(adesso.getHours())}:${p(adesso.getMinutes())}`;
+  return db()
+    .prepare(
+      `${APP_JOIN} WHERE a.tenant_id = ? AND a.cliente_id = ? AND a.stato NOT IN ('cancellato','annullato') AND a.inizio >= ? ORDER BY a.inizio LIMIT 1`
+    )
+    .get(T(), clienteId, iso) as Appuntamento | undefined;
 }
 
 // ── Note ──────────────────────────────────────────────────────────────────
@@ -1324,7 +1389,22 @@ export function messaggiInArrivoDopo(iso: string): Comunicazione[] {
     .all(T(), iso) as Comunicazione[];
 }
 
-// ── Fatture ─────────────────────────────────────────────────────────────────
+// ── Fatture (con fatturazione elettronica SDI) ──────────────────────────────
+
+export type Fattura = {
+  id: number;
+  cliente_id: number | null;
+  numero: string;
+  importo: number;
+  descrizione: string | null;
+  stato: string;
+  data: string;
+  xml: string | null;
+  stato_sdi: string | null; // 'da_trasmettere' | 'trasmessa' | 'consegnata' | 'scartata'
+  sdi_id: string | null;
+  bollo: number | null;
+  created_at: string;
+};
 
 export function prossimoNumeroFattura(): string {
   const anno = new Date().getFullYear();
@@ -1334,16 +1414,51 @@ export function prossimoNumeroFattura(): string {
   return `${row.n + 1}/${anno}`;
 }
 
-export function creaFattura(f: { cliente_id: number; importo: number; descrizione?: string | null; stato?: string }) {
+export function creaFattura(f: {
+  cliente_id: number;
+  importo: number;
+  descrizione?: string | null;
+  stato?: string;
+  xml?: string | null;
+  stato_sdi?: string | null;
+  bollo?: number | null;
+}): Fattura {
   const numero = prossimoNumeroFattura();
   const data = new Date().toISOString().slice(0, 10);
   const r = db()
     .prepare(
-      `INSERT INTO fatture (tenant_id, cliente_id, numero, importo, descrizione, stato, data, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO fatture (tenant_id, cliente_id, numero, importo, descrizione, stato, data, xml, stato_sdi, bollo, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(T(), f.cliente_id, numero, f.importo, f.descrizione ?? null, f.stato ?? "emessa", data, nowISO());
-  return db().prepare("SELECT * FROM fatture WHERE id = ?").get(Number(r.lastInsertRowid));
+    .run(
+      T(), f.cliente_id, numero, f.importo, f.descrizione ?? null, f.stato ?? "emessa", data,
+      f.xml ?? null, f.stato_sdi ?? null, f.bollo ?? null, nowISO()
+    );
+  return db().prepare("SELECT * FROM fatture WHERE id = ?").get(Number(r.lastInsertRowid)) as Fattura;
+}
+
+export function getFattura(id: number): Fattura | undefined {
+  return db().prepare("SELECT * FROM fatture WHERE id = ? AND tenant_id = ?").get(id, T()) as Fattura | undefined;
+}
+
+export function aggiornaFatturaSdi(id: number, campi: { stato_sdi?: string; sdi_id?: string | null; xml?: string | null }) {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  if (campi.stato_sdi !== undefined) { updates.push("stato_sdi = ?"); values.push(campi.stato_sdi); }
+  if (campi.sdi_id !== undefined) { updates.push("sdi_id = ?"); values.push(campi.sdi_id); }
+  if (campi.xml !== undefined) { updates.push("xml = ?"); values.push(campi.xml); }
+  if (!updates.length) return;
+  values.push(id, T());
+  db().prepare(`UPDATE fatture SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
+}
+
+export function listFatture(limite = 20): Fattura[] {
+  return db()
+    .prepare(
+      `SELECT f.*, c.nome AS cliente_nome FROM fatture f LEFT JOIN clienti c ON c.id = f.cliente_id
+       WHERE f.tenant_id = ? ORDER BY f.created_at DESC LIMIT ?`
+    )
+    .all(T(), limite) as Fattura[];
 }
 
 // ── Promemoria ──────────────────────────────────────────────────────────────
@@ -1803,4 +1918,237 @@ export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
   }
 
   return { segnalazioni };
+}
+
+// ── Centralino AI (registro chiamate) ───────────────────────────────────────
+
+export type Chiamata = {
+  id: number;
+  cliente_id: number | null;
+  cliente_nome?: string | null;
+  call_sid: string | null;
+  da_numero: string | null;
+  stato: string; // 'in_corso' | 'conclusa' | 'persa'
+  esito: string | null;
+  trascrizione: string | null; // JSON: [{chi:'caller'|'orion', testo}]
+  appuntamento_id: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function apriChiamata(c: { call_sid: string; da_numero?: string | null; cliente_id?: number | null }): Chiamata {
+  const r = db()
+    .prepare(
+      `INSERT INTO chiamate (tenant_id, cliente_id, call_sid, da_numero, stato, trascrizione, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'in_corso', '[]', ?, ?)`
+    )
+    .run(T(), c.cliente_id ?? null, c.call_sid, c.da_numero ?? null, nowISO(), nowISO());
+  return db().prepare("SELECT * FROM chiamate WHERE id = ?").get(Number(r.lastInsertRowid)) as Chiamata;
+}
+
+export function getChiamataBySid(callSid: string): Chiamata | undefined {
+  return db()
+    .prepare(
+      `SELECT ch.*, c.nome AS cliente_nome FROM chiamate ch LEFT JOIN clienti c ON c.id = ch.cliente_id
+       WHERE ch.call_sid = ? AND ch.tenant_id = ?`
+    )
+    .get(callSid, T()) as Chiamata | undefined;
+}
+
+export function aggiornaChiamata(
+  id: number,
+  campi: { stato?: string; esito?: string | null; trascrizione?: string | null; appuntamento_id?: number | null; cliente_id?: number | null }
+) {
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  for (const k of ["stato", "esito", "trascrizione", "appuntamento_id", "cliente_id"] as const) {
+    if (campi[k] !== undefined) {
+      updates.push(`${k} = ?`);
+      values.push(campi[k]);
+    }
+  }
+  if (!updates.length) return;
+  updates.push("updated_at = ?");
+  values.push(nowISO(), id, T());
+  db().prepare(`UPDATE chiamate SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
+}
+
+export function listChiamate(limite = 15): Chiamata[] {
+  return db()
+    .prepare(
+      `SELECT ch.*, c.nome AS cliente_nome FROM chiamate ch LEFT JOIN clienti c ON c.id = ch.cliente_id
+       WHERE ch.tenant_id = ? ORDER BY ch.created_at DESC LIMIT ?`
+    )
+    .all(T(), limite) as Chiamata[];
+}
+
+// Numero dello studio collegato al centralino: risolve il tenant dal numero
+// chiamato (come tenantDaPhoneNumberId per WhatsApp).
+export function tenantDaNumeroCentralino(numero: string): number | null {
+  const norm = numero.replace(/\D/g, "");
+  if (!norm) return null;
+  const row = db()
+    .prepare("SELECT tenant_id FROM telefono_accounts WHERE replace(replace(numero,'+',''),' ','') = ? AND attivo = 1")
+    .get(norm) as { tenant_id: number } | undefined;
+  return row?.tenant_id ?? null;
+}
+
+export function salvaTelefonoAccount(a: { numero: string; messaggio_benvenuto?: string | null }) {
+  db()
+    .prepare(
+      `INSERT INTO telefono_accounts (tenant_id, numero, messaggio_benvenuto, attivo, created_at, updated_at)
+       VALUES (?, ?, ?, 1, ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET numero = excluded.numero,
+         messaggio_benvenuto = excluded.messaggio_benvenuto, attivo = 1, updated_at = excluded.updated_at`
+    )
+    .run(T(), a.numero, a.messaggio_benvenuto ?? null, nowISO(), nowISO());
+}
+
+export function getTelefonoAccount(): { numero: string | null; messaggio_benvenuto: string | null } | undefined {
+  return db().prepare("SELECT numero, messaggio_benvenuto FROM telefono_accounts WHERE tenant_id = ?").get(T()) as
+    | { numero: string | null; messaggio_benvenuto: string | null }
+    | undefined;
+}
+
+// ── Audit (tracciabilità delle azioni — fiducia / AI Act) ───────────────────
+
+export function logAudit(a: {
+  canale: "voce" | "telefono" | "whatsapp" | "email" | "cron" | "api";
+  azione: string;
+  dettaglio?: string | null;
+  esito?: string;
+  utente_id?: number | null;
+}) {
+  try {
+    db()
+      .prepare(
+        `INSERT INTO audit (tenant_id, utente_id, canale, azione, dettaglio, esito, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(T(), a.utente_id ?? null, a.canale, a.azione, a.dettaglio ?? null, a.esito ?? "ok", nowISO());
+  } catch {
+    /* l'audit non deve mai bloccare l'azione */
+  }
+}
+
+export type VoceAudit = {
+  id: number;
+  canale: string;
+  azione: string;
+  dettaglio: string | null;
+  esito: string;
+  created_at: string;
+};
+
+export function listAudit(limite = 50): VoceAudit[] {
+  return db()
+    .prepare("SELECT id, canale, azione, dettaglio, esito, created_at FROM audit WHERE tenant_id = ? ORDER BY id DESC LIMIT ?")
+    .all(T(), limite) as VoceAudit[];
+}
+
+// ── Google Calendar (account e sync) ────────────────────────────────────────
+
+export type CalendarAccount = {
+  tenant_id: number;
+  provider: string;
+  email: string | null;
+  refresh_token: string | null;
+  calendar_id: string;
+  sync_token: string | null;
+  ultimo_sync: string | null;
+  stato: string;
+};
+
+export function getCalendarAccount(): CalendarAccount | undefined {
+  return db().prepare("SELECT * FROM calendar_accounts WHERE tenant_id = ?").get(T()) as
+    | CalendarAccount
+    | undefined;
+}
+
+export function salvaCalendarAccount(a: { email?: string | null; refresh_token: string; calendar_id?: string }) {
+  db()
+    .prepare(
+      `INSERT INTO calendar_accounts (tenant_id, provider, email, refresh_token, calendar_id, stato, created_at, updated_at)
+       VALUES (?, 'google', ?, ?, ?, 'collegato', ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET email = excluded.email, refresh_token = excluded.refresh_token,
+         calendar_id = excluded.calendar_id, stato = 'collegato', sync_token = NULL, updated_at = excluded.updated_at`
+    )
+    .run(T(), a.email ?? null, cifra(a.refresh_token), a.calendar_id ?? "primary", nowISO(), nowISO());
+}
+
+export function salvaSyncToken(token: string | null) {
+  db()
+    .prepare("UPDATE calendar_accounts SET sync_token = ?, ultimo_sync = ?, updated_at = ? WHERE tenant_id = ?")
+    .run(token, nowISO(), nowISO(), T());
+}
+
+export function rimuoviCalendarAccount(): boolean {
+  return db().prepare("DELETE FROM calendar_accounts WHERE tenant_id = ?").run(T()).changes > 0;
+}
+
+// Appuntamenti da spingere su Google: nuovi (gcal_id NULL) o modificati (dirty).
+export function appuntamentiDaSpingere(limite = 25): Appuntamento[] {
+  const oggiISO = new Date().toISOString().slice(0, 10);
+  return db()
+    .prepare(
+      `${APP_JOIN} WHERE a.tenant_id = ? AND a.stato != 'cancellato'
+         AND substr(a.inizio,1,10) >= ?
+         AND (a.gcal_id IS NULL OR a.gcal_dirty = 1)
+       ORDER BY a.inizio LIMIT ?`
+    )
+    .all(T(), oggiISO, limite) as Appuntamento[];
+}
+
+export function setGcal(idAppuntamento: number, gcalId: string) {
+  db()
+    .prepare("UPDATE appuntamenti SET gcal_id = ?, gcal_dirty = 0 WHERE id = ? AND tenant_id = ?")
+    .run(gcalId, idAppuntamento, T());
+}
+
+export function appuntamentoDaGcalId(gcalId: string): Appuntamento | undefined {
+  return db().prepare(`${APP_JOIN} WHERE a.tenant_id = ? AND a.gcal_id = ?`).get(T(), gcalId) as
+    | Appuntamento
+    | undefined;
+}
+
+// Eventi Google in arrivo → appuntamenti ORION (upsert per gcal_id).
+export function upsertAppuntamentoDaGcal(e: {
+  gcal_id: string;
+  titolo: string;
+  inizio: string;
+  fine: string;
+  cancellato?: boolean;
+}): "creato" | "aggiornato" | "cancellato" | "ignorato" {
+  const esistente = appuntamentoDaGcalId(e.gcal_id);
+  if (e.cancellato) {
+    if (!esistente) return "ignorato";
+    db()
+      .prepare("UPDATE appuntamenti SET stato = 'cancellato', gcal_dirty = 0 WHERE id = ? AND tenant_id = ?")
+      .run(esistente.id, T());
+    return "cancellato";
+  }
+  if (esistente) {
+    if (esistente.inizio === e.inizio && esistente.fine === e.fine && esistente.titolo === e.titolo) return "ignorato";
+    db()
+      .prepare("UPDATE appuntamenti SET titolo = ?, inizio = ?, fine = ?, gcal_dirty = 0 WHERE id = ? AND tenant_id = ?")
+      .run(e.titolo, e.inizio, e.fine, esistente.id, T());
+    return "aggiornato";
+  }
+  db()
+    .prepare(
+      `INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, gcal_id, gcal_dirty, created_at)
+       VALUES (?, NULL, ?, ?, ?, 'confermato', ?, 0, ?)`
+    )
+    .run(T(), e.titolo, e.inizio, e.fine, e.gcal_id, nowISO());
+  return "creato";
+}
+
+export function listTombstones(limite = 25): { id: number; gcal_id: string }[] {
+  return db()
+    .prepare("SELECT id, gcal_id FROM gcal_tombstones WHERE tenant_id = ? LIMIT ?")
+    .all(T(), limite) as { id: number; gcal_id: string }[];
+}
+
+export function rimuoviTombstone(id: number) {
+  db().prepare("DELETE FROM gcal_tombstones WHERE id = ? AND tenant_id = ?").run(id, T());
 }

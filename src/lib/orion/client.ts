@@ -6,7 +6,29 @@ import { salvaMessaggio } from "../data";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
 
-const MODEL = "claude-opus-4-8";
+// ── ROUTING DEI MODELLI (economia senza perdere intelligenza) ───────────────
+// Le richieste OPERATIVE brevi ("mostrami l'agenda", "segna Rossi alle 15",
+// "quanto ho incassato") non hanno bisogno del modello massimo: le gestisce il
+// modello RAPIDO (più veloce e ~10-20 volte più economico). Tutto il resto —
+// onboarding, analisi, scrittura, immagini, richieste lunghe o ambigue — resta
+// sul modello PIENO. Override: ORION_MODEL, ORION_MODEL_RAPIDO, ORION_ROUTING=off.
+const MODEL = (process.env.ORION_MODEL || "claude-opus-4-8").trim();
+const MODEL_RAPIDO = (process.env.ORION_MODEL_RAPIDO || "claude-haiku-4-5-20251001").trim();
+const ROUTING_ATTIVO = (process.env.ORION_ROUTING || "on").trim() !== "off";
+
+const RE_OPERATIVA =
+  /\b(agenda|appuntament|prenot|fissa|segna|sposta|disdic|conferma|slot|liber[oi]|mostra|apri|chiudi|cliente|clienti|scheda|incass|pagament|fattur|promemoria|ricorda(mi)?|nota|note|whatsapp|messagg|email|posta|chiam|briefing|oggi|domani|settimana|attesa|documenti|profilo|calendario)\b/i;
+
+function scegliModello(storico: MessaggioStorico[], avvio: boolean, allegato?: Allegato, onboarding = true): string {
+  if (!ROUTING_ATTIVO) return MODEL;
+  if (avvio || allegato || !onboarding) return MODEL; // briefing/colloquio/vision: piena potenza
+  const ultimo = storico.length ? storico[storico.length - 1] : null;
+  if (!ultimo || ultimo.role !== "user") return MODEL;
+  const testo = ultimo.content.trim();
+  if (testo.length > 160) return MODEL; // richieste articolate → modello pieno
+  return RE_OPERATIVA.test(testo) ? MODEL_RAPIDO : MODEL;
+}
+
 const MAX_GIRI = 8;
 // La conversazione è persistita per intero, ma al modello inviamo solo una
 // FINESTRA recente (i ricordi più vecchi vivono nella memoria viva / diario /
@@ -102,13 +124,17 @@ export async function runConversation(
   const azioni: Azione[] = [];
   let testo = "";
 
+  const onboardingCompleto = utente ? utente.onboarding_completo === 1 : true;
+  const modello = scegliModello(storico, avvio, allegato, onboardingCompleto);
+  const usaThinking = modello === MODEL; // il rapido risponde diretto (velocità)
+
   try {
     for (let giro = 0; giro < MAX_GIRI; giro++) {
       const resp = await client.messages.create({
-        model: MODEL,
+        model: modello,
         max_tokens: 16000,
-        // Priorità all'INTELLIGENZA: thinking adattivo a piena potenza (come prima).
-        thinking: { type: "adaptive" },
+        // Priorità all'INTELLIGENZA sul modello pieno: thinking adattivo.
+        ...(usaThinking ? { thinking: { type: "adaptive" as const } } : {}),
         system,
         tools: TOOLS,
         messages,
