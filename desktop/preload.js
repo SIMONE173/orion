@@ -32,6 +32,10 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   gestiRidimensiona: (dati) => ipcRenderer.send("os:gestiRidimensiona", dati),
   gestiChiudi: (dati) => ipcRenderer.send("os:gestiChiudi", dati),
   gestiAvanti: (dati) => ipcRenderer.send("os:gestiAvanti", dati),
+  // Finestre delle ALTRE app (Accessibility): pinch su tutto lo schermo.
+  gestiEsterna: (dati) => ipcRenderer.invoke("os:gestiEsterna", dati),
+  // Chiusura a comando: finestra (pulsante rosso) o scheda del browser (Cmd+W).
+  chiudiFinestra: (dati) => ipcRenderer.invoke("os:chiudiFinestra", dati),
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra: () => ipcRenderer.send("os:mostraFinestra"),
   onFinestra: (cb) => ipcRenderer.on("orion:finestra", (_e, stato) => cb(stato)),

@@ -20,7 +20,8 @@
   "build": {
     "appId": "app.orion.desktop",
     "productName": "ORION",
-    "files": ["main.js", "preload.js", "whisper.js"],
+    "files": ["main.js", "preload.js", "whisper.js", "gesti-ax.js"],
+    "asarUnpack": ["gesti-ax.js"],
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg",

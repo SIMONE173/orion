@@ -212,6 +212,7 @@ export type Azione =
   | { tipo: "cestina_file"; query: string }
   | { tipo: "apri_app"; nome: string }
   | { tipo: "chiudi_app"; nome: string }
+  | { tipo: "chiudi_finestra"; app?: string; scheda?: boolean }
   | { tipo: "crea_file"; nome: string; tipoElemento: "file" | "cartella"; posizione?: string }
   | { tipo: "rinomina_file"; da: string; a: string }
   // Creative Workspace (solo Desktop): lavorare DENTRO i software.

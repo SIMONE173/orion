@@ -1324,8 +1324,20 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "chiudi_app",
     description:
-      "SOLO versione DESKTOP: chiude (esce da) un'applicazione aperta sul computer. Usalo per 'chiudi Spotify', 'chiudi Word', 'chiudi questa finestra di X'. Passa il nome dell'app in 'nome'. È il contrario di apri_app.",
+      "SOLO versione DESKTOP: chiude (ESCE DA) un'applicazione INTERA sul computer. Usalo per 'chiudi Spotify', 'esci da Word'. Passa il nome dell'app in 'nome'. È il contrario di apri_app. Per chiudere UNA finestra o una scheda senza uscire dall'app usa chiudi_finestra.",
     input_schema: { type: "object", properties: { nome: { type: "string" } }, required: ["nome"] },
+  },
+  {
+    name: "chiudi_finestra",
+    description:
+      "SOLO versione DESKTOP: chiude UNA finestra del computer (il pulsante rosso) o UNA scheda del browser (Cmd+W), senza uscire dall'app. Usalo per 'chiudi questa finestra', 'chiudi la finestra di Safari', 'chiudi la scheda', 'chiudi questa pagina'. 'app' (opzionale) = di quale app; senza app agisce su quella in primo piano. 'scheda'=true per la scheda/pagina del browser. Per i pannelli di ORION usa invece chiudi_vista; per uscire da un'app intera usa chiudi_app.",
+    input_schema: {
+      type: "object",
+      properties: {
+        app: { type: "string", description: "Nome dell'app (opzionale: senza, quella in primo piano)" },
+        scheda: { type: "boolean", description: "true = chiudi la scheda del browser, non la finestra" },
+      },
+    },
   },
   {
     name: "crea_file_locale",
@@ -3412,6 +3424,11 @@ const handlers: Record<string, Handler> = {
   chiudi_app: (input) => ({
     result: { ok: true, app: input.nome },
     azione: { tipo: "chiudi_app", nome: String(input.nome ?? "") },
+  }),
+
+  chiudi_finestra: (input) => ({
+    result: { ok: true, app: input.app ?? "in primo piano", scheda: !!input.scheda },
+    azione: { tipo: "chiudi_finestra", app: input.app ? String(input.app) : undefined, scheda: !!input.scheda },
   }),
 
   crea_file_locale: (input) => ({

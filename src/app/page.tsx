@@ -46,6 +46,8 @@ type OrionDesktop = {
   // Gesture Mode nativa: overlay che manovra le finestre-pannello con le mani.
   gestiOn?: () => void;
   gestiOff?: () => void;
+  // Chiude una finestra del computer o una scheda del browser (Accessibility).
+  chiudiFinestra?: (d: { app?: string; scheda?: boolean }) => Promise<{ ok: boolean; errore?: string }>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
   // Solo desktop: chiude le finestre-pannello (per tipo, o "tutto").
@@ -303,6 +305,23 @@ export default function Home() {
         }
         d.chiudiApp(a.nome).then((r) => {
           if (!r.ok) speakRef.current?.(`Non sono riuscito a chiudere ${a.nome}.`);
+        });
+        break;
+      }
+      case "chiudi_finestra": {
+        const d = desktopBridge();
+        if (!d?.chiudiFinestra) {
+          speakRef.current?.("Chiudere le finestre del computer è possibile con ORION Desktop aggiornato.");
+          break;
+        }
+        d.chiudiFinestra({ app: a.app, scheda: a.scheda }).then((r) => {
+          if (r.ok) return;
+          if (r.errore === "accessibilita")
+            speakRef.current?.(
+              "Per chiudere le finestre mi serve il permesso Accessibilità: Impostazioni di Sistema, Privacy e Sicurezza, Accessibilità, e attiva ORION."
+            );
+          else if (r.errore === "quale_app") speakRef.current?.("Dimmi di quale app devo chiudere la finestra.");
+          else speakRef.current?.("Non sono riuscito a chiudere la finestra.");
         });
         break;
       }
