@@ -122,13 +122,6 @@ function finestraDiTipo(tipo) {
 
 function apriOverlayGesti() {
   if (finestraGesti && !finestraGesti.isDestroyed()) return;
-  // Prima accensione: se manca il permesso Accessibilità, macOS mostra la
-  // richiesta (serve per muovere le finestre delle ALTRE app; i pannelli di
-  // ORION funzionano comunque).
-  if (!accessibilitaOk(false) && !axPromptFatto) {
-    axPromptFatto = true;
-    accessibilitaOk(true);
-  }
   const b = screen.getPrimaryDisplay().bounds;
   finestraGesti = new BrowserWindow({
     x: b.x,
@@ -170,19 +163,16 @@ function chiudiOverlayGesti() {
 }
 
 // ── FINESTRE DELLE ALTRE APP (Accessibility / System Events) ─────────────────
-// Un piccolo daemon JXA (gesti-ax.js) resta in ascolto su stdin e manovra le
-// finestre di qualunque app: così il pinch muove TUTTO lo schermo, non solo i
-// pannelli di ORION, e ORION può chiudere finestre/schede a comando. Richiede
-// il permesso Accessibilità (macOS lo chiede la prima volta).
+// Un piccolo daemon JXA (gesti-ax.js) resta in ascolto su stdin: serve alla
+// CHIUSURA A VOCE di finestre e schede ("chiudi questa finestra", "chiudi la
+// scheda"). Richiede il permesso Accessibilità (macOS lo chiede la prima volta).
+// I gesti restano SOLO sui pannelli di ORION (scelta dell'utente).
 // Nell'app impacchettata lo script vive FUORI dall'asar (asarUnpack):
 // osascript è un processo esterno e non sa leggere dentro l'archivio.
 const AX_SCRIPT = path.join(__dirname, "gesti-ax.js").replace(/\.asar([\\/])/, ".asar.unpacked$1");
 let axProc = null;
 let axCoda = []; // una risposta per comando, in ordine (FIFO)
 let axBuf = "";
-let axCache = { t: 0, finestre: [] };
-let axListInVolo = false;
-let axPromptFatto = false;
 
 function accessibilitaOk(prompt) {
   if (process.platform !== "darwin") return false;
@@ -264,21 +254,6 @@ function axComando(riga, timeoutMs = 4000) {
   });
 }
 
-// Elenco finestre esterne con cache (~1.2s) e una sola LIST in volo: il polling
-// dell'overlay resta leggero anche se System Events è lento.
-function finestreEsterne() {
-  if (!accessibilitaOk(false)) return [];
-  const ora = Date.now();
-  if (ora - axCache.t > 1200 && !axListInVolo) {
-    axListInVolo = true;
-    axComando("LIST").then((r) => {
-      axListInVolo = false;
-      if (r && r.ok && Array.isArray(r.finestre)) axCache = { t: Date.now(), finestre: r.finestre };
-    });
-  }
-  return axCache.finestre;
-}
-
 const pulisciNomeApp = (v) => String(v || "").replace(/[|\n\r]/g, "").trim();
 
 ipcMain.on("os:gestiOn", () => apriOverlayGesti());
@@ -291,25 +266,7 @@ ipcMain.handle("os:gestiFinestre", () => {
       const r = f.win.getBounds();
       return { tipo: f.tipo, x: r.x, y: r.y, w: r.width, h: r.height };
     }),
-    esterne: finestreEsterne(),
   };
-});
-
-// Operazioni sulle finestre delle altre app (dal pinch dell'overlay).
-ipcMain.handle("os:gestiEsterna", async (_e, d) => {
-  const appNome = pulisciNomeApp(d && d.app);
-  const indice = Math.max(1, Number((d && d.indice) || 1));
-  if (!appNome) return { ok: false, errore: "app mancante" };
-  const op = d && d.op;
-  if (op === "sposta") return axComando(`MOVE|${appNome}|${indice}|${Math.round(d.x)}|${Math.round(d.y)}`);
-  if (op === "ridimensiona")
-    return axComando(`SIZE|${appNome}|${indice}|${Math.max(240, Math.round(d.w))}|${Math.max(160, Math.round(d.h))}`);
-  if (op === "avanti") {
-    const r = await axComando(`FRONT|${appNome}|${indice}`);
-    if (finestraGesti && !finestraGesti.isDestroyed()) finestraGesti.setAlwaysOnTop(true, "screen-saver");
-    return r;
-  }
-  return { ok: false, errore: "operazione sconosciuta" };
 });
 
 // Comando vocale: chiude una finestra (pulsante rosso) o la scheda del browser

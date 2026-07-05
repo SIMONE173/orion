@@ -43,19 +43,7 @@ class OneEuro {
   }
 }
 
-// Una finestra manovrabile: pannello di ORION (via veloce Electron) oppure
-// finestra di QUALUNQUE app (via Accessibility, se l'app desktop la supporta).
-type Finestra = {
-  id: string;
-  esterna: boolean;
-  tipo?: string; // pannelli ORION
-  app?: string; // finestre di altre app
-  indice?: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-};
+type Finestra = { tipo: string; x: number; y: number; w: number; h: number };
 type Mano = { cx: number; cy: number; sx: number; sy: number; pinch: boolean };
 
 export default function GestiOverlay() {
@@ -78,31 +66,9 @@ export default function GestiOverlay() {
     const filtri: OneEuro[] = [];
     const pinchStato = [false, false];
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
-    let grab: { id: string; offX: number; offY: number } | null = null;
-    let resize: { id: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
+    let grab: { tipo: string; offX: number; offY: number } | null = null;
+    let resize: { tipo: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
     let selezionata: string | null = null; // finestra sotto il cursore (pallino che pulsa)
-    // Comandi alle finestre esterne: UNO in volo per volta, l'ultimo vince
-    // (System Events è più lento di Electron: così il drag resta fluido).
-    let esternaInVolo = false;
-    let esternaCoda: { op: string; f: Finestra; x?: number; y?: number; w?: number; h?: number } | null = null;
-    const eseguiEsterna = (op: string, f: Finestra, v: { x?: number; y?: number; w?: number; h?: number } = {}) => {
-      if (!od.gestiEsterna) return;
-      if (esternaInVolo) {
-        esternaCoda = { op, f, ...v };
-        return;
-      }
-      esternaInVolo = true;
-      od.gestiEsterna({ op, app: f.app, indice: f.indice, ...v })
-        .catch(() => {})
-        .finally(() => {
-          esternaInVolo = false;
-          if (esternaCoda) {
-            const c = esternaCoda;
-            esternaCoda = null;
-            eseguiEsterna(c.op, c.f, c);
-          }
-        });
-    };
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -113,27 +79,7 @@ export default function GestiOverlay() {
 
     const aggiornaBounds = async () => {
       try {
-        const r = await od.gestiFinestre();
-        // Mentre si trascina/ridimensiona, la posizione "ottimistica" locale
-        // comanda: niente refresh che farebbe saltare la finestra.
-        if (grab || resize) return;
-        const orion: Finestra[] = (r.finestre ?? []).map((f: { tipo: string; x: number; y: number; w: number; h: number }) => ({
-          id: `orion:${f.tipo}`,
-          esterna: false,
-          tipo: f.tipo,
-          x: f.x, y: f.y, w: f.w, h: f.h,
-        }));
-        const esterne: Finestra[] = (r.esterne ?? []).map(
-          (f: { app: string; indice: number; x: number; y: number; w: number; h: number }) => ({
-            id: `app:${f.app}#${f.indice}`,
-            esterna: true,
-            app: f.app,
-            indice: f.indice,
-            x: f.x, y: f.y, w: f.w, h: f.h,
-          })
-        );
-        // ORION per ultimo: a parità di punto, il pannello vince sull'app sotto.
-        bounds = { origin: r.origin, finestre: [...esterne, ...orion] };
+        bounds = await od.gestiFinestre();
       } catch {
         /* noop */
       }
@@ -148,33 +94,7 @@ export default function GestiOverlay() {
       }
       return found;
     };
-    const rectDi = (id: string) => bounds.finestre.find((f) => f.id === id) || null;
-
-    // Operazioni unificate: pannelli ORION via Electron, altre app via Accessibility.
-    const portaAvanti = (f: Finestra) => {
-      if (f.esterna) eseguiEsterna("avanti", f);
-      else od.gestiAvanti({ tipo: f.tipo });
-    };
-    const sposta = (f: Finestra, x: number, y: number) => {
-      f.x = x;
-      f.y = y; // ottimistico: il pallino e l'hit-test seguono subito la mano
-      if (f.esterna) eseguiEsterna("sposta", f, { x, y });
-      else od.gestiSposta({ tipo: f.tipo, x, y });
-    };
-    const ridimensiona = (f: Finestra, w: number, h: number, cx: number, cy: number) => {
-      f.w = w;
-      f.h = h;
-      if (f.esterna) {
-        // Le app esterne restano ancorate all'angolo in alto a sinistra
-        // (un solo comando per aggiornamento: più fluido).
-        eseguiEsterna("ridimensiona", f, { w, h });
-      } else {
-        od.gestiRidimensiona({ tipo: f.tipo, w, h });
-        od.gestiSposta({ tipo: f.tipo, x: cx - w / 2, y: cy - h / 2 });
-        f.x = cx - w / 2;
-        f.y = cy - h / 2;
-      }
-    };
+    const rectDi = (tipo: string) => bounds.finestre.find((f) => f.tipo === tipo) || null;
 
     const disegna = (mani: Mano[]) => {
       const cv = canvasRef.current;
@@ -191,12 +111,10 @@ export default function GestiOverlay() {
           const x = f.x - bounds.origin.x + f.w - 16;
           const y = f.y - bounds.origin.y + 16;
           const pulse = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(performance.now() / 280));
-          // Ciano = pannello ORION · bianco = finestra di un'altra app.
-          const colore = f.esterna ? "#e2e8f0" : "#22d3ee";
           ctx.save();
           ctx.globalAlpha = pulse;
-          ctx.fillStyle = colore;
-          ctx.shadowColor = colore;
+          ctx.fillStyle = "#22d3ee";
+          ctx.shadowColor = "#22d3ee";
           ctx.shadowBlur = 14;
           ctx.beginPath();
           ctx.arc(x, y, 5, 0, Math.PI * 2);
@@ -223,26 +141,26 @@ export default function GestiOverlay() {
       // Pallino di selezione: la finestra sotto il cursore (quella che pinchando agganci).
       if (cursore) {
         const f = sotto(cursore.sx, cursore.sy);
-        if (f) selezionata = f.id;
+        if (f) selezionata = f.tipo;
       }
 
       if (pin.length >= 2) {
-        // DUE MANI (allarga/restringi) → ridimensiona.
+        // DUE MANI (allarga/restringi) → ridimensiona, ancorato al centro.
         const [a, b] = pin;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
-          const f = grab ? rectDi(grab.id) : selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
+          const f = grab ? rectDi(grab.tipo) : selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
           if (f) {
-            resize = { id: f.id, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
-            selezionata = f.id;
-            portaAvanti(f);
+            resize = { tipo: f.tipo, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
+            selezionata = f.tipo;
+            od.gestiAvanti({ tipo: f.tipo });
           }
         } else {
-          const f = rectDi(resize.id);
-          if (f) {
-            const s = Math.min(4, Math.max(0.3, dist / resize.dist0));
-            ridimensiona(f, resize.w0 * s, resize.h0 * s, resize.cx, resize.cy);
-          }
+          const s = Math.min(4, Math.max(0.3, dist / resize.dist0));
+          const w = resize.w0 * s;
+          const h = resize.h0 * s;
+          od.gestiRidimensiona({ tipo: resize.tipo, w, h });
+          od.gestiSposta({ tipo: resize.tipo, x: resize.cx - w / 2, y: resize.cy - h / 2 });
         }
         grab = null;
         return;
@@ -250,19 +168,17 @@ export default function GestiOverlay() {
       resize = null;
 
       if (pin.length === 1) {
-        // PINCH (una mano) → aggancia e sposta liberamente la finestra
-        // (pannello di ORION o finestra di qualunque app).
+        // PINCH (una mano) → aggancia e sposta liberamente la finestra.
         const m = pin[0];
         if (!grab) {
           const f = sotto(m.sx, m.sy);
           if (f) {
-            grab = { id: f.id, offX: m.sx - f.x, offY: m.sy - f.y };
-            selezionata = f.id;
-            portaAvanti(f);
+            grab = { tipo: f.tipo, offX: m.sx - f.x, offY: m.sy - f.y };
+            selezionata = f.tipo;
+            od.gestiAvanti({ tipo: f.tipo });
           }
         } else {
-          const f = rectDi(grab.id);
-          if (f) sposta(f, m.sx - grab.offX, m.sy - grab.offY);
+          od.gestiSposta({ tipo: grab.tipo, x: m.sx - grab.offX, y: m.sy - grab.offY });
         }
       } else {
         grab = null;
