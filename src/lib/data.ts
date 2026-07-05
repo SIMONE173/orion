@@ -2152,3 +2152,147 @@ export function listTombstones(limite = 25): { id: number; gcal_id: string }[] {
 export function rimuoviTombstone(id: number) {
   db().prepare("DELETE FROM gcal_tombstones WHERE id = ? AND tenant_id = ?").run(id, T());
 }
+
+// ── MOTORE RICAVI ────────────────────────────────────────────────────────────
+
+// Riempi-buchi: offerte di slot alla lista d'attesa.
+export type OffertaSlot = {
+  id: number;
+  attesa_id: number | null;
+  cliente_id: number | null;
+  cliente_nome?: string | null;
+  telefono: string | null;
+  inizio: string;
+  fine: string;
+  stato: string;
+  scadenza: string;
+};
+
+export function creaOffertaSlot(o: {
+  attesa_id?: number | null;
+  cliente_id: number;
+  telefono: string;
+  inizio: string;
+  fine: string;
+  minutiScadenza?: number;
+}): OffertaSlot {
+  const scad = new Date(Date.now() + (o.minutiScadenza ?? 45) * 60000).toISOString();
+  const r = db()
+    .prepare(
+      `INSERT INTO offerte_slot (tenant_id, attesa_id, cliente_id, telefono, inizio, fine, stato, scadenza, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'inviata', ?, ?, ?)`
+    )
+    .run(T(), o.attesa_id ?? null, o.cliente_id, o.telefono, o.inizio, o.fine, scad, nowISO(), nowISO());
+  return db().prepare("SELECT * FROM offerte_slot WHERE id = ?").get(Number(r.lastInsertRowid)) as OffertaSlot;
+}
+
+export function offertaInviataPerCliente(clienteId: number): OffertaSlot | undefined {
+  return db()
+    .prepare(
+      `SELECT o.*, c.nome AS cliente_nome FROM offerte_slot o LEFT JOIN clienti c ON c.id = o.cliente_id
+       WHERE o.tenant_id = ? AND o.cliente_id = ? AND o.stato = 'inviata' ORDER BY o.id DESC LIMIT 1`
+    )
+    .get(T(), clienteId) as OffertaSlot | undefined;
+}
+
+export function aggiornaOfferta(id: number, stato: string) {
+  db().prepare("UPDATE offerte_slot SET stato = ?, updated_at = ? WHERE id = ? AND tenant_id = ?").run(stato, nowISO(), id, T());
+}
+
+export function offerteScadute(): OffertaSlot[] {
+  return db()
+    .prepare(
+      `SELECT o.*, c.nome AS cliente_nome FROM offerte_slot o LEFT JOIN clienti c ON c.id = o.cliente_id
+       WHERE o.tenant_id = ? AND o.stato = 'inviata' AND o.scadenza < ?`
+    )
+    .all(T(), nowISO()) as OffertaSlot[];
+}
+
+// Chi ha già ricevuto un'offerta per QUESTO slot (per non riproporla alla stessa persona).
+export function clientiGiaOffertiPerSlot(inizio: string): number[] {
+  return (
+    db()
+      .prepare("SELECT cliente_id FROM offerte_slot WHERE tenant_id = ? AND inizio = ? AND cliente_id IS NOT NULL")
+      .all(T(), inizio) as { cliente_id: number }[]
+  ).map((r) => r.cliente_id);
+}
+
+// Prossimo candidato dalla lista d'attesa (con telefono), priorità alta prima.
+export function prossimoCandidatoAttesa(escludi: number[]): { attesa_id: number; cliente_id: number; nome: string; telefono: string } | undefined {
+  const rows = db()
+    .prepare(
+      `SELECT la.id AS attesa_id, c.id AS cliente_id, c.nome, c.telefono
+       FROM lista_attesa la JOIN clienti c ON c.id = la.cliente_id
+       WHERE la.tenant_id = ? AND c.telefono IS NOT NULL AND c.telefono != ''
+       ORDER BY CASE la.priorita WHEN 'alta' THEN 0 ELSE 1 END, la.created_at ASC`
+    )
+    .all(T()) as { attesa_id: number; cliente_id: number; nome: string; telefono: string }[];
+  return rows.find((r) => !escludi.includes(r.cliente_id));
+}
+
+// Clienti "dormienti": nessuna visita da almeno N mesi, nessun appuntamento
+// futuro, con telefono → candidati a un richiamo gentile.
+export function clientiDormienti(mesiMin = 6, limite = 20): (Cliente & { mesi: number })[] {
+  const soglia = new Date();
+  soglia.setMonth(soglia.getMonth() - mesiMin);
+  const sogliaISO = soglia.toISOString().slice(0, 10);
+  const adesso = nowISO().slice(0, 16);
+  const rows = db()
+    .prepare(
+      `SELECT c.* FROM clienti c
+       WHERE c.tenant_id = ? AND c.telefono IS NOT NULL AND c.telefono != ''
+         AND c.ultima_visita IS NOT NULL AND c.ultima_visita <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM appuntamenti a WHERE a.tenant_id = c.tenant_id AND a.cliente_id = c.id
+             AND a.stato NOT IN ('cancellato','annullato') AND a.inizio >= ?
+         )
+       ORDER BY c.ultima_visita ASC LIMIT ?`
+    )
+    .all(T(), sogliaISO, adesso, limite) as Cliente[];
+  return rows.map((c) => ({
+    ...c,
+    mesi: Math.floor((Date.now() - new Date(c.ultima_visita as string).getTime()) / (30.44 * 24 * 3600_000)),
+  }));
+}
+
+// Report "quanto ti ho fatto guadagnare": conta le azioni di valore del periodo
+// e le traduce in una stima in euro usando il prezzo medio REALE dei pagamenti.
+export function statisticheValore(da: string, a: string) {
+  const t = T();
+  const cnt = (tipo: string) =>
+    (db()
+      .prepare("SELECT COUNT(*) AS n FROM eventi WHERE tenant_id = ? AND tipo = ? AND created_at >= ? AND created_at <= ?")
+      .get(t, tipo, da, a) as { n: number }).n;
+  const chiamate = (db()
+    .prepare("SELECT COUNT(*) AS n FROM chiamate WHERE tenant_id = ? AND created_at >= ? AND created_at <= ?")
+    .get(t, da, a) as { n: number }).n;
+  const prezzoMedio =
+    (db()
+      .prepare("SELECT AVG(importo) AS m FROM pagamenti WHERE tenant_id = ? AND stato = 'incassato'")
+      .get(t) as { m: number | null }).m ?? 0;
+  const prenotazioniTelefono = cnt("appuntamento_da_telefono");
+  const slotRiempiti = cnt("slot_riempito");
+  const confermeAutomatiche = cnt("appuntamento_confermato");
+  const promemoriaInviati = cnt("promemoria_appuntamento");
+  const disdetteIntercettate = cnt("richiesta_disdetta");
+  const richiamiInviati = cnt("richiamo_dormiente");
+  const fattureEmesse = cnt("fattura_emessa");
+  // Stima prudente: prenotazioni da telefono e buchi riempiti = ricavo pieno;
+  // 1 no-show evitato ogni 4 conferme automatiche (stima conservativa).
+  const noShowEvitatiStima = Math.floor(confermeAutomatiche / 4);
+  const valoreStimato = Math.round((prenotazioniTelefono + slotRiempiti + noShowEvitatiStima) * prezzoMedio);
+  return {
+    periodo: { da, a },
+    chiamateGestite: chiamate,
+    prenotazioniTelefono,
+    slotRiempiti,
+    promemoriaInviati,
+    confermeAutomatiche,
+    noShowEvitatiStima,
+    disdetteIntercettate,
+    richiamiInviati,
+    fattureEmesse,
+    prezzoMedio: Math.round(prezzoMedio * 100) / 100,
+    valoreStimato,
+  };
+}

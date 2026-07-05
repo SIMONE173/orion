@@ -11,6 +11,7 @@ import {
   type Cliente,
 } from "@/lib/data";
 import { scaricaMediaWhatsApp, inviaMessaggioWhatsApp } from "@/lib/whatsapp";
+import { processaRispostaOfferta } from "@/lib/slots";
 import { inviaPushATutti } from "@/lib/push";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
@@ -157,12 +158,14 @@ export async function POST(req: NextRequest) {
           stato: "ricevuto",
         });
 
-        // Anti no-show: se è la risposta a un promemoria, gestiscila subito.
+        // Risposte automatiche, in ordine di priorità: prima le offerte di slot
+        // (riempi-buchi), poi i promemoria anti no-show.
         if (tipo === "testo" && cliente && contenuto) {
           try {
-            await gestisciRispostaPromemoria(cliente, contenuto);
+            const eraOfferta = await processaRispostaOfferta(cliente, contenuto);
+            if (!eraOfferta) await gestisciRispostaPromemoria(cliente, contenuto);
           } catch (e) {
-            console.error("[whatsapp webhook] risposta promemoria:", e);
+            console.error("[whatsapp webhook] risposta automatica:", e);
           }
         }
       }

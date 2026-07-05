@@ -1,6 +1,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Vista, Azione } from "./views";
 import type { Cliente } from "../data";
+import { eseguiImport } from "../importa";
 import {
   getProfilo,
   aggiornaProfilo,
@@ -68,6 +69,8 @@ import {
   logAudit,
   listChiamate,
   getCalendarAccount,
+  clientiDormienti,
+  statisticheValore,
   type VoceMemoria,
   type Compito,
   type EntitaEsterna,
@@ -75,6 +78,7 @@ import {
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
 import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
 import { trasmettiFattura, sdiConfigurato } from "../sdi";
+import { avviaOffertaSlot } from "../slots";
 import {
   setOnboardingUtente,
   setPreferenzeUtente,
@@ -630,6 +634,39 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "importa_dati",
+    description:
+      "ECOSISTEMA. Porta DENTRO ORION i dati che già esistono nel software dell'utente (gestionale, CRM, Excel, archivio): apre il pannello dove carica un'esportazione CSV o Excel (.xlsx). Usalo per 'importa i miei clienti', 'ti passo i dati del gestionale', 'leggi questo excel'. Spiega che ogni gestionale sa esportare in CSV/Excel. Quando il file è caricato ti arriva un messaggio [Sistema] con colonne ed esempi: ragiona sulla mappatura più sensata, proponila in UNA frase e, dopo conferma, usa esegui_import.",
+    input_schema: {
+      type: "object",
+      properties: {
+        sistema: { type: "string", description: "Nome del software di provenienza, se già noto (es. il gestionale collegato)" },
+      },
+    },
+  },
+  {
+    name: "esegui_import",
+    description:
+      "ECOSISTEMA. Esegue l'import di un file già analizzato (usa lo stage_id ricevuto nel messaggio [Sistema]). destinazione: 'clienti' (anagrafica), 'appuntamenti' (storico e futuri: servono data E ora), 'entita_esterne' (tutto il resto: ordini, pratiche, schede, interventi — le colonne non mappate finiscono nei dettagli, non si perde nulla). mappa = campo→nome esatto della colonna del file. Puoi richiamarlo più volte sullo stesso stage_id per destinazioni diverse (es. prima clienti, poi appuntamenti). Non sovrascrive mai dati già presenti (dedup + integra solo i campi vuoti). Dopo l'import commenta le statistiche ricevute e salva con impara ciò che caratterizza il suo lavoro (durate reali, giorni/orari tipici, prestazioni frequenti).",
+    input_schema: {
+      type: "object",
+      properties: {
+        stage_id: { type: "string" },
+        destinazione: { type: "string", enum: ["clienti", "appuntamenti", "entita_esterne"] },
+        sistema: { type: "string", description: "Software di provenienza: viene registrato/riusato come connessione (obbligatorio per entita_esterne)" },
+        mappa: {
+          type: "object",
+          description:
+            "campo→colonna del file. Per clienti: nome (obbligatorio), telefono, email, codice_fiscale, piva, indirizzo, cap, comune, provincia, note. Per appuntamenti: inizio (data+ora insieme) OPPURE data e ora separate, poi cliente_nome, durata_min, titolo, note. Per entita_esterne: titolo, chiave_esterna, cliente_nome, riferimento.",
+          additionalProperties: { type: "string" },
+        },
+        tipo_entita: { type: "string", description: "Per entita_esterne: cliente|ordine|pratica|progetto|documento|ticket|persona|attivita|altro" },
+        durata_min_default: { type: "integer", description: "Durata in minuti quando il file non la indica (per appuntamenti; default 60)" },
+      },
+      required: ["stage_id", "destinazione", "mappa"],
+    },
+  },
+  {
     name: "mostra_agenda",
     description:
       "Mostra l'agenda degli appuntamenti in un intervallo di date. Senza parametri mostra oggi. Usalo ogni volta che l'utente vuole vedere l'agenda o gli impegni.",
@@ -930,6 +967,46 @@ export const TOOLS: Anthropic.Tool[] = [
     description:
       "Collega Google Calendar (sync bidirezionale: ciò che prenoto qui appare su Google e viceversa). Usalo quando l'utente dice 'collega il mio calendario/Google Calendar', 'sincronizza il calendario'. Apre la pagina di consenso Google. Se è GIÀ collegato te lo dice il risultato (riferisci lo stato).",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "prepara_richiami",
+    description:
+      "MOTORE RICAVI — richiami dei clienti dormienti. Trova i clienti che non si vedono da almeno N mesi (default 6), senza appuntamenti futuri. Tu poi SCRIVI un messaggio WhatsApp personalizzato e cordiale per ciascuno (nome, quanto tempo è passato, invito gentile a fissare un controllo — MAI pressante), li leggi/riassumi all'utente e SOLO dopo conferma esplicita li invii con invia_richiami. Usalo quando l'utente dice 'richiamiamo i clienti che non si vedono da un po'', 'facciamo una campagna richiami', o quando l'analisi proattiva segnala clienti inattivi.",
+    input_schema: {
+      type: "object",
+      properties: { mesi_min: { type: "integer", description: "Mesi minimi di assenza (default 6)" } },
+    },
+  },
+  {
+    name: "invia_richiami",
+    description:
+      "Invia i messaggi di richiamo preparati (SOLO dopo conferma esplicita dell'utente). Passa l'elenco {cliente_id, testo} con i messaggi che hai scritto tu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        richiami: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              cliente_id: { type: "integer" },
+              testo: { type: "string" },
+            },
+            required: ["cliente_id", "testo"],
+          },
+        },
+      },
+      required: ["richiami"],
+    },
+  },
+  {
+    name: "report_valore",
+    description:
+      "Il report 'quanto ti ho fatto guadagnare': chiamate gestite dal centralino, appuntamenti prenotati da solo, buchi riempiti dalla lista d'attesa, no-show evitati (stima prudente), promemoria e richiami inviati, con una STIMA IN EURO basata sul prezzo medio reale dei pagamenti. Usalo per 'quanto mi hai aiutato questo mese', 'report del mese', 'quanto mi hai fatto guadagnare'. A voce: dai il numero in euro e le 2-3 voci principali, precisando che è una stima prudente.",
+    input_schema: {
+      type: "object",
+      properties: { periodo: { type: "string", enum: ["mese", "mese_scorso"] } },
+    },
   },
   {
     name: "archivia_documento",
@@ -1700,6 +1777,27 @@ const handlers: Record<string, Handler> = {
     };
   },
 
+  importa_dati: (input) => ({
+    result: {
+      ok: true,
+      istruzioni:
+        "Pannello di import aperto. L'utente esporta dal suo software un CSV o Excel e lo carica lì: all'arrivo riceverai un messaggio [Sistema] con stage_id, colonne ed esempi. Proponi la mappatura e chiedi conferma prima di esegui_import.",
+    },
+    vista: { tipo: "importa", dati: { sistema: input.sistema ? String(input.sistema) : null } },
+  }),
+
+  esegui_import: (input) => {
+    const esito = eseguiImport({
+      stage_id: String(input.stage_id ?? ""),
+      destinazione: input.destinazione,
+      sistema: input.sistema ? String(input.sistema) : null,
+      mappa: (input.mappa ?? {}) as Record<string, string>,
+      tipo_entita: input.tipo_entita ? String(input.tipo_entita) : null,
+      durata_min_default: input.durata_min_default ? Number(input.durata_min_default) : null,
+    });
+    return { result: esito, vista: { tipo: "importa", dati: { esito } } };
+  },
+
   mostra_agenda: (input) => {
     const da = input.data_da || oggi();
     const a = input.data_a || da;
@@ -1777,13 +1875,27 @@ const handlers: Record<string, Handler> = {
     };
   },
 
-  elimina_appuntamento: (input) => {
+  elimina_appuntamento: async (input) => {
     const esistente = getAppuntamento(Number(input.id));
     const ok = eliminaAppuntamento(Number(input.id));
+    // RIEMPI-BUCHI: lo slot liberato viene offerto subito alla lista d'attesa.
+    let offerta = false;
+    if (ok && esistente) {
+      try {
+        offerta = await avviaOffertaSlot(esistente.inizio, esistente.fine);
+      } catch {
+        /* il riempi-buchi non deve mai bloccare la cancellazione */
+      }
+    }
     const giorno = esistente?.inizio.slice(0, 10) || oggi();
     const appuntamenti = listAppuntamenti(giorno, giorno);
     return {
-      result: { ok },
+      result: {
+        ok,
+        riempi_buchi: offerta
+          ? "Slot offerto automaticamente al primo della lista d'attesa via WhatsApp (45 minuti per accettare; se rifiuta o scade passo al successivo). Dillo all'utente."
+          : undefined,
+      },
       vista: { tipo: "agenda", titolo: `Agenda ${giorno}`, dati: { periodo: { da: giorno, a: giorno }, appuntamenti } },
     };
   },
@@ -2325,6 +2437,73 @@ const handlers: Record<string, Handler> = {
         nota: chiamate.length
           ? "Riassumi a voce le chiamate più rilevanti (prenotazioni e messaggi urgenti prima)."
           : "Nessuna chiamata registrata dal centralino. Se il numero Twilio non è ancora collegato, la guida è in TELEFONO.md.",
+      },
+    };
+  },
+
+  prepara_richiami: (input) => {
+    const mesi = input?.mesi_min ? Number(input.mesi_min) : 6;
+    const dormienti = clientiDormienti(mesi).map((c) => ({
+      cliente_id: c.id,
+      nome: c.nome,
+      telefono: c.telefono,
+      ultima_visita: c.ultima_visita,
+      mesi_di_assenza: c.mesi,
+      note: c.note,
+    }));
+    return {
+      result: {
+        dormienti,
+        istruzioni: dormienti.length
+          ? "Scrivi un messaggio personalizzato e cordiale per ciascuno (usa nome e mesi di assenza; tono gentile, mai commerciale/pressante). Leggili in sintesi all'utente, chiedi conferma, e SOLO dopo il sì usa invia_richiami."
+          : `Nessun cliente dormiente da almeno ${mesi} mesi (con telefono e senza appuntamenti futuri).`,
+      },
+    };
+  },
+
+  invia_richiami: async (input) => {
+    const richiami = Array.isArray(input?.richiami) ? input.richiami.slice(0, 20) : [];
+    let inviati = 0;
+    const errori: string[] = [];
+    for (const r of richiami) {
+      const c = getCliente(Number(r.cliente_id));
+      if (!c?.telefono) {
+        errori.push(`cliente ${r.cliente_id}: telefono mancante`);
+        continue;
+      }
+      const esito = await inviaMessaggioWhatsApp(c.telefono, String(r.testo));
+      if (!esito.ok) {
+        errori.push(`${c.nome}: ${esito.errore ?? "invio fallito"}`);
+        continue;
+      }
+      logCommunication({ cliente_id: c.id, direzione: "out", contenuto: String(r.testo), stato: esito.simulato ? "simulato" : "inviato" });
+      logEvento({
+        tipo: "richiamo_dormiente",
+        soggetto: c.nome,
+        cliente_id: c.id,
+        descrizione: `Richiamo inviato a ${c.nome} (cliente inattivo)`,
+      });
+      inviati++;
+    }
+    logAudit({ canale: "whatsapp", azione: "campagna_richiami", dettaglio: `${inviati} richiami inviati${errori.length ? `, ${errori.length} errori` : ""}` });
+    return { result: { ok: true, inviati, errori } };
+  },
+
+  report_valore: (input) => {
+    const now = new Date();
+    let da: Date, a: Date;
+    if (input?.periodo === "mese_scorso") {
+      da = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      a = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    } else {
+      da = new Date(now.getFullYear(), now.getMonth(), 1);
+      a = now;
+    }
+    const stats = statisticheValore(da.toISOString(), a.toISOString());
+    return {
+      result: {
+        ...stats,
+        nota: "Stima PRUDENTE: prenotazioni dal centralino e buchi riempiti valgono il prezzo medio reale; no-show evitati stimati 1 ogni 4 conferme automatiche. A voce: euro + 2-3 voci principali.",
       },
     };
   },

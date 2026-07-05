@@ -64,6 +64,18 @@ prodotto ma non si spinge finché il verticale non tira).
    bidirezionale con Google Calendar: nessuno deve abbandonare il proprio
    calendario per adottare ORION.
 
+E il quinto, quello che nessun concorrente ha — il **MOTORE RICAVI** (ORION
+non evita solo perdite: genera incassi e lo dimostra):
+
+5. **Riempi-buchi automatico** — a ogni disdetta lo slot viene offerto via
+   WhatsApp alla lista d'attesa, uno alla volta con scadenza 45', finché
+   qualcuno dice SÌ (prenotato, notificato, tracciato). **Richiami dormienti**
+   — ORION trova i clienti spariti da mesi, scrive messaggi personalizzati e
+   li invia dopo conferma. **Report del valore** — a fine mese quantifica in
+   euro quanto ha portato (chiamate gestite, prenotazioni, buchi riempiti,
+   no-show evitati, stima prudente sul prezzo medio reale): è l'argomento di
+   rinnovo che si scrive da solo, e la metrica dei pilot già automatizzata.
+
 Trasversali: **fiducia** (audit log di ogni azione automatica, disclosure AI
 nelle interazioni coi clienti, cifratura a riposo dei segreti) ed **economia**
 (routing dei modelli: operatività al modello rapido, intelligenza piena dove

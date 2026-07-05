@@ -400,6 +400,19 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_entita_cliente ON entita_esterne(tenant_id, cliente_id);
     CREATE INDEX IF NOT EXISTS idx_entita_chiave ON entita_esterne(connessione_id, chiave_esterna);
 
+    -- Import dei dati esistenti (esportazioni CSV/Excel dei software già in uso):
+    -- il file analizzato resta in staging finché ORION non esegue la mappatura
+    -- (righe = JSON string[][]). Le voci vecchie vengono ripulite dopo 24 ore.
+    CREATE TABLE IF NOT EXISTS import_stage (
+      id TEXT PRIMARY KEY,
+      tenant_id INTEGER NOT NULL,
+      nome_file TEXT NOT NULL,
+      colonne TEXT NOT NULL,
+      righe TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_import_stage_tenant ON import_stage(tenant_id, created_at);
+
     -- ── CENTRALINO AI (telefono) ────────────────────────────────────────────
     -- Registro delle chiamate gestite dall'assistente telefonico. La trascrizione
     -- è il JSON dei turni (caller/orion) accumulati durante la chiamata; l'esito
@@ -472,6 +485,26 @@ function migrate(d: Database.Database) {
       gcal_id TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    -- ── MOTORE RICAVI: riempi-buchi automatico ──────────────────────────────
+    -- Quando uno slot si libera, ORION lo offre via WhatsApp alla lista d'attesa
+    -- (uno alla volta, con scadenza). stato: 'inviata' | 'accettata' |
+    -- 'rifiutata' | 'scaduta' | 'annullata' (slot rioccupato nel frattempo).
+    CREATE TABLE IF NOT EXISTS offerte_slot (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      attesa_id INTEGER,
+      cliente_id INTEGER REFERENCES clienti(id) ON DELETE SET NULL,
+      telefono TEXT,
+      inizio TEXT NOT NULL,
+      fine TEXT NOT NULL,
+      stato TEXT NOT NULL DEFAULT 'inviata',
+      scadenza TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_offerte_tenant ON offerte_slot(tenant_id, stato);
+    CREATE INDEX IF NOT EXISTS idx_offerte_cliente ON offerte_slot(tenant_id, cliente_id, stato);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:

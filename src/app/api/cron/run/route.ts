@@ -11,6 +11,7 @@ import {
   logAudit,
 } from "@/lib/data";
 import { inviaMessaggioWhatsApp } from "@/lib/whatsapp";
+import { processaScadenzeOfferte } from "@/lib/slots";
 import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
@@ -132,6 +133,15 @@ export async function POST(req: NextRequest) {
         totPromemoriaApp += await promemoriaAppuntamenti();
       } catch (e) {
         console.error("[cron] promemoria appuntamenti:", e instanceof Error ? e.message : e);
+      }
+    });
+
+    // Riempi-buchi: le offerte scadute passano al prossimo in lista d'attesa.
+    await runWithTenant(tenantId, async () => {
+      try {
+        await processaScadenzeOfferte();
+      } catch (e) {
+        console.error("[cron] scadenze offerte:", e instanceof Error ? e.message : e);
       }
     });
 

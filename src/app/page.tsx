@@ -369,6 +369,17 @@ export default function Home() {
   inviaAOrionRef.current = inviaAOrion;
   const entraStandbyRef = useRef<() => void>(() => {});
 
+  // Canale pannello→ORION: un pannello (es. import dati) può passare un esito
+  // al cervello come messaggio [Sistema] silenzioso (non appare in chat).
+  useEffect(() => {
+    const h = (e: Event) => {
+      const testo = (e as CustomEvent<{ testo?: string }>).detail?.testo;
+      if (testo) inviaAOrionRef.current?.(String(testo), false, undefined, true);
+    };
+    window.addEventListener("orion:messaggio", h);
+    return () => window.removeEventListener("orion:messaggio", h);
+  }, []);
+
   // ── Gesture Mode: gestione del layout spaziale dei pannelli ────────────────
   // Carica il layout salvato (posizioni ricordate) al primo avvio.
   useEffect(() => {

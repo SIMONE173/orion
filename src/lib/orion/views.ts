@@ -171,6 +171,7 @@ export type Vista =
   | { tipo: "profilo"; dati: { profilo: Profilo; azienda?: Azienda | null; ruolo?: string | null } }
   | { tipo: "memoria"; dati: { intuizioni: Memoria[] } }
   | { tipo: "integrazioni"; dati: { connessioni: Connessione[] } }
+  | { tipo: "importa"; dati: { sistema?: string | null; esito?: import("../importa").EsitoImport } }
   | { tipo: "organico"; dati: { organico: MembroOrganico[] } }
   | { tipo: "compiti"; titolo?: string; dati: { compiti: Compito[] } }
   | {

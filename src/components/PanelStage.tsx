@@ -42,6 +42,7 @@ import { EmailPanel } from "./panels/EmailPanel";
 import { EmailConnectPanel } from "./panels/EmailConnectPanel";
 import { VerbalePanel } from "./panels/VerbalePanel";
 import { IntegrazioniPanel } from "./panels/IntegrazioniPanel";
+import { ImportaPanel } from "./panels/ImportaPanel";
 
 export function renderPanel(v: Vista) {
   switch (v.tipo) {
@@ -105,6 +106,8 @@ export function renderPanel(v: Vista) {
       return <VerbalePanel dati={v.dati} />;
     case "integrazioni":
       return <IntegrazioniPanel dati={v.dati} />;
+    case "importa":
+      return <ImportaPanel dati={v.dati} />;
     default:
       return null;
   }

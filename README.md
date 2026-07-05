@@ -69,6 +69,11 @@ Senza chiave API l'interfaccia parte ugualmente, ma ORION non potrà rispondere.
 - **Google Calendar bidirezionale** — "collega il mio calendario": ciò che
   prenoti (tu o il centralino) appare su Google; ciò che metti su Google blocca
   gli slot in ORION. → [CALENDARIO.md](CALENDARIO.md)
+- **Motore ricavi** — a ogni disdetta lo slot viene offerto da solo alla lista
+  d'attesa via WhatsApp (45' per accettare, poi il successivo); i clienti
+  spariti da mesi ricevono richiami personalizzati (dopo tua conferma); e a
+  fine mese "quanto mi hai fatto guadagnare?" risponde con un numero in euro
+  (report del valore, stima prudente sul prezzo medio reale).
 
 ## Il resto della segretaria
 

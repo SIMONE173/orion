@@ -32,3 +32,7 @@ npm-debug.log*
 # ORION Desktop (Electron)
 /desktop/node_modules
 /desktop/dist
+
+# Il trailer è un MP4 separato: la route resta solo locale (render), MAI sul sito.
+src/app/trailer/
+trailer-render/
