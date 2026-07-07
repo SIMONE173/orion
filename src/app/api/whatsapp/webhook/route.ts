@@ -15,6 +15,7 @@ import { processaRispostaOfferta } from "@/lib/slots";
 import { inviaPushATutti } from "@/lib/push";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
+import { verificaFirmaMeta, fallbackTenantConsentito } from "@/lib/webhookSec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,9 +26,9 @@ export async function GET(req: NextRequest) {
   const mode = p.get("hub.mode");
   const token = (p.get("hub.verify_token") ?? "").trim();
   const challenge = p.get("hub.challenge");
-  // Verify token fisso (parola d'ordine dell'handshake, non un segreto critico):
-  // così la verifica non dipende da caratteri invisibili in una variabile.
-  const atteso = "orion2026";
+  // Verify token dall'ambiente (consigliato: WHATSAPP_VERIFY_TOKEN); fallback
+  // storico "orion2026" per retrocompatibilità con i webhook già configurati.
+  const atteso = (process.env.WHATSAPP_VERIFY_TOKEN || "orion2026").trim();
   if (mode === "subscribe" && token && token === atteso) {
     return new NextResponse(challenge ?? "", { status: 200 });
   }
@@ -117,17 +118,38 @@ async function gestisciRispostaPromemoria(cliente: Cliente, testo: string) {
 // Ricezione dei messaggi in arrivo.
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const change = body?.entry?.[0]?.changes?.[0]?.value;
+    // Firma Meta (X-Hub-Signature-256) calcolata sul corpo GREZZO: solo i
+    // messaggi che arrivano davvero da Meta entrano nel sistema.
+    const raw = await req.text();
+    const firma = verificaFirmaMeta(raw, req.headers.get("x-hub-signature-256"));
+    if (!firma.ok) {
+      console.warn("[whatsapp webhook] rifiutato:", firma.motivo);
+      return new NextResponse("forbidden", { status: 403 });
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return NextResponse.json({ ok: true });
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const change = (body as any)?.entry?.[0]?.changes?.[0]?.value;
     const messaggi = change?.messages;
     if (!Array.isArray(messaggi)) return NextResponse.json({ ok: true });
 
-    // Routing: dal numero che ha ricevuto il messaggio risali al tenant proprietario
-    // (numero collegato via Embedded Signup). Se non trovato, ripiega sul numero
-    // condiviso → primo tenant (sviluppo / numero di prova).
+    // Routing: dal numero che ha ricevuto il messaggio risali al tenant
+    // proprietario (numero collegato via Embedded Signup). Fallback SOLO se
+    // legittimo: numero condiviso di Fase 1 dichiarato in env, oppure sviluppo.
+    // In produzione un numero sconosciuto NON finisce nei dati del primo tenant.
     const phoneNumberId: string | undefined = change?.metadata?.phone_number_id;
-    const tenantId =
-      (phoneNumberId ? tenantDaPhoneNumberId(phoneNumberId) : null) ?? primoTenant();
+    let tenantId = phoneNumberId ? tenantDaPhoneNumberId(phoneNumberId) : null;
+    if (!tenantId) {
+      const numeroCondiviso = (process.env.WHATSAPP_PHONE_NUMBER_ID || "").trim();
+      const fallbackOk =
+        fallbackTenantConsentito() || (numeroCondiviso !== "" && phoneNumberId === numeroCondiviso);
+      tenantId = fallbackOk ? Number(process.env.ORION_WA_TENANT || 0) || primoTenant() : null;
+    }
     if (!tenantId) return NextResponse.json({ ok: true });
 
     await runWithTenant(tenantId, async () => {

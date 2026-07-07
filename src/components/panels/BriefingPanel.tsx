@@ -10,9 +10,19 @@ export function BriefingPanel({ dati }: { dati: Dati }) {
 
   return (
     <div className="flex h-full flex-col">
-      <h2 className="mb-4 text-lg font-semibold tracking-tight text-cyan-100">
+      <h2 className="mb-1 text-lg font-semibold tracking-tight text-cyan-100">
         Briefing della giornata
       </h2>
+
+      {dati.fonte?.modo === "gestionale" && dati.fonte.sistema ? (
+        <p className="mb-4 flex items-center gap-1.5 text-xs text-slate-400">
+          <span className="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400" />
+          Dati da <span className="text-slate-200">{dati.fonte.sistema}</span>
+          {dati.fonte.aggiornato_at && ` · aggiornato alle ${ora(dati.fonte.aggiornato_at)}`}
+        </p>
+      ) : (
+        <div className="mb-4" />
+      )}
 
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Kpi n={dati.totaleAppuntamenti} label="Appuntamenti" tono="cyan" />

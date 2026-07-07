@@ -284,6 +284,15 @@ export const TOOLS: Anthropic.Tool[] = [
         regime_fiscale: { type: "string", description: "es. 'forfettario' oppure 'ordinario'" },
         pec: { type: "string" },
         sdi: { type: "string" },
+        caparra_importo: {
+          type: "number",
+          description:
+            "Caparra richiesta ai NUOVI appuntamenti in euro (0 = disattivata). Con caparra e link_pagamento impostati, le conferme automatiche (centralino, riempi-buchi) includono la richiesta col link.",
+        },
+        link_pagamento: {
+          type: "string",
+          description: "Link di pagamento dello studio (Stripe Payment Link, PayPal.me, Satispay…): dove il cliente versa la caparra",
+        },
         onboarding_completo: { type: "integer", enum: [0, 1] },
       },
     },
@@ -600,6 +609,19 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "imposta_fonte_dati",
+    description:
+      "ECOSISTEMA / FONTE DI VERITÀ. Stabilisce CHI possiede i dati che ORION mostra in agenda, clienti e briefing. fonte='orion' = ORION È il gestionale del professionista (non ne ha uno, o vuole lavorare qui): i dati nascono e vivono in ORION. fonte='gestionale' = ORION è lo SPECCHIO VIVO del software indicato in 'sistema': la verità sta nel gestionale, ORION la rispecchia (sincronia in tempo reale via webhook e/o import). Usalo nel colloquio quando capisci se ha o meno un gestionale, o quando l'utente lo cambia. Con 'gestionale' prepara la connessione (con webhook) e apre il pannello per attivare la sincronia; poi proponi l'import iniziale per popolare subito ORION.",
+    input_schema: {
+      type: "object",
+      properties: {
+        fonte: { type: "string", enum: ["orion", "gestionale"] },
+        sistema: { type: "string", description: "Nome del gestionale (obbligatorio se fonte=gestionale)" },
+      },
+      required: ["fonte"],
+    },
+  },
+  {
     name: "mostra_sistemi",
     description: "ECOSISTEMA. Mostra a schermo i sistemi esterni collegati e cosa ORION ne sa. Usalo per 'quali software hai collegato', 'mostrami le integrazioni', 'cosa sai dei nostri sistemi'.",
     input_schema: { type: "object", properties: {} },
@@ -664,6 +686,20 @@ export const TOOLS: Anthropic.Tool[] = [
         durata_min_default: { type: "integer", description: "Durata in minuti quando il file non la indica (per appuntamenti; default 60)" },
       },
       required: ["stage_id", "destinazione", "mappa"],
+    },
+  },
+  {
+    name: "esporta_dati",
+    description:
+      "PORTABILITÀ (mai ostaggio dei dati — il contrario dei gestionali storici). Scarica i dati in un CSV pulito, apribile in Excel e importabile in qualsiasi altro software. Usalo per 'esporta i clienti', 'scarica le fatture', 'passa i pagamenti al commercialista', 'voglio i miei dati'. Il download parte subito nel browser. cosa: clienti | appuntamenti | pagamenti | fatture | note. Per appuntamenti e pagamenti puoi restringere il periodo (default: ultimo anno, e per l'agenda anche l'anno futuro).",
+    input_schema: {
+      type: "object",
+      properties: {
+        cosa: { type: "string", enum: ["clienti", "appuntamenti", "pagamenti", "fatture", "note"] },
+        data_da: { type: "string", description: "Inizio periodo YYYY-MM-DD (solo appuntamenti/pagamenti)" },
+        data_a: { type: "string", description: "Fine periodo YYYY-MM-DD (solo appuntamenti/pagamenti)" },
+      },
+      required: ["cosa"],
     },
   },
   {
@@ -1265,6 +1301,12 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "attiva_affiancamento",
+    description:
+      "SOLO Desktop. Attiva la MODALITÀ AFFIANCAMENTO: ORION guarda lo SCHERMO (il gestionale, sito o app che il professionista già usa: agenda, gestionale pazienti/clienti, portale, email…), EVIDENZIA direttamente sopra lo schermo ciò che conta ora (l'appuntamento imminente, il dato da confermare, la scadenza vicina) e ne fa un breve briefing nel suo pannello. Usalo quando l'utente lavora con un SUO software esterno e dice 'affiancami sul gestionale', 'guarda la mia agenda', 'controlla il gestionale', 'aiutami con questa schermata', o al briefing del mattino se i suoi dati stanno su un software che già usa. È DIVERSO da attiva_visione (telecamera sulle mani) e non copia i dati: li lascia dove sono. Se serve, passa 'domanda' con cosa cercare/evidenziare. A voce di' una frase breve tipo 'Guardo lo schermo e ti evidenzio cosa conta'.",
+    input_schema: { type: "object", properties: { domanda: { type: "string", description: "Cosa cercare o evidenziare sullo schermo, se l'utente l'ha specificato" } } },
+  },
+  {
     name: "attiva_gesti",
     description:
       "Attiva la MODALITÀ GESTI: l'utente può manovrare i pannelli di ORION con le mani davanti alla telecamera (pinch pollice+indice per agganciare e spostare un pannello, due mani per ridimensionarlo, rilascio sulla × o in alto per chiuderlo). I pannelli diventano finestre fluttuanti e il layout si ricorda. Usalo quando l'utente dice 'modalità gesti', 'voglio spostare i pannelli con le mani', 'controllo a gesti', 'fammi sistemare le finestre a mano'. È diverso dalla modalità visione (che assiste le attività manuali). A voce di' una frase breve tipo 'Modalità gesti attiva: muovi pure i pannelli con le mani'.",
@@ -1740,6 +1782,41 @@ const handlers: Record<string, Handler> = {
     return { result: { ok: true, totale: connessioni.length }, vista: { tipo: "integrazioni", dati: { connessioni } } };
   },
 
+  imposta_fonte_dati: (input) => {
+    const fonte = input.fonte === "gestionale" ? "gestionale" : "orion";
+    if (fonte === "orion") {
+      aggiornaProfilo({ fonte_dati: "orion" });
+      return {
+        result: { ok: true, fonte: "orion", messaggio: "ORION è la fonte: i dati vivono qui." },
+      };
+    }
+    const nome = String(input.sistema ?? "").trim();
+    if (!nome) {
+      return { result: { ok: false, errore: "serve_sistema", messaggio: "Indica quale gestionale è la fonte." } };
+    }
+    const esistente = listConnessioni().find((c) => c.nome.toLowerCase() === nome.toLowerCase());
+    // Assicura che la connessione esista in modalità ingest (→ token/webhook).
+    const conn = registraConnessione({
+      ...(esistente ? { id: esistente.id } : {}),
+      nome,
+      tipo: "gestionale",
+      modalita: "ingest",
+      descrizione: esistente?.descrizione ?? "Fonte di verità: ORION è lo specchio vivo di questo gestionale.",
+    });
+    aggiornaProfilo({ fonte_dati: "gestionale", fonte_connessione_id: conn.id });
+    return {
+      result: {
+        ok: true,
+        fonte: "gestionale",
+        sistema: conn.nome,
+        // Il token è un segreto: NON leggerlo ad alta voce. L'endpoint lo mostra il pannello.
+        ingest: conn.token ? { endpoint: "/api/integrazioni/ingest" } : null,
+        messaggio: `ORION è ora lo specchio vivo di ${conn.nome}. Dal pannello attivi la sincronia; intanto posso importare i dati esistenti per popolarlo subito.`,
+      },
+      vista: { tipo: "integrazioni", dati: { connessioni: listConnessioni() } },
+    };
+  },
+
   registra_dato_esterno: (input) => {
     const conn = listConnessioni().find((c) => c.nome.toLowerCase() === String(input.sistema ?? "").toLowerCase())
       ?? listConnessioni().find((c) => c.nome.toLowerCase().includes(String(input.sistema ?? "").toLowerCase()));
@@ -1808,6 +1885,27 @@ const handlers: Record<string, Handler> = {
       durata_min_default: input.durata_min_default ? Number(input.durata_min_default) : null,
     });
     return { result: esito, vista: { tipo: "importa", dati: { esito } } };
+  },
+
+  esporta_dati: (input) => {
+    const cosa = String(input.cosa ?? "").toLowerCase();
+    const valide = ["clienti", "appuntamenti", "pagamenti", "fatture", "note"];
+    if (!valide.includes(cosa)) {
+      return { result: { ok: false, errore: `'cosa' deve essere una tra: ${valide.join(", ")}` } };
+    }
+    const qs = new URLSearchParams({ cosa });
+    if (input.data_da) qs.set("da", String(input.data_da));
+    if (input.data_a) qs.set("a", String(input.data_a));
+    const url = `/api/esporta?${qs.toString()}`;
+    // L'azione apre l'URL nel browser: il CSV parte come download immediato.
+    return {
+      result: {
+        ok: true,
+        url,
+        nota: "Download CSV avviato. Di' all'utente che il file è suo, in formato aperto: può darlo al commercialista o importarlo in qualsiasi software.",
+      },
+      azione: { tipo: "apri_url", url, etichetta: `Export ${cosa} (CSV)` },
+    };
   },
 
   mostra_agenda: (input) => {
@@ -2699,6 +2797,15 @@ const handlers: Record<string, Handler> = {
   attiva_visione: () => ({
     result: { ok: true, visione: "aperta", nota: "Da qui in poi guidi tu dal vivo nel pannello visione: di' una frase breve di avvio." },
     azione: { tipo: "apri_visione" },
+  }),
+
+  attiva_affiancamento: (input) => ({
+    result: {
+      ok: true,
+      affiancamento: "aperto",
+      nota: "Guardo lo schermo e disegno le evidenze sul gestionale; il riassunto compare nel pannello affiancamento. Di' una frase breve di avvio.",
+    },
+    azione: { tipo: "apri_affiancamento", domanda: input.domanda ? String(input.domanda) : undefined },
   }),
 
   attiva_gesti: () => ({

@@ -5,9 +5,15 @@ import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
 import { VisioneMode, type VisioneHandle } from "@/components/VisioneMode";
+import dynamic from "next/dynamic";
+import type { AffiancaRichiesta } from "@/components/AffiancaMode";
+// Desktop-only e usa window/cattura schermo: caricata solo lato client (ssr:false),
+// così non entra nel prerender della home.
+const AffiancaMode = dynamic(() => import("@/components/AffiancaMode").then((m) => m.AffiancaMode), { ssr: false });
 import { SpatialStage, type Layout, MIN_W, MIN_H } from "@/components/SpatialStage";
 import { GestiMode } from "@/components/GestiMode";
 import { Notifiche } from "@/components/Notifiche";
+import { Suggerimenti } from "@/components/Suggerimenti";
 import { AuthScreen } from "@/components/AuthScreen";
 import { AppuntiPanel } from "@/components/AppuntiPanel";
 import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
@@ -68,6 +74,7 @@ const desktopBridge = (): OrionDesktop | null =>
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [viste, setViste] = useState<Vista[]>([]);
+  const [suggerimenti, setSuggerimenti] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasKey, setHasKey] = useState(true);
   const [testoInput, setTestoInput] = useState("");
@@ -78,6 +85,10 @@ export default function Home() {
   // Modalità visione (telecamera dal vivo). Opt-in.
   const [visioneAttiva, setVisioneAttiva] = useState(false);
   const visioneRef = useRef<VisioneHandle>(null);
+  // Modalità affiancamento (copilota sullo schermo). Opt-in, solo Desktop.
+  const [affiancaAttiva, setAffiancaAttiva] = useState(false);
+  const [affiancaDomanda, setAffiancaDomanda] = useState<string | undefined>(undefined);
+  const [affiancaRichiesta, setAffiancaRichiesta] = useState<AffiancaRichiesta>({ seq: 0 });
   // Modalità gesti (manipolazione spaziale dei pannelli con le mani). Opt-in.
   const [gestiAttivi, setGestiAttivi] = useState(false);
   const [layout, setLayout] = useState<Layout>({});
@@ -111,6 +122,8 @@ export default function Home() {
     async (testo?: string, avvio = false, allegato?: string, quiet = false) => {
       setLoading(true);
       cancelSpeakRef.current?.();
+      // Le pillole del turno precedente spariscono appena parte una nuova richiesta.
+      setSuggerimenti([]);
 
       const storico: Msg[] = testo ? [...messagesRef.current, { role: "user", content: testo }] : messagesRef.current;
       // quiet: il messaggio (es. esito di un comando) va al modello ma NON si
@@ -128,7 +141,7 @@ export default function Home() {
             desktop: !!desktopBridge(),
           }),
         });
-        const data: { testo: string; viste: Vista[]; azioni?: Azione[]; errore?: string } =
+        const data: { testo: string; viste: Vista[]; azioni?: Azione[]; suggerimenti?: string[]; errore?: string } =
           await res.json();
 
         if (data.errore === "no_key") {
@@ -153,6 +166,7 @@ export default function Home() {
           }
         }
         if (Array.isArray(data.azioni)) data.azioni.forEach((a) => eseguiAzioneRef.current?.(a));
+        setSuggerimenti(Array.isArray(data.suggerimenti) ? data.suggerimenti.slice(0, 3) : []);
       } catch {
         setMessages((m) => [
           ...m,
@@ -175,6 +189,11 @@ export default function Home() {
 
   const { supported, listening, speaking, interim, voiceOn, setVoiceOn, speak, cancelSpeak, micAttivo, toggleMic, setBusy } =
     useSpeech((t) => gestisciVoceRef.current(t));
+
+  // Le pillole spariscono appena l'utente inizia a parlare (STT attivo).
+  useEffect(() => {
+    if (listening || interim) setSuggerimenti([]);
+  }, [listening, interim]);
 
   const speakRef = useRef(speak);
   speakRef.current = speak;
@@ -200,6 +219,11 @@ export default function Home() {
   useEffect(() => {
     if (visioneAttiva && supported && !micAttivoRef.current) toggleMic();
   }, [visioneAttiva, supported, toggleMic]);
+
+  // Idem per l'affiancamento: mic pronto per chiedere "evidenziami…".
+  useEffect(() => {
+    if (affiancaAttiva && supported && !micAttivoRef.current) toggleMic();
+  }, [affiancaAttiva, supported, toggleMic]);
 
   // Esegue le azioni che ORION comanda sullo schermo (apri sito, appunti, foto…).
   const eseguiAzione = useCallback((a: Azione) => {
@@ -242,11 +266,16 @@ export default function Home() {
       case "apri_visione":
         setVisioneAttiva(true);
         break;
+      case "apri_affiancamento":
+        setAffiancaDomanda(a.domanda);
+        setAffiancaAttiva(true);
+        break;
       case "apri_gesti":
         setGestiAttivi(true);
         break;
       case "chiudi_vista": {
         if (a.vista === "visione" || a.vista === "tutto") setVisioneAttiva(false);
+        if (a.vista === "affianca" || a.vista === "affiancamento" || a.vista === "tutto") setAffiancaAttiva(false);
         if (a.vista === "gesti" || a.vista === "tutto") setGestiAttivi(false);
         const d = desktopBridge();
         if (d?.chiudiVista) {
@@ -654,6 +683,17 @@ export default function Home() {
       }
       return;
     }
+    // In modalità affiancamento la voce è una richiesta sullo schermo (o la chiude).
+    if (affiancaAttiva) {
+      const low = t.trim().toLowerCase();
+      if (/(chiudi|ferma|spegni|esci)\b.*(affianc|schermo|gestional)|^(chiudi|ferma|basta|stop)$/.test(low)) {
+        setAffiancaAttiva(false);
+        speakRef.current?.("Chiudo l'affiancamento.");
+      } else {
+        setAffiancaRichiesta((r) => ({ testo: t, seq: r.seq + 1 }));
+      }
+      return;
+    }
     // Mentre la fotocamera è aperta: "scatta/fotografa/vai/ok/pronto" → scatta la foto.
     // La voce non viene mandata a ORION finché si sta inquadrando.
     if (mostraCamera) {
@@ -944,6 +984,9 @@ export default function Home() {
         )}
       </section>
 
+      {/* Suggerimenti contestuali: tra lo stage e la barra di input, non coprono i pannelli. */}
+      <Suggerimenti suggerimenti={suggerimenti} onScegli={(t) => inviaAOrion(t)} disabled={loading} />
+
       {/* Dock */}
       <footer className="flex items-center gap-4 px-5 py-4">
         {haPannelli && (
@@ -970,7 +1013,10 @@ export default function Home() {
               <input
                 ref={inputRef}
                 value={testoInput}
-                onChange={(e) => setTestoInput(e.target.value)}
+                onChange={(e) => {
+                  setTestoInput(e.target.value);
+                  if (e.target.value) setSuggerimenti([]);
+                }}
                 placeholder="Scrivi a ORION…"
                 className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-400/40"
                 autoFocus
@@ -1117,6 +1163,15 @@ export default function Home() {
           ref={visioneRef}
           parla={(t) => speakRef.current?.(t)}
           onClose={() => setVisioneAttiva(false)}
+        />
+      )}
+
+      {affiancaAttiva && (
+        <AffiancaMode
+          domandaIniziale={affiancaDomanda}
+          richiesta={affiancaRichiesta}
+          parla={(t) => speakRef.current?.(t)}
+          onClose={() => setAffiancaAttiva(false)}
         />
       )}
 

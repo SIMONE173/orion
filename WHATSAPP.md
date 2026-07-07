@@ -16,6 +16,10 @@ già pronto: devi solo creare l'accesso e incollare 3 variabili.
      da un utente di sistema → mettilo in `WHATSAPP_TOKEN`.
 3. Scegli tu una stringa qualsiasi come **verify token** (es. `orion-2026`) e
    mettila in `WHATSAPP_VERIFY_TOKEN`.
+   **Firma dei webhook (obbligatoria in produzione):** copia l'**App Secret**
+   dell'app Meta (Impostazioni → Di base) e mettilo in `META_APP_SECRET`.
+   ORION verifica `X-Hub-Signature-256` sul corpo di ogni webhook: senza
+   segreto, in produzione i webhook vengono rifiutati (fail-closed).
 4. **Webhook:** in fase di test l'app gira su `localhost`, che Meta non può
    raggiungere. Esponi la porta con un tunnel:
    ```bash

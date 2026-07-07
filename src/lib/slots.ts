@@ -11,6 +11,7 @@ import {
   logCommunication,
   logEvento,
   logAudit,
+  getProfilo,
   type Cliente,
   type OffertaSlot,
 } from "./data";
@@ -123,7 +124,14 @@ export async function processaRispostaOfferta(cliente: Cliente, testo: string): 
     corpo: `${cliente.nome} ha preso lo slot di ${quando(off.inizio)} (lista d'attesa).`,
     url: "/",
   });
-  const r = `Perfetto ${cliente.nome.split(" ")[0]}, l'appuntamento di ${quando(off.inizio)} è suo. A presto!` + DISCLOSURE;
+  // Conferma; con la caparra configurata si chiede subito il versamento (lo
+  // slot recuperato diventa un incasso più sicuro, non solo un buco riempito).
+  const profilo = getProfilo();
+  let testoConferma = `Perfetto ${cliente.nome.split(" ")[0]}, l'appuntamento di ${quando(off.inizio)} è suo.`;
+  if (profilo.caparra_importo && profilo.caparra_importo > 0 && profilo.link_pagamento) {
+    testoConferma += ` Per bloccarlo definitivamente è prevista una caparra di ${profilo.caparra_importo}€: può versarla qui ${profilo.link_pagamento}`;
+  }
+  const r = testoConferma + " A presto!" + DISCLOSURE;
   const e = await inviaMessaggioWhatsApp(cliente.telefono ?? "", r);
   if (e.ok) logCommunication({ cliente_id: cliente.id, direzione: "out", contenuto: r, stato: e.simulato ? "simulato" : "inviato" });
   return true;

@@ -16,6 +16,7 @@ import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
+import { backupGiornaliero } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,6 +85,15 @@ export async function POST(req: NextRequest) {
   const segreto = process.env.VAPID_PRIVATE_KEY || "";
   if (!segreto || req.headers.get("x-orion-cron") !== segreto) {
     return NextResponse.json({ ok: false, errore: "non autorizzato" }, { status: 403 });
+  }
+
+  // Backup giornaliero del DB (idempotente: fa la copia solo la prima volta
+  // del giorno). Un DB perso senza backup = studio fermo: non deve succedere.
+  let backupFatto = false;
+  try {
+    backupFatto = (await backupGiornaliero()) !== null;
+  } catch (e) {
+    console.error("[cron] backup DB:", e instanceof Error ? e.message : e);
   }
 
   let totDovuti = 0;
@@ -155,5 +165,5 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ok: true, dovuti: totDovuti, inviati: totInviati, promemoriaAppuntamenti: totPromemoriaApp });
+  return NextResponse.json({ ok: true, dovuti: totDovuti, inviati: totInviati, promemoriaAppuntamenti: totPromemoriaApp, backup: backupFatto });
 }

@@ -563,15 +563,47 @@ function migrate(d: Database.Database) {
     "ALTER TABLE clienti ADD COLUMN provincia TEXT",
     // Anti no-show: quando il promemoria WhatsApp dell'appuntamento è partito.
     "ALTER TABLE appuntamenti ADD COLUMN promemoria_inviato INTEGER NOT NULL DEFAULT 0",
+    // Caparra (opzionale): importo richiesto ai nuovi appuntamenti e link di
+    // pagamento dello studio (Stripe Payment Link, PayPal.me, Satispay…).
+    // Se entrambi presenti, le conferme automatiche includono la richiesta.
+    "ALTER TABLE profili ADD COLUMN caparra_importo REAL",
+    "ALTER TABLE profili ADD COLUMN link_pagamento TEXT",
     // Sync Google Calendar: id evento remoto + flag "da riallineare".
     "ALTER TABLE appuntamenti ADD COLUMN gcal_id TEXT",
     "ALTER TABLE appuntamenti ADD COLUMN gcal_dirty INTEGER NOT NULL DEFAULT 0",
+    // SPECCHIO VIVO DEL GESTIONALE: provenienza + idempotenza sui dati core. Un
+    // record sincronizzato da un sistema esterno porta l'id della connessione,
+    // la sua chiave nel gestionale (per aggiornare invece di duplicare) e quando
+    // è stato allineato l'ultima volta. NULL = nato dentro ORION.
+    "ALTER TABLE clienti ADD COLUMN origine_connessione_id INTEGER",
+    "ALTER TABLE clienti ADD COLUMN origine_chiave TEXT",
+    "ALTER TABLE clienti ADD COLUMN sincronizzato_at TEXT",
+    "ALTER TABLE appuntamenti ADD COLUMN origine_connessione_id INTEGER",
+    "ALTER TABLE appuntamenti ADD COLUMN origine_chiave TEXT",
+    "ALTER TABLE appuntamenti ADD COLUMN sincronizzato_at TEXT",
+    // Fonte di verità del tenant: NULL/'orion' = ORION è il gestionale; oppure
+    // l'id della connessione-gestionale di cui ORION è lo specchio vivo.
+    "ALTER TABLE profili ADD COLUMN fonte_dati TEXT",
+    "ALTER TABLE profili ADD COLUMN fonte_connessione_id INTEGER",
   ];
   for (const sql of alters) {
     try {
       d.exec(sql);
     } catch {
       /* colonna già presente */
+    }
+  }
+
+  // Indici per il dedup della sincronia (creati DOPO gli ALTER: su un DB vecchio
+  // le colonne non esistevano al CREATE TABLE).
+  for (const sql of [
+    "CREATE INDEX IF NOT EXISTS idx_clienti_origine ON clienti(tenant_id, origine_connessione_id, origine_chiave)",
+    "CREATE INDEX IF NOT EXISTS idx_appuntamenti_origine ON appuntamenti(tenant_id, origine_connessione_id, origine_chiave)",
+  ]) {
+    try {
+      d.exec(sql);
+    } catch {
+      /* indice già presente */
     }
   }
 
@@ -596,6 +628,34 @@ function migrate(d: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_pagamenti_tenant ON pagamenti(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_comunicazioni_tenant ON comunicazioni(tenant_id);
   `);
+}
+
+// ── BACKUP AUTOMATICO ───────────────────────────────────────────────────────
+// Snapshot giornaliero del database (better-sqlite3 .backup = copia consistente
+// anche a caldo, senza fermare l'app). File in DATA_DIR/backups/orion-YYYY-MM-DD.db,
+// si tengono gli ultimi `conserva`. Idempotente: una sola copia al giorno.
+// Lanciato dal cron; richiamabile anche a mano.
+export async function backupGiornaliero(conserva = 7): Promise<string | null> {
+  const dir = process.env.DATA_DIR || path.join(process.cwd(), "data");
+  const cartella = path.join(dir, "backups");
+  const oggi = new Date().toISOString().slice(0, 10);
+  const destinazione = path.join(cartella, `orion-${oggi}.db`);
+  if (fs.existsSync(destinazione)) return null; // già fatto oggi
+  fs.mkdirSync(cartella, { recursive: true });
+  await db().backup(destinazione);
+  // Ruota: elimina i backup più vecchi oltre la finestra.
+  const vecchi = fs
+    .readdirSync(cartella)
+    .filter((f) => /^orion-\d{4}-\d{2}-\d{2}\.db$/.test(f))
+    .sort();
+  for (const f of vecchi.slice(0, Math.max(0, vecchi.length - conserva))) {
+    try {
+      fs.unlinkSync(path.join(cartella, f));
+    } catch {
+      /* non bloccare per un file che non si lascia eliminare */
+    }
+  }
+  return destinazione;
 }
 
 // Formattazione date locali "YYYY-MM-DDTHH:MM".

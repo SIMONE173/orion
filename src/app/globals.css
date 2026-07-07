@@ -201,6 +201,18 @@ body {
   to { opacity: 1; }
 }
 
+/* Pillole di suggerimento: entrano con un breve fade + salita. */
+.suggerimento-pill {
+  animation: suggerimentoIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes suggerimentoIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .suggerimento-pill { animation: fadeIn 0.25s ease both; }
+}
+
 /* Elementi che compaiono uno dopo l'altro (lavagna, schema…): "scritti" a mano. */
 .lavagna-passo,
 .appare {

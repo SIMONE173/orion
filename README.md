@@ -36,6 +36,16 @@ npm run dev
 Apri http://localhost:3000 — **in Chrome** per la voce (Web Speech API).
 Senza chiave API l'interfaccia parte ugualmente, ma ORION non potrà rispondere.
 
+## Test
+
+```bash
+npm run typecheck   # controllo dei tipi su tutto il progetto
+npm test            # test (fatture/regole fiscali, cifratura, firme webhook)
+```
+
+I test coprono il codice che tocca soldi e sicurezza: girano anche in CI a
+ogni push (`.github/workflows/ci.yml`). Falli passare prima di ogni deploy.
+
 ## Come funziona
 
 1. **Chiamata 0 (onboarding).** Alla prima apertura ORION conduce una
@@ -74,6 +84,11 @@ Senza chiave API l'interfaccia parte ugualmente, ma ORION non potrà rispondere.
   spariti da mesi ricevono richiami personalizzati (dopo tua conferma); e a
   fine mese "quanto mi hai fatto guadagnare?" risponde con un numero in euro
   (report del valore, stima prudente sul prezzo medio reale).
+- **Caparra opzionale (anti no-show definitivo)** — "voglio chiedere 20 euro
+  alla prenotazione": ORION salva importo e link di pagamento (Stripe Payment
+  Link, PayPal.me, Satispay…) e da lì in poi le conferme automatiche —
+  prenotazioni dal centralino e slot accettati dalla lista d'attesa —
+  includono da sole la richiesta di caparra col link.
 
 ## Il resto della segretaria
 
@@ -90,9 +105,17 @@ Senza chiave API l'interfaccia parte ugualmente, ma ORION non potrà rispondere.
   pagamenti mancanti, buchi in agenda, preparazione per domani.
 - **Memoria viva** — ORION impara abitudini, regole ed eccezioni (con il
   perché) e le consolida ogni giorno.
+- **Portabilità totale (mai ostaggio)** — i dati ENTRANO dai software già in
+  uso (import CSV/Excel, ingest via token) ed ESCONO liberi: "esporta i
+  clienti", "scarica gli incassi per il commercialista" → CSV pulito
+  (`esporta_dati`, `GET /api/esporta`). Il contrario dei gestionali storici.
 - **Fiducia** — log di **audit** di ogni azione automatica (telefono,
-  promemoria, fatture, invii), disclosure AI verso i clienti (AI Act),
-  segreti **cifrati a riposo**.
+  promemoria, fatture, invii, export), disclosure AI verso i clienti (AI Act),
+  segreti **cifrati a riposo** (obbligatoria in produzione: fail-fast senza
+  chiave), **webhook firmati** (Twilio `X-Twilio-Signature`, Meta
+  `X-Hub-Signature-256`, fail-closed in produzione), rate limit su
+  login/registrazione, **backup giornaliero automatico** del DB (ultimi 7 in
+  `DATA_DIR/backups`).
 - **Economia** — routing dei modelli: richieste operative brevi → modello
   rapido (~10-20× più economico); onboarding, analisi e scrittura → modello
   pieno. `ORION_ROUTING=off` per disattivare.

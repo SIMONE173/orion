@@ -27,11 +27,20 @@ export type Profilo = {
   regime_fiscale: string | null;
   pec: string | null;
   sdi: string | null;
+  // Caparra opzionale per i nuovi appuntamenti: importo e link di pagamento
+  // dello studio (Stripe Payment Link, PayPal.me, Satispay…). Se entrambi
+  // presenti, le conferme automatiche (centralino, riempi-buchi) la richiedono.
+  caparra_importo: number | null;
+  link_pagamento: string | null;
   // Onboarding dinamico:
   tipo_uso: string | null; // 'personale' | 'lavoro'
   tipo_lavoro: string | null; // 'autonomo' | 'azienda'
   memoria_operativa: string | null; // JSON flessibile: { tema: dettaglio, ... }
   ultima_consolidazione: string | null; // data (YYYY-MM-DD) ultima distillazione AI
+  // Fonte di verità dei dati: NULL/'orion' = ORION è il gestionale; 'gestionale'
+  // = ORION è lo specchio vivo del sistema in fonte_connessione_id.
+  fonte_dati: string | null;
+  fonte_connessione_id: number | null;
   onboarding_completo: number;
   updated_at: string;
 };
@@ -75,6 +84,10 @@ export type Cliente = {
   comune: string | null;
   provincia: string | null;
   ultima_visita: string | null;
+  // Provenienza (specchio del gestionale): NULL = nato in ORION.
+  origine_connessione_id?: number | null;
+  origine_chiave?: string | null;
+  sincronizzato_at?: string | null;
   created_at: string;
 };
 
@@ -90,6 +103,9 @@ export type Appuntamento = {
   note: string | null;
   promemoria_inviato?: number;
   gcal_id?: string | null;
+  origine_connessione_id?: number | null;
+  origine_chiave?: string | null;
+  sincronizzato_at?: string | null;
   created_at: string;
 };
 
@@ -207,6 +223,8 @@ const CAMPI_PROFILO = [
   "nome", "professione", "durata_visita_min", "gestione_cancellazioni",
   "canale_comunicazione", "problemi_tempo", "abitudini", "piva", "codice_fiscale",
   "indirizzo", "cap", "comune", "provincia", "regime_fiscale", "pec", "sdi",
+  "caparra_importo", "link_pagamento",
+  "fonte_dati", "fonte_connessione_id",
   "tipo_uso", "tipo_lavoro", "onboarding_completo",
 ] as const;
 
@@ -1016,7 +1034,10 @@ export function entitaPerCliente(clienteId: number): EntitaEsterna[] {
 }
 
 // Inserisce o aggiorna (dedup per connessione + chiave_esterna) un record esterno,
-// collegandolo al cliente (per nome) e a una catena (riferimento) quando possibile.
+// AGGANCIANDOLO da solo al cliente giusto quando possibile (telefono → email →
+// nome univoco: dal più affidabile al meno) e a una catena (riferimento).
+// È il cuore dell'ecosistema: il gestionale spinge i record e ORION li ritrova
+// già dentro la scheda del cliente, senza lavoro manuale.
 export function upsertEntitaEsterna(e: {
   connessione_id: number;
   tipo?: string;
@@ -1024,13 +1045,21 @@ export function upsertEntitaEsterna(e: {
   titolo?: string | null;
   dati?: unknown;
   cliente_nome?: string | null;
+  cliente_telefono?: string | null;
+  cliente_email?: string | null;
   cliente_id?: number | null;
   riferimento?: string | null;
 }): EntitaEsterna {
   const now = nowISO();
   const datiStr = e.dati == null ? null : typeof e.dati === "string" ? e.dati : JSON.stringify(e.dati);
-  // Collega al cliente: id esplicito, oppure match per nome (1 solo risultato).
+  // Collega al cliente: id esplicito → telefono → email → nome (1 solo risultato).
   let cliente_id = e.cliente_id ?? null;
+  if (!cliente_id && e.cliente_telefono) {
+    cliente_id = getClienteByTelefono(String(e.cliente_telefono))?.id ?? null;
+  }
+  if (!cliente_id && e.cliente_email) {
+    cliente_id = getClienteByEmail(String(e.cliente_email))?.id ?? null;
+  }
   if (!cliente_id && e.cliente_nome) {
     const found = cercaCliente(String(e.cliente_nome));
     if (found.length === 1) cliente_id = found[0].id;
@@ -1057,6 +1086,212 @@ export function upsertEntitaEsterna(e: {
     )
     .run(T(), e.connessione_id, e.tipo ?? "altro", e.chiave_esterna ?? null, e.titolo ?? null, datiStr, cliente_id, e.riferimento ?? null, now, now);
   return db().prepare("SELECT * FROM entita_esterne WHERE id = ?").get(Number(r.lastInsertRowid)) as EntitaEsterna;
+}
+
+// ── SPECCHIO VIVO DEL GESTIONALE: sync dei dati CORE (clienti + appuntamenti) ──
+// A differenza di entita_esterne (arricchimento della scheda), qui il gestionale
+// alimenta DIRETTAMENTE ciò che ORION mostra in agenda/briefing/clienti. Idempotente
+// (dedup per connessione+chiave, ripush = aggiorna), con ADOZIONE di un record locale
+// già esistente (telefono→email) così non si creano doppioni, e cancellazione SICURA
+// (solo su record nati da quella connessione).
+
+const CAMPI_CLIENTE_SYNC = ["nome", "telefono", "email", "note", "piva", "codice_fiscale", "indirizzo", "cap", "comune", "provincia"] as const;
+
+export function upsertClienteEsterno(e: {
+  connessione_id: number;
+  chiave: string;
+  nome?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  note?: string | null;
+  piva?: string | null;
+  codice_fiscale?: string | null;
+  indirizzo?: string | null;
+  cap?: string | null;
+  comune?: string | null;
+  provincia?: string | null;
+  cancellato?: boolean;
+}): { azione: "creato" | "aggiornato" | "cancellato" | "ignorato"; cliente?: Cliente } {
+  const t = T();
+  const now = nowISO();
+  let esistente = db()
+    .prepare("SELECT * FROM clienti WHERE tenant_id = ? AND origine_connessione_id = ? AND origine_chiave = ?")
+    .get(t, e.connessione_id, e.chiave) as Cliente | undefined;
+  // Adozione: un cliente già in ORION (importato o creato a voce) con lo stesso
+  // telefono/email diventa lo stesso record, non un doppione.
+  if (!esistente && e.telefono) esistente = getClienteByTelefono(String(e.telefono));
+  if (!esistente && e.email) esistente = getClienteByEmail(String(e.email));
+
+  if (e.cancellato) {
+    if (esistente && esistente.origine_connessione_id === e.connessione_id) {
+      db().prepare("DELETE FROM clienti WHERE id = ? AND tenant_id = ?").run(esistente.id, t);
+      return { azione: "cancellato" };
+    }
+    return { azione: "ignorato" };
+  }
+
+  if (esistente) {
+    // Il gestionale è la fonte: sovrascrive i campi FORNITI (COALESCE mantiene i
+    // vecchi per quelli non passati). Timbra sempre provenienza e freschezza.
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const k of CAMPI_CLIENTE_SYNC) {
+      if (e[k] !== undefined && e[k] !== null) {
+        sets.push(`${k} = ?`);
+        vals.push(e[k]);
+      }
+    }
+    sets.push("origine_connessione_id = ?", "origine_chiave = ?", "sincronizzato_at = ?");
+    vals.push(e.connessione_id, e.chiave, now, esistente.id, t);
+    db().prepare(`UPDATE clienti SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...vals);
+    return { azione: "aggiornato", cliente: getCliente(esistente.id) };
+  }
+
+  const nuovo = creaCliente({
+    nome: (e.nome ?? e.telefono ?? `Cliente ${e.chiave}`).slice(0, 120),
+    telefono: e.telefono ?? undefined,
+    email: e.email ?? undefined,
+    note: e.note ?? undefined,
+    piva: e.piva ?? undefined,
+    codice_fiscale: e.codice_fiscale ?? undefined,
+    indirizzo: e.indirizzo ?? undefined,
+    cap: e.cap ?? undefined,
+    comune: e.comune ?? undefined,
+    provincia: e.provincia ?? undefined,
+  });
+  db()
+    .prepare("UPDATE clienti SET origine_connessione_id = ?, origine_chiave = ?, sincronizzato_at = ? WHERE id = ?")
+    .run(e.connessione_id, e.chiave, now, nuovo.id);
+  return { azione: "creato", cliente: getCliente(nuovo.id) };
+}
+
+// Risolve il cliente di un appuntamento sincronizzato: chiave gestionale →
+// telefono → email → nome univoco. Restituisce l'id o null.
+function risolviClienteSync(e: {
+  connessione_id: number;
+  cliente_chiave?: string | null;
+  cliente_telefono?: string | null;
+  cliente_email?: string | null;
+  cliente_nome?: string | null;
+}): number | null {
+  if (e.cliente_chiave) {
+    const c = db()
+      .prepare("SELECT id FROM clienti WHERE tenant_id = ? AND origine_connessione_id = ? AND origine_chiave = ?")
+      .get(T(), e.connessione_id, e.cliente_chiave) as { id: number } | undefined;
+    if (c) return c.id;
+  }
+  if (e.cliente_telefono) {
+    const c = getClienteByTelefono(String(e.cliente_telefono));
+    if (c) return c.id;
+  }
+  if (e.cliente_email) {
+    const c = getClienteByEmail(String(e.cliente_email));
+    if (c) return c.id;
+  }
+  if (e.cliente_nome) {
+    const found = cercaCliente(String(e.cliente_nome));
+    if (found.length === 1) return found[0].id;
+  }
+  return null;
+}
+
+export function upsertAppuntamentoEsterno(e: {
+  connessione_id: number;
+  chiave: string;
+  cliente_chiave?: string | null;
+  cliente_nome?: string | null;
+  cliente_telefono?: string | null;
+  cliente_email?: string | null;
+  titolo?: string | null;
+  inizio?: string | null;
+  fine?: string | null;
+  durata_min?: number | null;
+  stato?: string | null;
+  note?: string | null;
+  cancellato?: boolean;
+}): { azione: "creato" | "aggiornato" | "cancellato" | "ignorato"; appuntamento?: Appuntamento } {
+  const t = T();
+  const now = nowISO();
+  const esistente = db()
+    .prepare("SELECT * FROM appuntamenti WHERE tenant_id = ? AND origine_connessione_id = ? AND origine_chiave = ?")
+    .get(t, e.connessione_id, e.chiave) as Appuntamento | undefined;
+
+  if (e.cancellato) {
+    if (esistente && esistente.origine_connessione_id === e.connessione_id) {
+      db().prepare("DELETE FROM appuntamenti WHERE id = ? AND tenant_id = ?").run(esistente.id, t);
+      return { azione: "cancellato" };
+    }
+    return { azione: "ignorato" };
+  }
+
+  const cliente_id = risolviClienteSync(e);
+  // Calcola la fine: esplicita, oppure inizio + durata (default 60').
+  const calcolaFine = (inizio: string): string => {
+    if (e.fine) return e.fine;
+    const d = new Date(inizio);
+    d.setMinutes(d.getMinutes() + (e.durata_min && e.durata_min > 0 ? e.durata_min : 60));
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+
+  if (esistente) {
+    const inizio = e.inizio ?? esistente.inizio;
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    if (e.titolo != null) { sets.push("titolo = ?"); vals.push(e.titolo); }
+    if (e.inizio != null) { sets.push("inizio = ?", "fine = ?"); vals.push(inizio, calcolaFine(inizio)); }
+    else if (e.fine != null) { sets.push("fine = ?"); vals.push(e.fine); }
+    if (e.stato != null) { sets.push("stato = ?"); vals.push(e.stato); }
+    if (e.note != null) { sets.push("note = ?"); vals.push(e.note); }
+    if (cliente_id != null) { sets.push("cliente_id = ?"); vals.push(cliente_id); }
+    sets.push("origine_connessione_id = ?", "origine_chiave = ?", "sincronizzato_at = ?");
+    vals.push(e.connessione_id, e.chiave, now, esistente.id, t);
+    db().prepare(`UPDATE appuntamenti SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...vals);
+    return { azione: "aggiornato", appuntamento: getAppuntamento(esistente.id) };
+  }
+
+  if (!e.inizio) return { azione: "ignorato" }; // un nuovo appuntamento senza data non ha senso
+  const r = db()
+    .prepare(
+      `INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, note, origine_connessione_id, origine_chiave, sincronizzato_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      t, cliente_id, (e.titolo ?? e.cliente_nome ?? "Appuntamento").slice(0, 160),
+      e.inizio, calcolaFine(e.inizio), e.stato ?? "confermato", e.note ?? null,
+      e.connessione_id, e.chiave, now, now
+    );
+  return { azione: "creato", appuntamento: getAppuntamento(Number(r.lastInsertRowid)) };
+}
+
+// Stato della fonte di verità del tenant, per la riga di freschezza dei pannelli.
+// modo 'orion' = ORION è il gestionale; 'gestionale' = specchio vivo di 'sistema'.
+export function statoFonte(): { modo: "orion" | "gestionale"; sistema: string | null; aggiornato_at: string | null } {
+  const p = getProfilo();
+  const connId = p?.fonte_connessione_id ?? null;
+  if (!connId || (p?.fonte_dati ?? "orion") === "orion") {
+    return { modo: "orion", sistema: null, aggiornato_at: null };
+  }
+  const conn = getConnessione(connId);
+  return { modo: "gestionale", sistema: conn?.nome ?? null, aggiornato_at: ultimaSincronizzazione(connId) };
+}
+
+// Freschezza: quando ORION è stato allineato l'ultima volta a una connessione
+// (o a qualunque, se non specificata). Alimenta la riga "aggiornato alle … da …".
+export function ultimaSincronizzazione(connessione_id?: number): string | null {
+  const t = T();
+  const clausola = connessione_id ? "AND origine_connessione_id = ?" : "AND origine_connessione_id IS NOT NULL";
+  const args = connessione_id ? [t, connessione_id, t, connessione_id] : [t, t];
+  const row = db()
+    .prepare(
+      `SELECT MAX(x) AS ultimo FROM (
+         SELECT MAX(sincronizzato_at) AS x FROM clienti WHERE tenant_id = ? ${clausola}
+         UNION ALL
+         SELECT MAX(sincronizzato_at) AS x FROM appuntamenti WHERE tenant_id = ? ${clausola}
+       )`
+    )
+    .get(...args) as { ultimo: string | null } | undefined;
+  return row?.ultimo ?? null;
 }
 
 // ── Clienti ─────────────────────────────────────────────────────────────────
@@ -1088,6 +1323,14 @@ export function getClienteByTelefono(telefono: string): Cliente | undefined {
     .prepare("SELECT * FROM clienti WHERE tenant_id = ? AND telefono IS NOT NULL")
     .all(T()) as Cliente[];
   return tutti.find((c) => (c.telefono ?? "").replace(/\D/g, "").endsWith(ultime));
+}
+
+export function getClienteByEmail(email: string): Cliente | undefined {
+  const e = email.trim().toLowerCase();
+  if (!e) return undefined;
+  return db()
+    .prepare("SELECT * FROM clienti WHERE tenant_id = ? AND LOWER(email) = ?")
+    .get(T(), e) as Cliente | undefined;
 }
 
 export function creaCliente(c: Partial<Cliente> & { nome: string }): Cliente {
@@ -1276,6 +1519,15 @@ export function listNote(): Nota[] {
   return db()
     .prepare(
       `SELECT n.*, c.nome AS cliente_nome FROM note n LEFT JOIN clienti c ON c.id = n.cliente_id WHERE n.tenant_id = ? ORDER BY n.created_at DESC LIMIT 30`
+    )
+    .all(T()) as Nota[];
+}
+
+// Tutte le note, senza limite (per l'export CSV: i dati escono SEMPRE interi).
+export function listNoteTutte(): Nota[] {
+  return db()
+    .prepare(
+      `SELECT n.*, c.nome AS cliente_nome FROM note n LEFT JOIN clienti c ON c.id = n.cliente_id WHERE n.tenant_id = ? ORDER BY n.created_at DESC`
     )
     .all(T()) as Nota[];
 }
@@ -1792,6 +2044,7 @@ export function briefingOggi() {
     clientiInattivi: inattivi.n,
     promemoriaAttivi: prom.n,
     inAttesa: attesa.n,
+    fonte: statoFonte(),
   };
 }
 

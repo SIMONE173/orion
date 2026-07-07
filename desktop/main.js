@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session, screen, globalShortcut, systemPreferences } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session, screen, globalShortcut, systemPreferences, desktopCapturer } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -161,6 +161,95 @@ function chiudiOverlayGesti() {
   }
   finestraGesti = null;
 }
+
+// ── MODALITÀ AFFIANCAMENTO (copilota sullo schermo) ──────────────────────────
+// ORION cattura ciò che è sullo schermo (il gestionale/sito che il pro già usa),
+// lo fa leggere alla vista e DISEGNA le evidenze sopra, in una finestra trasparente
+// click-through (come i gesti). Opt-in, desktop, richiede il permesso "Registrazione
+// schermo" di macOS. Nessuno screenshot viene salvato su disco.
+let finestraAffianca = null;
+
+function permessoSchermo(prompt) {
+  if (process.platform !== "darwin") return true;
+  try {
+    const stato = systemPreferences.getMediaAccessStatus("screen");
+    if (stato !== "granted" && prompt) {
+      // Non esiste un dialogo programmatico per lo schermo: si apre il pannello giusto.
+      shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+    }
+    return stato === "granted";
+  } catch {
+    return true; // in dubbio, prova: sarà lo screenshot vuoto a dirlo
+  }
+}
+
+ipcMain.handle("os:catturaSchermo", async () => {
+  if (!permessoSchermo(true)) {
+    return { ok: false, errore: "permesso_schermo" };
+  }
+  try {
+    const b = screen.getPrimaryDisplay().bounds;
+    const larghezza = Math.min(1600, Math.round(b.width));
+    const altezza = Math.max(1, Math.round(larghezza * (b.height / b.width)));
+    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: larghezza, height: altezza } });
+    const primario = sources[0];
+    if (!primario || primario.thumbnail.isEmpty()) return { ok: false, errore: "permesso_schermo" };
+    return { ok: true, dataUrl: primario.thumbnail.toDataURL(), larghezza, altezza };
+  } catch (e) {
+    return { ok: false, errore: String(e && e.message ? e.message : e) };
+  }
+});
+
+function apriOverlayAffianca() {
+  if (finestraAffianca && !finestraAffianca.isDestroyed()) return;
+  const b = screen.getPrimaryDisplay().bounds;
+  finestraAffianca = new BrowserWindow({
+    x: b.x,
+    y: b.y,
+    width: b.width,
+    height: b.height,
+    transparent: true,
+    backgroundColor: "#00000000",
+    frame: false,
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    fullscreenable: false,
+    webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false },
+  });
+  finestraAffianca.setAlwaysOnTop(true, "screen-saver");
+  finestraAffianca.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  finestraAffianca.setIgnoreMouseEvents(true, { forward: true }); // i clic passano sotto (al gestionale)
+  finestraAffianca.loadURL(`${ORION_URL}/affianca`);
+  finestraAffianca.on("closed", () => {
+    finestraAffianca = null;
+  });
+}
+
+function chiudiOverlayAffianca() {
+  if (finestraAffianca && !finestraAffianca.isDestroyed()) {
+    try {
+      finestraAffianca.close();
+    } catch {
+      /* già chiusa */
+    }
+  }
+  finestraAffianca = null;
+}
+
+ipcMain.on("os:affiancaOn", () => apriOverlayAffianca());
+ipcMain.on("os:affiancaOff", () => chiudiOverlayAffianca());
+ipcMain.on("os:affiancaDisegna", (_e, evidenze) => {
+  if (finestraAffianca && !finestraAffianca.isDestroyed()) {
+    finestraAffianca.webContents.send("affianca:disegna", evidenze);
+    finestraAffianca.setAlwaysOnTop(true, "screen-saver");
+  }
+});
 
 // ── FINESTRE DELLE ALTRE APP (Accessibility / System Events) ─────────────────
 // Un piccolo daemon JXA (gesti-ax.js) resta in ascolto su stdin: serve alla
@@ -370,6 +459,7 @@ app.on("will-quit", () => {
     /* noop */
   }
   axFerma();
+  chiudiOverlayAffianca();
 });
 
 app.on("window-all-closed", () => {

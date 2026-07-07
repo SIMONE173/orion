@@ -3,6 +3,7 @@ import { tenantDaNumeroCentralino, getChiamataBySid, aggiornaChiamata, logEvento
 import { inviaPushATutti } from "@/lib/push";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
+import { verificaFirmaTwilio, fallbackTenantConsentito } from "@/lib/webhookSec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,13 +13,24 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
+
+    // Firma Twilio: rifiuta le richieste che non arrivano davvero da Twilio.
+    const firma = verificaFirmaTwilio(req, form);
+    if (!firma.ok) {
+      console.warn("[telefono stato] rifiutato:", firma.motivo);
+      return new NextResponse("forbidden", { status: 403 });
+    }
+
     const callSid = String(form.get("CallSid") ?? "");
     const from = String(form.get("From") ?? "");
     const to = String(form.get("To") ?? "");
     const status = String(form.get("CallStatus") ?? "");
     if (!callSid) return NextResponse.json({ ok: true });
 
-    const tenantId = tenantDaNumeroCentralino(to) || Number(process.env.ORION_TELEFONO_TENANT || 0) || primoTenant();
+    const tenantId =
+      tenantDaNumeroCentralino(to) ||
+      Number(process.env.ORION_TELEFONO_TENANT || 0) ||
+      (fallbackTenantConsentito() ? primoTenant() : null);
     if (!tenantId) return NextResponse.json({ ok: true });
 
     await runWithTenant(tenantId, async () => {

@@ -14,8 +14,10 @@ import {
   aggiornaChiamata,
   logEvento,
   logAudit,
+  logCommunication,
   type Chiamata,
 } from "./data";
+import { inviaMessaggioWhatsApp } from "./whatsapp";
 
 // ──────────────────────────────────────────────────────────────────────────
 // CENTRALINO AI: il cervello che risponde al TELEFONO dello studio.
@@ -232,7 +234,7 @@ export async function cervelloTelefono(callSid: string, daNumero: string, testoC
             const durata = getProfilo().durata_visita_min ?? 30;
             result = { slots: slotDelGiorno(String(input.data), durata) };
           } else if (block.name === "prenota") {
-            result = prenotaDaTelefono(daNumero, input, clienteNoto?.id ?? null);
+            result = await prenotaDaTelefono(daNumero, input, clienteNoto?.id ?? null);
             const r = result as { ok: boolean; appuntamento_id?: number };
             if (r.ok && r.appuntamento_id) appuntamentoId = r.appuntamento_id;
           } else if (block.name === "lascia_messaggio") {
@@ -285,9 +287,17 @@ export async function cervelloTelefono(callSid: string, daNumero: string, testoC
   return { risposta, fine };
 }
 
+// "martedì 15 luglio alle 15:00" — per i messaggi di conferma.
+function quandoParlato(iso: string): string {
+  const GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
+  const MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
+  const d = new Date(iso);
+  return `${GIORNI[d.getDay()]} ${d.getDate()} ${MESI[d.getMonth()]} alle ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 // Prenotazione dal telefono: SOLO su slot liberi, cliente trovato o creato.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function prenotaDaTelefono(daNumero: string, input: any, clienteNotoId: number | null) {
+async function prenotaDaTelefono(daNumero: string, input: any, clienteNotoId: number | null) {
   const profilo = getProfilo();
   const durata = profilo.durata_visita_min ?? 30;
   const data = String(input.data);
@@ -334,6 +344,36 @@ function prenotaDaTelefono(daNumero: string, input: any, clienteNotoId: number |
     descrizione: `Il centralino AI ha prenotato ${nomeCliente} per ${inizio.replace("T", " alle ")}`,
   });
   logAudit({ canale: "telefono", azione: "prenotazione", dettaglio: `${nomeCliente} — ${inizio}` });
+
+  // Conferma scritta via WhatsApp al numero del chiamante (il tocco che nessun
+  // centralino-only ha): riepilogo dell'appuntamento e, se lo studio la usa,
+  // richiesta della CAPARRA col link di pagamento. Best-effort: se WhatsApp non
+  // è configurato non blocca la prenotazione (invio simulato/ignorato).
+  try {
+    const primoNome = nomeCliente.split(" ")[0] || nomeCliente;
+    let msg =
+      `Gentile ${primoNome}, confermiamo l'appuntamento di ${quandoParlato(inizio)}` +
+      `${profilo.nome ? ` presso lo studio di ${profilo.nome}` : ""}.`;
+    if (profilo.caparra_importo && profilo.caparra_importo > 0 && profilo.link_pagamento) {
+      msg += ` Per bloccare il posto è prevista una caparra di ${profilo.caparra_importo}€: può versarla qui ${profilo.link_pagamento}`;
+    }
+    msg += `\n\n(Messaggio automatico dell'assistente dello studio)`;
+    const esitoWa = await inviaMessaggioWhatsApp(daNumero, msg);
+    if (esitoWa.ok) {
+      logCommunication({
+        cliente_id: clienteId,
+        direzione: "out",
+        contenuto: msg,
+        stato: esitoWa.simulato ? "simulato" : "inviato",
+      });
+      if (!esitoWa.simulato) {
+        logAudit({ canale: "whatsapp", azione: "conferma_prenotazione_telefono", dettaglio: `${nomeCliente} — ${inizio}` });
+      }
+    }
+  } catch (e) {
+    console.error("[telefono] conferma WhatsApp:", e instanceof Error ? e.message : e);
+  }
+
   return { ok: true, appuntamento_id: app.id, inizio, fine };
 }
 

@@ -215,7 +215,15 @@
       "Bash(open -R ORION-trailer.mp4)",
       "Bash(node -e 'const {spawnSync}=require\\(\"child_process\"\\);const f=require\\(\"ffmpeg-static\"\\);const r=spawnSync\\(f,[\"-hide_banner\",\"-i\",\"/Users/simonecataldo/Desktop/ORION/trailer-render/ORION-trailer.mp4\"],{encoding:\"utf8\"}\\);console.log\\(\\(r.stderr||\"\"\\).split\\(\"\\\\n\"\\).filter\\(l=>/Duration|Stream/.test\\(l\\)\\).join\\(\"\\\\n\"\\)\\)')",
       "Bash(open /Users/simonecataldo/Desktop/ORION/trailer-render/ORION-trailer.mp4)",
-      "Bash(open -R /Users/simonecataldo/Desktop/ORION/trailer-render/ORION-trailer.mp4)"
+      "Bash(open -R /Users/simonecataldo/Desktop/ORION/trailer-render/ORION-trailer.mp4)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -y -i ORION-trailer-45.mp4 -vf \"fps=1/5,scale=960:-1\" /private/tmp/claude-501/-Users-simonecataldo-Desktop-ORION/8a8645cc-2423-49c7-a2f7-cc38fbe433f6/scratchpad/frames45/f_%02d.jpg)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -i ORION-trailer-45.mp4 -af volumedetect -vn -f null -)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -v error -i ORION-trailer-45.mp4 -f null -)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -y -i ORION-trailer-45.mp4 -c:v libx264 -preset slow -crf 19 -pix_fmt yuv420p -c:a aac -b:a 192k -movflags +faststart ORION-trailer-45-web.mp4)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -y -i ORION-trailer-45.mp4 -c:v libx264 -preset slow -crf 26 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart ORION-trailer-45-web.mp4)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -y -ss 22 -i ORION-trailer-45-web.mp4 -frames:v 1 -q:v 2 /private/tmp/claude-501/-Users-simonecataldo-Desktop-ORION/8a8645cc-2423-49c7-a2f7-cc38fbe433f6/scratchpad/web_check.jpg)",
+      "Bash(./node_modules/ffmpeg-static/ffmpeg -i ORION-trailer-45-web.mp4)",
+      "Bash(open -R /Users/simonecataldo/Desktop/ORION/trailer-render/ORION-trailer-45-web.mp4)"
     ]
   }
 }

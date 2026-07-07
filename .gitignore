@@ -36,3 +36,10 @@ npm-debug.log*
 # Il trailer è un MP4 separato: la route resta solo locale (render), MAI sul sito.
 src/app/trailer/
 trailer-render/
+
+# Media pesanti / backup: mai su git (rifiutati da GitHub, gonfiano il repo)
+*.mp4
+*.aiff
+*.tgz
+voce/
+data/backups/

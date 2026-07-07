@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { trovaUtenteByEmail, verifyPassword, creaSessione } from "@/lib/auth";
 import { COOKIE_SESSIONE, MAX_AGE_SESSIONE } from "@/lib/sessione";
+import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,15 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const email = String(body?.email ?? "").trim().toLowerCase();
     const password = String(body?.password ?? "");
+
+    // Anti forza-bruta: max 10 tentativi ogni 15 minuti per coppia IP+email.
+    const lim = rateLimit(`login:${ipRichiesta(req)}:${email}`, 10, 15 * 60 * 1000);
+    if (!lim.ok) {
+      return NextResponse.json(
+        { ok: false, errore: `Troppi tentativi. Riprova tra ${Math.ceil(lim.riprovaTraSec / 60)} minuti.` },
+        { status: 429 }
+      );
+    }
 
     const utente = trovaUtenteByEmail(email);
     if (!utente || !verifyPassword(password, utente.password_hash)) {

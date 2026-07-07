@@ -34,6 +34,12 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   gestiAvanti: (dati) => ipcRenderer.send("os:gestiAvanti", dati),
   // Chiusura a comando: finestra (pulsante rosso) o scheda del browser (Cmd+W).
   chiudiFinestra: (dati) => ipcRenderer.invoke("os:chiudiFinestra", dati),
+  // Modalità AFFIANCAMENTO: cattura schermo + overlay che disegna le evidenze.
+  catturaSchermo: () => ipcRenderer.invoke("os:catturaSchermo"),
+  affiancaOn: () => ipcRenderer.send("os:affiancaOn"),
+  affiancaOff: () => ipcRenderer.send("os:affiancaOff"),
+  affiancaDisegna: (evidenze) => ipcRenderer.send("os:affiancaDisegna", evidenze),
+  onAffiancaDisegna: (cb) => ipcRenderer.on("affianca:disegna", (_e, d) => cb(d)),
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra: () => ipcRenderer.send("os:mostraFinestra"),
   onFinestra: (cb) => ipcRenderer.on("orion:finestra", (_e, stato) => cb(stato)),

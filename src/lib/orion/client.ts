@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, dispatch, type TurnoContext } from "./tools";
 import { buildSystem, DIRETTIVA_AVVIO } from "./system";
 import { consolidaSeNecessario } from "./memoria";
+import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
 import { salvaMessaggio } from "../data";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
@@ -198,12 +199,23 @@ export async function runConversation(
     return { testo, viste, errore };
   }
 
+  // Estrai le pillole dalla riga [suggerimenti: ...] e PULISCI il testo prima di
+  // salvarlo/leggerlo: il parlato non deve mai contenere quella riga.
+  const { testoPulito, suggerimenti: suggerimentiAI } = estraiSuggerimenti(testo);
+  testo = testoPulito;
+
   // Persisti la risposta di ORION (continuità tra sessioni + richiamo esatto).
   if (testo) salvaMessaggio("assistant", testo, utente?.id);
 
   // Dedup per tipo (l'ultima vista di ogni tipo vince), mantenendo l'ordine d'apparizione.
   const perTipo = new Map<string, Vista>();
   for (const v of viste) perTipo.set(v.tipo, v);
+  const visteDedup = Array.from(perTipo.values());
 
-  return { testo, viste: Array.from(perTipo.values()), azioni };
+  // Suggerimenti: mai durante l'onboarding; altrimenti quelli del modello, con
+  // fallback deterministico all'ultima vista aperta se il modello non li ha dati.
+  let suggerimenti = onboardingCompleto ? suggerimentiAI : [];
+  if (onboardingCompleto && !suggerimenti.length) suggerimenti = suggerimentiPerViste(visteDedup);
+
+  return { testo, viste: visteDedup, azioni, suggerimenti: suggerimenti.length ? suggerimenti : undefined };
 }

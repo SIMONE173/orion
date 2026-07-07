@@ -25,10 +25,18 @@ chiamato?" → ORION risponde).
 3. Nel numero → **Voice Configuration**:
    - *A call comes in*: Webhook `https://<dominio>/api/telefono/webhook` (POST)
    - *Call status changes*: `https://<dominio>/api/telefono/stato` (POST)
-4. (Opz.) `TWILIO_VOICE=Polly.Bianca` in env per la voce italiana.
-5. Registra il numero per il tenant: di' a ORION "il numero del centralino è
+4. **Firma dei webhook (obbligatoria in produzione):** copia l'**Auth Token**
+   da Twilio Console → Account Info e mettilo in `TWILIO_AUTH_TOKEN`. ORION
+   verifica `X-Twilio-Signature` su ogni richiesta: senza token, in produzione
+   i webhook vengono rifiutati (fail-closed). Imposta anche `PUBLIC_URL`
+   (es. `https://orion.up.railway.app`) se la verifica fallisse dietro proxy:
+   la firma copre l'URL esatto configurato su Twilio.
+5. (Opz.) `TWILIO_VOICE=Polly.Bianca` in env per la voce italiana.
+6. Registra il numero per il tenant: di' a ORION "il numero del centralino è
    +39…" oppure inserisci la riga in `telefono_accounts`. In sviluppo basta
-   `ORION_TELEFONO_TENANT=<id utente>`.
+   `ORION_TELEFONO_TENANT=<id utente>`. **In produzione il fallback "primo
+   account" è disattivato**: un numero non registrato riceve un messaggio di
+   servizio non configurato (mai i dati di un altro studio).
 
 ## Provare subito senza Twilio
 

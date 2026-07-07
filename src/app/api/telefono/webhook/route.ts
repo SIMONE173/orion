@@ -3,6 +3,7 @@ import { cervelloTelefono, salutoIniziale } from "@/lib/telefono";
 import { tenantDaNumeroCentralino, getChiamataBySid, apriChiamata, getClienteByTelefono } from "@/lib/data";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
+import { verificaFirmaTwilio, fallbackTenantConsentito } from "@/lib/webhookSec";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,12 +50,21 @@ function risolviTenant(to: string): number | null {
   if (daNumero) return daNumero;
   const forzato = Number(process.env.ORION_TELEFONO_TENANT || 0);
   if (forzato) return forzato;
-  return primoTenant();
+  // Solo in sviluppo: in produzione un numero non registrato NON deve mai
+  // finire nell'agenda di un altro studio (fallback vietato).
+  return fallbackTenantConsentito() ? primoTenant() : null;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
+
+    // Firma Twilio: rifiuta le richieste che non arrivano davvero da Twilio.
+    const firma = verificaFirmaTwilio(req, form);
+    if (!firma.ok) {
+      console.warn("[telefono webhook] rifiutato:", firma.motivo);
+      return new NextResponse("forbidden", { status: 403 });
+    }
     const callSid = String(form.get("CallSid") ?? "");
     const from = String(form.get("From") ?? "");
     const to = String(form.get("To") ?? "");

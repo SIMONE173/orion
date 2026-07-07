@@ -34,6 +34,9 @@ export type Vista =
         clientiInattivi: number;
         promemoriaAttivi: number;
         inAttesa: number;
+        // Fonte di verità dei dati: se ORION è lo specchio di un gestionale,
+        // mostra "aggiornato alle … da <sistema>".
+        fonte?: { modo: string; sistema: string | null; aggiornato_at: string | null };
       };
     }
   | {
@@ -204,6 +207,7 @@ export type Azione =
   | { tipo: "cerca_documento"; testo: string }
   | { tipo: "apri_camera"; modo: "documento" | "descrizione" }
   | { tipo: "apri_visione" }
+  | { tipo: "apri_affiancamento"; domanda?: string }
   | { tipo: "apri_gesti" }
   | { tipo: "chiudi_vista"; vista: string }
   | { tipo: "riposo" }
@@ -219,9 +223,15 @@ export type Azione =
   | { tipo: "esegui_comando"; comando: string; cwd?: string; etichetta?: string; riporta?: boolean }
   | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string };
 
+// Pillola tappabile mostrata dopo una risposta: una frase breve che l'utente
+// direbbe ("Fagli la fattura"), che al tap viene inviata come suo messaggio.
+export type Suggerimento = string;
+
 export type RisultatoConversazione = {
   testo: string;
   viste: Vista[];
   azioni?: Azione[];
+  // Fino a 3 azioni successive suggerite, contestuali al turno appena concluso.
+  suggerimenti?: Suggerimento[];
   errore?: "no_key" | "auth" | "credito" | "rate_limit" | "api_error";
 };
