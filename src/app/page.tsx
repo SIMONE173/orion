@@ -6,7 +6,7 @@ import { PanelStage } from "@/components/PanelStage";
 import { CameraCapture } from "@/components/CameraCapture";
 import { VisioneMode, type VisioneHandle } from "@/components/VisioneMode";
 import dynamic from "next/dynamic";
-import type { AffiancaRichiesta } from "@/components/AffiancaMode";
+import type { AffiancaRichiesta, AffiancaDati } from "@/components/AffiancaMode";
 // Desktop-only e usa window/cattura schermo: caricata solo lato client (ssr:false),
 // così non entra nel prerender della home.
 const AffiancaMode = dynamic(() => import("@/components/AffiancaMode").then((m) => m.AffiancaMode), { ssr: false });
@@ -85,10 +85,17 @@ export default function Home() {
   // Modalità visione (telecamera dal vivo). Opt-in.
   const [visioneAttiva, setVisioneAttiva] = useState(false);
   const visioneRef = useRef<VisioneHandle>(null);
-  // Modalità affiancamento (copilota sullo schermo). Opt-in, solo Desktop.
-  const [affiancaAttiva, setAffiancaAttiva] = useState(false);
-  const [affiancaDomanda, setAffiancaDomanda] = useState<string | undefined>(undefined);
+  // Affiancamento (copilota sullo schermo): SEMPRE attivo su Desktop, invisibile.
+  // ORION guarda lo schermo a comando/proattivamente e apre la scheda del riassunto.
   const [affiancaRichiesta, setAffiancaRichiesta] = useState<AffiancaRichiesta>({ seq: 0 });
+  // La scheda dell'affiancamento: su Desktop apre una finestra-pannello (che si
+  // aggiorna a ogni sguardo), su web un pannello nello stage.
+  const mostraAffianca = useCallback((dati: AffiancaDati) => {
+    const vista: Vista = { tipo: "affianca", dati };
+    const d = desktopBridge();
+    if (d?.apriVista) d.apriVista(vista);
+    else setViste((vs) => [vista, ...vs.filter((v) => v.tipo !== "affianca")]);
+  }, []);
   // Modalità gesti (manipolazione spaziale dei pannelli con le mani). Opt-in.
   const [gestiAttivi, setGestiAttivi] = useState(false);
   const [layout, setLayout] = useState<Layout>({});
@@ -220,11 +227,6 @@ export default function Home() {
     if (visioneAttiva && supported && !micAttivoRef.current) toggleMic();
   }, [visioneAttiva, supported, toggleMic]);
 
-  // Idem per l'affiancamento: mic pronto per chiedere "evidenziami…".
-  useEffect(() => {
-    if (affiancaAttiva && supported && !micAttivoRef.current) toggleMic();
-  }, [affiancaAttiva, supported, toggleMic]);
-
   // Esegue le azioni che ORION comanda sullo schermo (apri sito, appunti, foto…).
   const eseguiAzione = useCallback((a: Azione) => {
     switch (a.tipo) {
@@ -267,15 +269,14 @@ export default function Home() {
         setVisioneAttiva(true);
         break;
       case "apri_affiancamento":
-        setAffiancaDomanda(a.domanda);
-        setAffiancaAttiva(true);
+        // ORION guarda lo schermo ORA (l'affiancamento è già sempre pronto).
+        setAffiancaRichiesta((r) => ({ testo: a.domanda, seq: r.seq + 1 }));
         break;
       case "apri_gesti":
         setGestiAttivi(true);
         break;
       case "chiudi_vista": {
         if (a.vista === "visione" || a.vista === "tutto") setVisioneAttiva(false);
-        if (a.vista === "affianca" || a.vista === "affiancamento" || a.vista === "tutto") setAffiancaAttiva(false);
         if (a.vista === "gesti" || a.vista === "tutto") setGestiAttivi(false);
         const d = desktopBridge();
         if (d?.chiudiVista) {
@@ -680,17 +681,6 @@ export default function Home() {
         speakRef.current?.("Chiudo la visione.");
       } else {
         visioneRef.current?.chiedi(t);
-      }
-      return;
-    }
-    // In modalità affiancamento la voce è una richiesta sullo schermo (o la chiude).
-    if (affiancaAttiva) {
-      const low = t.trim().toLowerCase();
-      if (/(chiudi|ferma|spegni|esci)\b.*(affianc|schermo|gestional)|^(chiudi|ferma|basta|stop)$/.test(low)) {
-        setAffiancaAttiva(false);
-        speakRef.current?.("Chiudo l'affiancamento.");
-      } else {
-        setAffiancaRichiesta((r) => ({ testo: t, seq: r.seq + 1 }));
       }
       return;
     }
@@ -1166,12 +1156,13 @@ export default function Home() {
         />
       )}
 
-      {affiancaAttiva && (
+      {/* Affiancamento SEMPRE attivo su Desktop: orchestratore invisibile, pronto
+          a guardare lo schermo appena ORION lo chiede (esplicito o proattivo). */}
+      {desktopBridge() && (
         <AffiancaMode
-          domandaIniziale={affiancaDomanda}
           richiesta={affiancaRichiesta}
           parla={(t) => speakRef.current?.(t)}
-          onClose={() => setAffiancaAttiva(false)}
+          onScheda={mostraAffianca}
         />
       )}
 

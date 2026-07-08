@@ -175,6 +175,15 @@ export type Vista =
   | { tipo: "memoria"; dati: { intuizioni: Memoria[] } }
   | { tipo: "integrazioni"; dati: { connessioni: Connessione[] } }
   | { tipo: "importa"; dati: { sistema?: string | null; esito?: import("../importa").EsitoImport } }
+  | {
+      tipo: "affianca";
+      dati: {
+        riassunto: string;
+        evidenze: { etichetta: string; forma: string; x: number; y: number; w?: number; h?: number }[];
+        stato: "guardo" | "pronto";
+        errore?: string;
+      };
+    }
   | { tipo: "organico"; dati: { organico: MembroOrganico[] } }
   | { tipo: "compiti"; titolo?: string; dati: { compiti: Compito[] } }
   | {

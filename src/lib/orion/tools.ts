@@ -1301,10 +1301,10 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
-    name: "attiva_affiancamento",
+    name: "guarda_schermo",
     description:
-      "SOLO Desktop. Attiva la MODALITÀ AFFIANCAMENTO: ORION guarda lo SCHERMO (il gestionale, sito o app che il professionista già usa: agenda, gestionale pazienti/clienti, portale, email…), EVIDENZIA direttamente sopra lo schermo ciò che conta ora (l'appuntamento imminente, il dato da confermare, la scadenza vicina) e ne fa un breve briefing nel suo pannello. Usalo quando l'utente lavora con un SUO software esterno e dice 'affiancami sul gestionale', 'guarda la mia agenda', 'controlla il gestionale', 'aiutami con questa schermata', o al briefing del mattino se i suoi dati stanno su un software che già usa. È DIVERSO da attiva_visione (telecamera sulle mani) e non copia i dati: li lascia dove sono. Se serve, passa 'domanda' con cosa cercare/evidenziare. A voce di' una frase breve tipo 'Guardo lo schermo e ti evidenzio cosa conta'.",
-    input_schema: { type: "object", properties: { domanda: { type: "string", description: "Cosa cercare o evidenziare sullo schermo, se l'utente l'ha specificato" } } },
+      "SOLO Desktop. ORION GUARDA LO SCHERMO ADESSO (l'affiancamento è SEMPRE attivo e pronto, non va acceso): cattura ciò che c'è a schermo — il gestionale/sito/app che il professionista già usa: agenda, gestionale pazienti/clienti, portale, email… — EVIDENZIA direttamente sopra lo schermo ciò che conta (appuntamento imminente, dato da confermare, scadenza) e apre la SCHEDA col riassunto. Usalo ISTANTANEAMENTE quando l'utente lo chiede ('guarda la mia agenda', 'affiancami sul gestionale', 'controlla lo schermo', 'aiutami con questa schermata') MA ANCHE PROATTIVAMENTE, senza che te lo chieda: appena dal discorso capisci che sta guardando/parlando di qualcosa che è sullo schermo (un cliente, un appuntamento, una schermata del suo software), guarda e mostragli ciò che serve. Non copia i dati: li lascia dove sono. Passa 'domanda' con cosa cercare, se specificato. A voce una frase brevissima ('Guardo…' / niente se stai già parlando). NB: è diverso da attiva_visione (telecamera sulle mani).",
+    input_schema: { type: "object", properties: { domanda: { type: "string", description: "Cosa cercare o evidenziare sullo schermo, se rilevante" } } },
   },
   {
     name: "attiva_gesti",
@@ -2799,11 +2799,11 @@ const handlers: Record<string, Handler> = {
     azione: { tipo: "apri_visione" },
   }),
 
-  attiva_affiancamento: (input) => ({
+  guarda_schermo: (input) => ({
     result: {
       ok: true,
-      affiancamento: "aperto",
-      nota: "Guardo lo schermo e disegno le evidenze sul gestionale; il riassunto compare nel pannello affiancamento. Di' una frase breve di avvio.",
+      affiancamento: "sto_guardando",
+      nota: "Guardo lo schermo adesso: evidenzio sul suo software ciò che conta e apro la scheda col riassunto. Una frase brevissima, o nulla se stai già parlando.",
     },
     azione: { tipo: "apri_affiancamento", domanda: input.domanda ? String(input.domanda) : undefined },
   }),

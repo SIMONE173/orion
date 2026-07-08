@@ -71,8 +71,10 @@ const finestreViste = []; // { win, tipo }
 function apriFinestraVista(vista) {
   const tipo = vista && vista.tipo ? String(vista.tipo) : "vista";
 
-  if (tipo === "mappa") {
-    const m = finestreViste.find((f) => f.tipo === "mappa" && !f.win.isDestroyed());
+  // Riuso della stessa finestra per i tipi che si AGGIORNANO invece di moltiplicarsi
+  // (mappa; affiancamento = un'unica scheda che si aggiorna a ogni sguardo).
+  if (tipo === "mappa" || tipo === "affianca") {
+    const m = finestreViste.find((f) => f.tipo === tipo && !f.win.isDestroyed());
     if (m) {
       m.win.webContents.send("orion:vista", vista);
       if (m.win.isMinimized()) m.win.restore();
@@ -94,9 +96,11 @@ function apriFinestraVista(vista) {
     },
   });
   finestreViste.push({ win, tipo });
+  disponiFinestreViste();
   win.on("closed", () => {
     const i = finestreViste.findIndex((f) => f.win === win);
     if (i >= 0) finestreViste.splice(i, 1);
+    disponiFinestreViste();
   });
   win.loadURL(`${ORION_URL}/pannello`);
   // Mando la vista appena la pagina è pronta (il preload la bufferizza se arriva prima).
@@ -114,6 +118,38 @@ let finestraGesti = null;
 
 function finestreVistePulite() {
   return finestreViste.filter((f) => f.win && !f.win.isDestroyed());
+}
+
+// AUTO-DISPOSIZIONE: dispone le schede aperte in una griglia ordinata sul monitor,
+// mai ammucchiate. ORION le mette già comode: 1 grande, 2 affiancate, 3-4 a griglia…
+// L'ultima riga incompleta viene centrata. Richiamata a ogni apertura/chiusura.
+function disponiFinestreViste() {
+  const finestre = finestreVistePulite()
+    .map((f) => f.win)
+    .filter((w) => !w.isMinimized());
+  const n = finestre.length;
+  if (n === 0) return;
+  const wa = screen.getPrimaryDisplay().workArea; // esclude dock e barra dei menu
+  const gap = 12;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const cellW = Math.floor((wa.width - gap * (cols + 1)) / cols);
+  const cellH = Math.floor((wa.height - gap * (rows + 1)) / rows);
+  finestre.forEach((win, i) => {
+    const r = Math.floor(i / cols);
+    const c = i % cols;
+    // Centra le finestre dell'ultima riga se non riempiono tutte le colonne.
+    const ultimaRiga = r === rows - 1;
+    const nUltima = n - cols * (rows - 1);
+    const centratura = ultimaRiga && nUltima < cols ? Math.floor(((cols - nUltima) * (cellW + gap)) / 2) : 0;
+    const x = Math.round(wa.x + gap + c * (cellW + gap) + centratura);
+    const y = Math.round(wa.y + gap + r * (cellH + gap));
+    try {
+      win.setBounds({ x, y, width: cellW, height: cellH }, false);
+    } catch {
+      /* finestra chiusa nel frattempo */
+    }
+  });
 }
 function finestraDiTipo(tipo) {
   const f = finestreVistePulite().find((x) => x.tipo === tipo);
