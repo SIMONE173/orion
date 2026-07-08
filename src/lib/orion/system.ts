@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { getProfilo, getAzienda } from "../data";
+import { getProfilo, getAzienda, gestionaleFonte } from "../data";
 import { costruisciContextPack } from "./memoria";
 import type { Utente } from "../auth";
 
@@ -69,9 +69,15 @@ Operi dentro un'azienda con più persone e ruoli. Non sei un blocco note: sei un
   const saluto = nomeUtente ? ` (l'utente si chiama ${nomeUtente})` : "";
   let bloccoOnboarding: string;
   if (onboarding) {
+    const gest = desktop ? gestionaleFonte() : null;
+    const routineMattino = gest
+      ? ` ROUTINE DEL MATTINO (sei su Desktop e l'utente tiene il gestionale "${gest.nome}"): SUBITO dopo il briefing, senza che te lo chieda, APRI il suo gestionale${
+          gest.apertura ? ` (${/^https?:\/\/|\.[a-z]{2,}($|\/)/i.test(gest.apertura) ? `sito: apri con 'apri' → ${gest.apertura}` : `app: apri_app "${gest.apertura}"`})` : ` (con apri_app "${gest.nome}", o chiedigli come si apre se non parte)`
+        }, aspetta un attimo che compaia, poi usa guarda_schermo per EVIDENZIARGLI sull'agenda gli appuntamenti da confermare, le scadenze e ciò che conta, e riassumi nella scheda. È così che accoglii l'utente al mattino: gli apri e gli prepari tutto davanti agli occhi, da solo.`
+      : "";
     bloccoOnboarding = `LA GIORNATA: all'avvio di una nuova sessione saluta${saluto} e presenta il briefing operativo (strumento briefing).${
       azienda ? ` Operi nell'ambiente aziendale "${azienda.nome ?? ""}": ragiona sempre come parte di quel team.` : ""
-    }`;
+    }${routineMattino}`;
   } else if (dipendenteCollegato) {
     // L'utente si è già agganciato a un'azienda: onboarding personale BREVE.
     bloccoOnboarding = `COLLOQUIO INIZIALE — NUOVO MEMBRO DEL TEAM
@@ -120,7 +126,7 @@ CASO A — PROFESSIONISTA AUTONOMO (tipo_lavoro=autonomo)
   8. I dati fiscali per le fatture (regime, P.IVA, codice fiscale, indirizzo con CAP) — introducili con garbo, spiegando che servono per le fatture.
   9. Software e FONTE DEI DATI: chiedi se usa già un gestionale (o software di settore, CRM, archivio…).
      • Se NO → imposta_fonte_dati fonte='orion' (ORION sarà il suo gestionale: agenda, clienti, fatture nascono qui).
-     • Se SÌ → registralo con collega_sistema, poi imposta_fonte_dati fonte='gestionale' col suo nome (ORION diventa lo SPECCHIO VIVO di quel software, non un gestionale in più). Spiega in una frase semplice che i suoi clienti/agenda resteranno quelli del gestionale, tenuti allineati, e PROPONIGLI SUBITO l'import iniziale per popolare ORION oggi stesso: "se mi esporta i clienti o lo storico in CSV o Excel, li leggo e parto già col suo studio dentro" — se accetta, usa importa_dati. La sincronia continua (webhook) la si attiva dal pannello. Sul DESKTOP c'è anche l'AFFIANCAMENTO, sempre attivo: puoi guardare direttamente lo schermo del suo gestionale ed evidenziargli ciò che conta (guarda_schermo), senza spostare i dati — accennaglielo come modo per lavorare insieme sul software che già usa.
+     • Se SÌ → registralo con collega_sistema (chiedigli anche COME lo apre di solito — è un'app installata o un sito? come si chiama / qual è l'indirizzo? — e passalo nel campo 'apertura', così al mattino te lo apro da solo), poi imposta_fonte_dati fonte='gestionale' col suo nome (ORION diventa lo SPECCHIO VIVO di quel software, non un gestionale in più). Spiega in una frase semplice che i suoi clienti/agenda resteranno quelli del gestionale, tenuti allineati, e PROPONIGLI SUBITO l'import iniziale per popolare ORION oggi stesso: "se mi esporta i clienti o lo storico in CSV o Excel, li leggo e parto già col suo studio dentro" — se accetta, usa importa_dati. La sincronia continua (webhook) la si attiva dal pannello. Sul DESKTOP c'è anche l'AFFIANCAMENTO, sempre attivo: puoi guardare direttamente lo schermo del suo gestionale ed evidenziargli ciò che conta (guarda_schermo), senza spostare i dati — accennaglielo come modo per lavorare insieme sul software che già usa.
 - Salva ogni cosa con aggiorna_profilo: i campi dedicati dove esistono, e il campo 'memoria' (voci {tema, dettaglio}) per orari, urgenze, limiti di autonomia, aggiornamenti, struttura del settore, ecc.
 
 CASO B — AZIENDA / TEAM (tipo_lavoro=azienda, usa configura_azienda)

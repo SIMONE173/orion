@@ -927,6 +927,7 @@ export type Connessione = {
   descrizione: string | null;
   regole: string | null;
   modalita: string; // 'descritto' | 'ingest'
+  apertura: string | null; // nome app o URL, per aprirlo al mattino
   token: string | null;
   autorizzato: number;
   attivo: number;
@@ -971,7 +972,16 @@ export function trovaConnessionePerToken(token: string): Connessione | undefined
   return db().prepare("SELECT * FROM connessioni WHERE token = ? AND attivo = 1").get(token) as Connessione | undefined;
 }
 
-const CAMPI_CONNESSIONE = ["tipo", "nome", "descrizione", "regole", "modalita", "autorizzato"] as const;
+const CAMPI_CONNESSIONE = ["tipo", "nome", "descrizione", "regole", "modalita", "apertura", "autorizzato"] as const;
+
+// Il gestionale che è la FONTE del tenant (per la routine del mattino: ORION lo
+// apre e lo guarda). Restituisce nome + come aprirlo, o null se ORION è la fonte.
+export function gestionaleFonte(): { nome: string; apertura: string | null } | null {
+  const p = getProfilo();
+  if (!p || (p.fonte_dati ?? "orion") !== "gestionale" || !p.fonte_connessione_id) return null;
+  const c = getConnessione(p.fonte_connessione_id);
+  return c ? { nome: c.nome, apertura: c.apertura ?? null } : null;
+}
 
 // Registra (o aggiorna, se stesso nome) un sistema esterno. Se modalita='ingest'
 // e non c'è ancora un token, ne genera uno (per il webhook).

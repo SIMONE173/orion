@@ -371,6 +371,7 @@ function migrate(d: Database.Database) {
       descrizione TEXT,
       regole TEXT,
       modalita TEXT NOT NULL DEFAULT 'descritto',
+      apertura TEXT,
       token TEXT UNIQUE,
       autorizzato INTEGER NOT NULL DEFAULT 1,
       attivo INTEGER NOT NULL DEFAULT 1,
@@ -585,6 +586,9 @@ function migrate(d: Database.Database) {
     // l'id della connessione-gestionale di cui ORION è lo specchio vivo.
     "ALTER TABLE profili ADD COLUMN fonte_dati TEXT",
     "ALTER TABLE profili ADD COLUMN fonte_connessione_id INTEGER",
+    // Come si apre un software collegato (nome app o URL): per la routine del
+    // mattino, ORION lo apre da solo e poi lo guarda.
+    "ALTER TABLE connessioni ADD COLUMN apertura TEXT",
   ];
   for (const sql of alters) {
     try {

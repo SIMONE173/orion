@@ -604,6 +604,7 @@ export const TOOLS: Anthropic.Tool[] = [
         descrizione: { type: "string", description: "Cosa contiene e com'è strutturato" },
         regole: { type: "string", description: "Autorizzazioni: cosa ORION può fare da solo, cosa va confermato" },
         modalita: { type: "string", enum: ["descritto", "ingest"], description: "ingest = genera un webhook per ricevere i dati" },
+        apertura: { type: "string", description: "COME si apre: il nome dell'app installata (es. 'GesCom') se è un programma, oppure l'indirizzo/URL se è un sito. Serve ad ORION per aprirlo da solo al mattino (routine del mattino su Desktop)." },
       },
       required: ["nome"],
     },
