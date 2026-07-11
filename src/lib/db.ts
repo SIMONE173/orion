@@ -17,8 +17,25 @@ export function db(): Database.Database {
   _db = new Database(path.join(dir, "orion.db"));
   _db.pragma("journal_mode = WAL");
   _db.pragma("foreign_keys = ON");
+  // Robustezza: le scritture concorrenti aspettano invece di fallire subito;
+  // synchronous NORMAL è lo standard consigliato in WAL (durabilità del
+  // checkpoint, prestazioni molto migliori di FULL).
+  _db.pragma("busy_timeout = 5000");
+  _db.pragma("synchronous = NORMAL");
   migrate(_db);
   return _db;
+}
+
+// Controllo di salute del database (PRAGMA quick_check): lanciato dal cron
+// prima del backup — un backup di un DB corrotto è una falsa sicurezza.
+export function controllaIntegrita(): { ok: boolean; dettaglio: string } {
+  try {
+    const r = db().pragma("quick_check") as { quick_check: string }[];
+    const dettaglio = r.map((x) => x.quick_check).join("; ");
+    return { ok: dettaglio === "ok", dettaglio };
+  } catch (e) {
+    return { ok: false, dettaglio: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 function migrate(d: Database.Database) {

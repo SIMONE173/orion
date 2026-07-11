@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",
+    "@aws-sdk/client-s3": "^3.1085.0",
     "@mediapipe/tasks-vision": "^0.10.35",
     "@types/katex": "^0.16.8",
     "@types/nodemailer": "^8.0.1",

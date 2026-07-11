@@ -17,7 +17,8 @@ import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti, inviaPushAUtente } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
-import { backupGiornaliero } from "@/lib/db";
+import { backupGiornaliero, controllaIntegrita } from "@/lib/db";
+import { caricaBackupRemoto } from "@/lib/backup-remoto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -90,9 +91,22 @@ export async function POST(req: NextRequest) {
 
   // Backup giornaliero del DB (idempotente: fa la copia solo la prima volta
   // del giorno). Un DB perso senza backup = studio fermo: non deve succedere.
+  // FORTEZZA: prima il controllo di salute (un backup corrotto è una falsa
+  // sicurezza), poi la copia locale, poi la copia CIFRATA fuori da Railway.
   let backupFatto = false;
+  let backupRemoto: string | null = null;
+  const salute = controllaIntegrita();
+  if (!salute.ok) {
+    console.error(`[cron] ⚠️ INTEGRITÀ DATABASE COMPROMESSA: ${salute.dettaglio} — backup remoto sospeso per non sovrascrivere le copie buone`);
+  }
   try {
-    backupFatto = (await backupGiornaliero()) !== null;
+    const percorso = await backupGiornaliero();
+    backupFatto = percorso !== null;
+    if (percorso && salute.ok) {
+      const r = await caricaBackupRemoto(percorso);
+      if (r.ok) backupRemoto = (r.caricati ?? []).join(", ");
+      else if (r.configurato) console.error("[cron] backup remoto fallito:", r.errore);
+    }
   } catch (e) {
     console.error("[cron] backup DB:", e instanceof Error ? e.message : e);
   }
@@ -191,5 +205,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ ok: true, dovuti: totDovuti, inviati: totInviati, promemoriaAppuntamenti: totPromemoriaApp, backup: backupFatto });
+  return NextResponse.json({
+    ok: true,
+    dovuti: totDovuti,
+    inviati: totInviati,
+    promemoriaAppuntamenti: totPromemoriaApp,
+    backup: backupFatto,
+    backupRemoto,
+    integrita: salute.ok ? "ok" : salute.dettaglio,
+  });
 }
