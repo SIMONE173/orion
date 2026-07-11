@@ -11,6 +11,12 @@ import {
   messaggiTeamPerUtente,
   segnaMessaggiTeamConsegnati,
   utenteIdPerNome,
+  chiediApprovazione,
+  approvazioniPerMe,
+  esitiApprovazioniDaComunicare,
+  segnaEsitiComunicati,
+  decidiApprovazione,
+  giornaleDiBordo,
 } from "../data";
 
 // AREE RISERVATE + STAFFETTA DEL TEAM: la protezione per ruolo è applicata nei
@@ -21,7 +27,7 @@ let TITOLARE = 0;
 let OPERATORE = 0;
 
 function pulisci() {
-  for (const t of ["aziende", "organico", "messaggi_team"]) {
+  for (const t of ["aziende", "organico", "messaggi_team", "approvazioni", "eventi"]) {
     db().prepare(`DELETE FROM ${t} WHERE tenant_id = ?`).run(TN);
   }
   db().prepare("DELETE FROM utenti WHERE email LIKE 'permessi-test-%'").run();
@@ -102,6 +108,50 @@ test("staffetta: 'di' a Marco che…' trova il collega e gli consegna il messagg
     // Consegnato una volta sola.
     segnaMessaggiTeamConsegnati(perMarco.map((m) => m.id));
     assert.equal(messaggiTeamPerUtente(OPERATORE).length, 0);
+  });
+});
+
+test("approvazioni: la richiesta va al titolare, l'esito torna a chi ha chiesto", () => {
+  runWithTenant(TN, () => {
+    // Marco chiede senza destinatario → va al titolare.
+    const rich = chiediApprovazione({ daUtenteId: OPERATORE, daNome: "Marco", richiesta: "Sconto 20% al cliente Bianchi?" });
+    assert.equal(rich.a_utente_id, TITOLARE);
+    assert.equal(approvazioniPerMe(TITOLARE).length, 1);
+    assert.equal(approvazioniPerMe(OPERATORE).length, 0);
+
+    // Marco NON può decidere la propria richiesta; il titolare sì.
+    assert.equal(decidiApprovazione(rich.id, { esito: "approvata", decisoDaId: OPERATORE }), null);
+    const decisa = decidiApprovazione(rich.id, { esito: "approvata", nota: "ok, solo per questa volta", decisoDaId: TITOLARE });
+    assert.equal(decisa?.stato, "approvata");
+    // Decisa = non più in attesa; l'esito aspetta Marco (una volta sola).
+    assert.equal(approvazioniPerMe(TITOLARE).length, 0);
+    const esiti = esitiApprovazioniDaComunicare(OPERATORE);
+    assert.equal(esiti.length, 1);
+    assert.equal(esiti[0].nota_esito, "ok, solo per questa volta");
+    segnaEsitiComunicati(esiti.map((e) => e.id));
+    assert.equal(esitiApprovazioniDaComunicare(OPERATORE).length, 0);
+  });
+});
+
+test("approvazioni: destinatario esplicito; doppia decisione impossibile", () => {
+  runWithTenant(TN, () => {
+    const rich = chiediApprovazione({ daUtenteId: TITOLARE, daNome: "Simone", aNome: "Marco", richiesta: "Posso fermare la linea 2 domattina?" });
+    assert.equal(rich.a_utente_id, OPERATORE);
+    assert.equal(approvazioniPerMe(OPERATORE).length, 1);
+    const decisa = decidiApprovazione(rich.id, { esito: "negata", nota: "domattina c'è il collaudo", decisoDaId: OPERATORE });
+    assert.equal(decisa?.stato, "negata");
+    assert.equal(decidiApprovazione(rich.id, { esito: "approvata", decisoDaId: TITOLARE }), null); // già decisa
+  });
+});
+
+test("giornale di bordo: la giornata raccoglie approvazioni e compiti", () => {
+  runWithTenant(TN, () => {
+    const oggi = new Date().toISOString().slice(0, 10);
+    const g = giornaleDiBordo(oggi);
+    assert.equal(g.giorno, oggi);
+    // Le due richieste di oggi (create nei test sopra) sono in cronaca.
+    assert.equal(g.approvazioni.length, 2);
+    assert.ok(Array.isArray(g.eventi) && Array.isArray(g.compitiChiusi) && Array.isArray(g.consegne));
   });
 });
 

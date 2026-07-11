@@ -525,6 +525,29 @@ function migrate(d: Database.Database) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_msgteam_attesa ON messaggi_team(tenant_id, consegnato);
+
+    -- ── APPROVAZIONI: richiesta → sì/no del responsabile → esito a chi chiede.
+    -- Le "regole operative" ("oltre 500€ serve l'ok") diventano un flusso vero:
+    -- la richiesta aspetta l'approvatore (briefing + push), la decisione torna
+    -- a chi ha chiesto (briefing + push, finché non gli è stata comunicata).
+    CREATE TABLE IF NOT EXISTS approvazioni (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      da_utente_id INTEGER,
+      da_nome TEXT,
+      a_nome TEXT,
+      a_utente_id INTEGER,
+      richiesta TEXT NOT NULL,
+      riferimento TEXT,
+      urgente INTEGER NOT NULL DEFAULT 0,
+      stato TEXT NOT NULL DEFAULT 'in_attesa',
+      nota_esito TEXT,
+      deciso_da TEXT,
+      esito_comunicato INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      deciso_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_approvazioni_stato ON approvazioni(tenant_id, stato, esito_comunicato);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:

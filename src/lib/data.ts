@@ -1006,6 +1006,145 @@ export function segnaMessaggiTeamConsegnati(ids: number[]) {
   for (const id of ids) marca.run(nowISO(), T(), id);
 }
 
+// ── APPROVAZIONI: richiesta → sì/no → esito a chi ha chiesto ─────────────────
+// Le regole operative ("un preventivo oltre 500€ va approvato") diventano un
+// flusso vero fra persone, con ORION che fa da tramite in entrambe le direzioni.
+
+export type Approvazione = {
+  id: number;
+  da_utente_id: number | null;
+  da_nome: string | null;
+  a_nome: string | null;
+  a_utente_id: number | null;
+  richiesta: string;
+  riferimento: string | null;
+  urgente: number;
+  stato: "in_attesa" | "approvata" | "negata" | "annullata";
+  nota_esito: string | null;
+  deciso_da: string | null;
+  esito_comunicato: number;
+  created_at: string;
+  deciso_at: string | null;
+};
+
+// Il titolare del tenant (per le richieste senza destinatario esplicito).
+export function titolareDelTenant(): { id: number; nome: string | null } | null {
+  const utenti = db().prepare("SELECT id, nome, ruolo FROM utenti WHERE tenant_id = ?").all(T()) as {
+    id: number;
+    nome: string | null;
+    ruolo: string | null;
+  }[];
+  const tit = utenti.find((u) => classeRuolo(u.ruolo) === "titolare");
+  return tit ? { id: tit.id, nome: tit.nome } : null;
+}
+
+export function chiediApprovazione(a: {
+  daUtenteId?: number | null;
+  daNome?: string | null;
+  aNome?: string | null; // vuoto → il titolare
+  richiesta: string;
+  riferimento?: string | null;
+  urgente?: boolean;
+}): Approvazione {
+  let aNome = a.aNome?.trim() || null;
+  let aUtenteId = aNome ? utenteIdPerNome(aNome) : null;
+  if (!aNome) {
+    const tit = titolareDelTenant();
+    aUtenteId = tit?.id ?? null;
+    aNome = tit?.nome ?? "il titolare";
+  }
+  const r = db()
+    .prepare(
+      `INSERT INTO approvazioni (tenant_id, da_utente_id, da_nome, a_nome, a_utente_id, richiesta, riferimento, urgente, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(T(), a.daUtenteId ?? null, a.daNome ?? null, aNome, aUtenteId, a.richiesta, a.riferimento ?? null, a.urgente ? 1 : 0, nowISO());
+  return db().prepare("SELECT * FROM approvazioni WHERE id = ?").get(Number(r.lastInsertRowid)) as Approvazione;
+}
+
+// Le richieste che aspettano LA MIA decisione: indirizzate a me, oppure senza
+// destinatario risolto se sono un titolare (le raccolgo io).
+export function approvazioniPerMe(utenteId: number): Approvazione[] {
+  const u = db().prepare("SELECT ruolo FROM utenti WHERE id = ?").get(utenteId) as { ruolo: string | null } | undefined;
+  const sonoTitolare = classeRuolo(u?.ruolo) === "titolare";
+  return db()
+    .prepare(
+      `SELECT * FROM approvazioni WHERE tenant_id = ? AND stato = 'in_attesa' AND da_utente_id IS NOT ?
+       AND (a_utente_id = ? OR (a_utente_id IS NULL AND ?))
+       ORDER BY urgente DESC, created_at ASC`
+    )
+    .all(T(), utenteId, utenteId, sonoTitolare ? 1 : 0) as Approvazione[];
+}
+
+// Gli esiti delle MIE richieste non ancora comunicati (da consegnare a voce).
+export function esitiApprovazioniDaComunicare(utenteId: number): Approvazione[] {
+  return db()
+    .prepare(
+      `SELECT * FROM approvazioni WHERE tenant_id = ? AND da_utente_id = ?
+       AND stato IN ('approvata','negata') AND esito_comunicato = 0 ORDER BY deciso_at ASC`
+    )
+    .all(T(), utenteId) as Approvazione[];
+}
+
+export function segnaEsitiComunicati(ids: number[]) {
+  if (!ids.length) return;
+  const marca = db().prepare("UPDATE approvazioni SET esito_comunicato = 1 WHERE tenant_id = ? AND id = ?");
+  for (const id of ids) marca.run(T(), id);
+}
+
+// Decide una richiesta. Può farlo il destinatario o un titolare; ritorna null
+// se la richiesta non esiste o chi decide non è autorizzato.
+export function decidiApprovazione(
+  id: number,
+  d: { esito: "approvata" | "negata"; nota?: string | null; decisoDaId: number }
+): Approvazione | null {
+  const a = db().prepare("SELECT * FROM approvazioni WHERE tenant_id = ? AND id = ?").get(T(), id) as Approvazione | undefined;
+  if (!a || a.stato !== "in_attesa") return null;
+  const u = db().prepare("SELECT nome, ruolo FROM utenti WHERE id = ?").get(d.decisoDaId) as
+    | { nome: string | null; ruolo: string | null }
+    | undefined;
+  const autorizzato = a.a_utente_id === d.decisoDaId || classeRuolo(u?.ruolo) === "titolare";
+  if (!autorizzato) return null;
+  db()
+    .prepare("UPDATE approvazioni SET stato = ?, nota_esito = ?, deciso_da = ?, deciso_at = ? WHERE tenant_id = ? AND id = ?")
+    .run(d.esito, d.nota ?? null, u?.nome ?? null, nowISO(), T(), id);
+  return db().prepare("SELECT * FROM approvazioni WHERE id = ?").get(id) as Approvazione;
+}
+
+export function listApprovazioni(opts: { soloAttese?: boolean } = {}): Approvazione[] {
+  return db()
+    .prepare(
+      `SELECT * FROM approvazioni WHERE tenant_id = ?${opts.soloAttese ? " AND stato = 'in_attesa'" : ""}
+       ORDER BY created_at DESC LIMIT 50`
+    )
+    .all(T()) as Approvazione[];
+}
+
+// ── GIORNALE DI BORDO: cosa è successo oggi in azienda ───────────────────────
+// Aggrega ciò che ORION già registra (eventi, compiti, consegne, approvazioni,
+// appuntamenti) nella cronaca di UNA giornata. Niente importi: non è finanza.
+export function giornaleDiBordo(giorno?: string) {
+  const g = (giorno ?? new Date().toISOString()).slice(0, 10);
+  const t = T();
+  const eventi = db()
+    .prepare("SELECT tipo, soggetto, descrizione, created_at FROM eventi WHERE tenant_id = ? AND substr(created_at,1,10) = ? ORDER BY created_at ASC LIMIT 200")
+    .all(t, g) as { tipo: string; soggetto: string | null; descrizione: string; created_at: string }[];
+  const compitiChiusi = db()
+    .prepare("SELECT titolo, assegnatario FROM compiti WHERE tenant_id = ? AND stato = 'completato' AND substr(updated_at,1,10) = ? ORDER BY updated_at ASC")
+    .all(t, g) as { titolo: string; assegnatario: string | null }[];
+  const compitiNuovi = db()
+    .prepare("SELECT titolo, assegnatario, scadenza FROM compiti WHERE tenant_id = ? AND substr(created_at,1,10) = ? ORDER BY created_at ASC")
+    .all(t, g) as { titolo: string; assegnatario: string | null; scadenza: string | null }[];
+  const consegne = db()
+    .prepare("SELECT reparto, da_nome, completato, in_sospeso, problemi FROM consegne WHERE tenant_id = ? AND substr(created_at,1,10) = ? ORDER BY created_at ASC")
+    .all(t, g) as { reparto: string | null; da_nome: string | null; completato: string | null; in_sospeso: string | null; problemi: string | null }[];
+  const approvazioni = db()
+    .prepare("SELECT richiesta, da_nome, stato, deciso_da FROM approvazioni WHERE tenant_id = ? AND ((deciso_at IS NOT NULL AND substr(deciso_at,1,10) = ?) OR substr(created_at,1,10) = ?) ORDER BY created_at ASC")
+    .all(t, g, g) as { richiesta: string; da_nome: string | null; stato: string; deciso_da: string | null }[];
+  const appuntamenti = listAppuntamenti(g, g);
+  return { giorno: g, eventi, compitiChiusi, compitiNuovi, consegne, approvazioni, appuntamenti: appuntamenti.length };
+}
+
 // Briefing intelligente SCOPED sul ruolo/reparto di chi apre ORION in azienda.
 export function briefingAzienda(ruolo?: string | null, reparto?: string | null) {
   const oggi = new Date().toISOString().slice(0, 10);

@@ -79,6 +79,13 @@ import {
   messaggiTeamPerUtente,
   segnaMessaggiTeamConsegnati,
   utenteIdPerNome,
+  chiediApprovazione,
+  approvazioniPerMe,
+  esitiApprovazioniDaComunicare,
+  segnaEsitiComunicati,
+  decidiApprovazione,
+  listApprovazioni,
+  giornaleDiBordo,
   type AreaPermessi,
   type ClasseRuolo,
   type VoceMemoria,
@@ -545,6 +552,50 @@ export const TOOLS: Anthropic.Tool[] = [
         urgente: { type: "boolean" },
       },
       required: ["testo"],
+    },
+  },
+  {
+    name: "chiedi_approvazione",
+    description:
+      "AZIENDA — FLUSSO DI APPROVAZIONE. Inoltra una RICHIESTA che per le regole aziendali serve l'ok di qualcuno ('un preventivo oltre 500€ va approvato', 'chiedi al titolare se posso rimandare la consegna'). ORION la porta all'approvatore (briefing + notifica sul suo dispositivo) e riporterà l'esito a chi ha chiesto, in automatico. Passa 'richiesta' (testo chiaro e completo: cosa, per chi, perché, cifre se servono), 'a' (nome dell'approvatore; se non indicato va al TITOLARE), 'riferimento' (es. 'ordine 245') e urgente. USALO ANCHE DI TUA INIZIATIVA: se l'utente ti chiede di fare qualcosa che le regole operative dicono di far approvare, proponi tu di inoltrare la richiesta invece di rifiutare o procedere. A voce conferma in una frase ('Richiesta inoltrata al titolare: ti dico appena risponde').",
+    input_schema: {
+      type: "object",
+      properties: {
+        richiesta: { type: "string", description: "La richiesta, completa e chiara" },
+        a: { type: "string", description: "Nome dell'approvatore (default: il titolare)" },
+        riferimento: { type: "string", description: "Catena/riferimento, es. 'ordine 245'" },
+        urgente: { type: "boolean" },
+      },
+      required: ["richiesta"],
+    },
+  },
+  {
+    name: "rispondi_approvazione",
+    description:
+      "AZIENDA — FLUSSO DI APPROVAZIONE. Registra la DECISIONE su una richiesta in attesa: quando l'approvatore (il destinatario o un titolare) dice 'approvala', 'va bene', 'digli di no', 'negata perché…'. Passa id (lo trovi nel briefing o con mostra_approvazioni), esito ('approvata'|'negata') e una eventuale nota con la motivazione (utile a chi ha chiesto). ORION riporta l'esito al richiedente (briefing + notifica). Se chi parla non è autorizzato a decidere, lo strumento rifiuta: spiegalo con garbo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        id: { type: "number" },
+        esito: { type: "string", enum: ["approvata", "negata"] },
+        nota: { type: "string", description: "Motivazione/condizioni della decisione" },
+      },
+      required: ["id", "esito"],
+    },
+  },
+  {
+    name: "mostra_approvazioni",
+    description:
+      "AZIENDA — FLUSSO DI APPROVAZIONE. Elenca le richieste di approvazione: quelle IN ATTESA della decisione dell'utente corrente e le ultime decise. Usalo per 'ho richieste da approvare?', 'a che punto è la mia richiesta?', 'mostrami le approvazioni'. Riassumile a voce (chi chiede, cosa, da quanto), con l'id per decidere.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "giornale_di_bordo",
+    description:
+      "AZIENDA — GIORNALE DI BORDO. La cronaca di UNA giornata in azienda: cosa è successo (eventi in ordine), compiti creati e completati, consegne di turno con i problemi, approvazioni chieste/decise, quanti appuntamenti. Usalo per 'cosa è successo oggi?', 'com'è andata la giornata?', 'il resoconto di ieri', 'riepilogo della settimana scorsa' (chiamalo per il giorno richiesto, formato YYYY-MM-DD; default oggi). Racconta a voce i 3-4 fatti salienti (problemi prima di tutto) e lascia i dettagli allo schema a schermo. Niente importi: per quelli c'è l'analisi economica (area riservata).",
+    input_schema: {
+      type: "object",
+      properties: { giorno: { type: "string", description: "YYYY-MM-DD (default oggi)" } },
     },
   },
   {
@@ -1851,6 +1902,134 @@ const handlers: Record<string, Handler> = {
     };
   },
 
+  // ── Flusso di approvazione ──────────────────────────────────────────────────
+  chiedi_approvazione: async (input, ctx) => {
+    if (!getAzienda()) return { result: { ok: false, errore: "Le approvazioni valgono solo negli ambienti aziendali." } };
+    const richiesta = String(input.richiesta ?? "").trim();
+    if (!richiesta) return { result: { ok: false, errore: "Serve il testo della richiesta." } };
+    const daNome = ctx.utenteId ? getUtente(ctx.utenteId)?.nome ?? null : null;
+    const a = chiediApprovazione({
+      daUtenteId: ctx.utenteId ?? null,
+      daNome,
+      aNome: input.a ? String(input.a) : null,
+      richiesta,
+      riferimento: input.riferimento ? String(input.riferimento) : null,
+      urgente: Boolean(input.urgente),
+    });
+    logEvento({
+      tipo: "approvazione_richiesta",
+      descrizione: `${daNome ?? "Qualcuno"} chiede a ${a.a_nome ?? "il titolare"}: ${richiesta.slice(0, 120)}`,
+      soggetto: a.a_nome,
+      riferimento: a.riferimento,
+    });
+    // L'approvatore lo scopre subito sul suo dispositivo (e comunque al briefing).
+    if (a.a_utente_id && a.a_utente_id !== ctx.utenteId) {
+      try {
+        const { inviaPushAUtente } = await import("../push");
+        await inviaPushAUtente(a.a_utente_id, {
+          titolo: a.urgente ? "Approvazione URGENTE richiesta" : "Richiesta di approvazione",
+          corpo: `${daNome ?? "Un collega"}: ${richiesta.slice(0, 120)}${richiesta.length > 120 ? "…" : ""}`,
+          url: "/",
+        });
+      } catch {
+        /* push non configurate */
+      }
+    }
+    return {
+      result: {
+        ok: true,
+        id: a.id,
+        approvatore: a.a_nome,
+        account_riconosciuto: Boolean(a.a_utente_id),
+        nota: "Richiesta inoltrata: l'esito tornerà a chi ha chiesto in automatico. Conferma in una frase.",
+      },
+    };
+  },
+
+  rispondi_approvazione: async (input, ctx) => {
+    if (!ctx.utenteId) return { result: { ok: false, errore: "serve_utente" } };
+    const esito = String(input.esito ?? "") as "approvata" | "negata";
+    if (esito !== "approvata" && esito !== "negata") return { result: { ok: false, errore: "Esito valido: approvata | negata." } };
+    const a = decidiApprovazione(Number(input.id), {
+      esito,
+      nota: input.nota ? String(input.nota) : null,
+      decisoDaId: ctx.utenteId,
+    });
+    if (!a)
+      return {
+        result: {
+          ok: false,
+          errore: "non_autorizzato_o_gia_decisa",
+          nota: "O la richiesta non esiste/è già stata decisa, o l'utente corrente non è il destinatario né un titolare. Spiegalo con garbo.",
+        },
+      };
+    logEvento({
+      tipo: "approvazione_decisa",
+      descrizione: `${a.deciso_da ?? "Qualcuno"} ha ${esito === "approvata" ? "APPROVATO" : "NEGATO"}: ${a.richiesta.slice(0, 120)}${a.nota_esito ? ` (${a.nota_esito})` : ""}`,
+      soggetto: a.da_nome,
+      riferimento: a.riferimento,
+    });
+    // Chi ha chiesto lo scopre subito (e comunque al suo prossimo briefing).
+    if (a.da_utente_id) {
+      try {
+        const { inviaPushAUtente } = await import("../push");
+        await inviaPushAUtente(a.da_utente_id, {
+          titolo: esito === "approvata" ? "Richiesta APPROVATA ✓" : "Richiesta non approvata",
+          corpo: `${a.deciso_da ?? "Il responsabile"}: ${a.richiesta.slice(0, 100)}${a.nota_esito ? ` — ${a.nota_esito}` : ""}`,
+          url: "/",
+        });
+      } catch {
+        /* push non configurate */
+      }
+    }
+    return { result: { ok: true, id: a.id, esito, richiedente: a.da_nome, nota: "Esito registrato e riportato al richiedente. Conferma in una frase." } };
+  },
+
+  mostra_approvazioni: (_input, ctx) => {
+    if (!getAzienda()) return { result: { ok: true, per_me: [], recenti: [] } };
+    const perMe = ctx.utenteId ? approvazioniPerMe(ctx.utenteId) : [];
+    const recenti = listApprovazioni().slice(0, 10);
+    return {
+      result: {
+        ok: true,
+        per_me: perMe.map((a) => ({ id: a.id, da: a.da_nome, richiesta: a.richiesta, urgente: a.urgente === 1, quando: a.created_at })),
+        recenti: recenti.map((a) => ({ id: a.id, da: a.da_nome, a: a.a_nome, richiesta: a.richiesta, stato: a.stato, esito_nota: a.nota_esito })),
+      },
+    };
+  },
+
+  // ── Giornale di bordo ───────────────────────────────────────────────────────
+  giornale_di_bordo: (input) => {
+    if (!getAzienda()) return { result: { ok: false, errore: "Il giornale di bordo vale negli ambienti aziendali (per i singoli c'è il briefing)." } };
+    const g = giornaleDiBordo(input.giorno ? String(input.giorno) : undefined);
+    // Lo schema a schermo riusa il pannello esistente: rami = capitoli della giornata.
+    const rami: { titolo: string; punti: string[] }[] = [];
+    if (g.consegne.length)
+      rami.push({
+        titolo: "Consegne di turno",
+        punti: g.consegne.map((c) => `${c.da_nome ?? "?"}${c.reparto ? ` (${c.reparto})` : ""}: ${c.problemi ? `⚠ ${c.problemi}` : c.completato ?? "ok"}`),
+      });
+    if (g.approvazioni.length)
+      rami.push({
+        titolo: "Approvazioni",
+        punti: g.approvazioni.map((a) => `${a.da_nome ?? "?"}: ${a.richiesta.slice(0, 60)} → ${a.stato}${a.deciso_da ? ` (${a.deciso_da})` : ""}`),
+      });
+    if (g.compitiChiusi.length)
+      rami.push({ titolo: `Compiti completati (${g.compitiChiusi.length})`, punti: g.compitiChiusi.map((c) => `${c.titolo}${c.assegnatario ? ` — ${c.assegnatario}` : ""}`) });
+    if (g.compitiNuovi.length)
+      rami.push({ titolo: `Compiti nuovi (${g.compitiNuovi.length})`, punti: g.compitiNuovi.map((c) => `${c.titolo}${c.assegnatario ? ` — ${c.assegnatario}` : ""}`) });
+    if (g.eventi.length)
+      rami.push({
+        titolo: "Filo degli eventi",
+        punti: g.eventi.slice(0, 14).map((e) => `${e.created_at.slice(11, 16)} ${e.descrizione.slice(0, 70)}`),
+      });
+    const dati = { titolo: `Giornale di bordo — ${g.giorno}`, rami };
+    return {
+      result: { ok: true, ...g },
+      ...(rami.length ? { vista: { tipo: "schema", dati } as Vista } : {}),
+    };
+  },
+
   // ── Aree riservate (permessi per ruolo) ─────────────────────────────────────
   imposta_permessi: (input) => {
     const area = String(input.area ?? "") as AreaPermessi;
@@ -2616,13 +2795,23 @@ const handlers: Record<string, Handler> = {
       // STAFFETTA: i messaggi lasciati dai colleghi arrivano col buongiorno.
       const messaggi = messaggiTeamPerUtente(ctx.utenteId);
       segnaMessaggiTeamConsegnati(messaggi.map((m) => m.id));
+      // APPROVAZIONI: le richieste che aspettano la MIA decisione + gli esiti
+      // delle MIE richieste (comunicati una volta sola).
+      const daApprovare = approvazioniPerMe(ctx.utenteId);
+      const esiti = esitiApprovazioniDaComunicare(ctx.utenteId);
+      segnaEsitiComunicati(esiti.map((e) => e.id));
       return {
         result: {
           ...dati,
           azienda: az,
           messaggi_team: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
-          ...(messaggi.length
-            ? { nota_messaggi: "Consegna a voce i messaggi_team all'inizio del briefing ('Marco ti ha lasciato detto che…'), prima gli urgenti." }
+          approvazioni_da_decidere: daApprovare.map((a) => ({ id: a.id, da: a.da_nome, richiesta: a.richiesta, urgente: a.urgente === 1 })),
+          esiti_mie_richieste: esiti.map((a) => ({ richiesta: a.richiesta, esito: a.stato, da: a.deciso_da, nota: a.nota_esito })),
+          ...(messaggi.length || daApprovare.length || esiti.length
+            ? {
+                nota_team:
+                  "All'inizio del briefing consegna a voce, in quest'ordine: gli esiti_mie_richieste ('Il titolare ha approvato…'), i messaggi_team ('Marco ti ha lasciato detto che…', prima gli urgenti), e le approvazioni_da_decidere ('C'è una richiesta di Laura che aspetta il tuo ok…').",
+              }
             : {}),
         },
         vista: { tipo: "briefing", dati },
