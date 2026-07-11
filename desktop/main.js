@@ -422,7 +422,7 @@ ipcMain.handle("os:gestiMouse", (_e, d) => {
   if (!accessibilitaOk(false)) return Promise.resolve({ ok: false, errore: "accessibilita" });
   const x = Math.round((d && d.x) || 0);
   const y = Math.round((d && d.y) || 0);
-  const cmd = { punta: "PUNTA", giu: "GIU", trascina: "TRASCINA", su: "SU" }[d && d.op];
+  const cmd = { punta: "PUNTA", giu: "GIU", trascina: "TRASCINA", su: "SU", destro: "DESTRO" }[d && d.op];
   if (!cmd) return Promise.resolve({ ok: false, errore: "op sconosciuta" });
   return axComando(`${cmd}|${x}|${y}`, 2000);
 });

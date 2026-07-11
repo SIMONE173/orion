@@ -10,8 +10,17 @@ import { useEffect, useRef } from "react";
 // Pinch misurato come RAPPORTO (distanza pollice-indice / dimensione della mano):
 // così è indipendente da quanto la mano è lontana/piccola nell'inquadratura → una
 // mano aperta non viene più scambiata per un pinch. Isteresi per stabilità.
-const PINCH_ON = 0.26; // pinch SOLO a dita davvero unite (prima scattava troppo presto)
-const PINCH_OFF = 0.42; // si rilascia aprendo poco → click e doppio-click facili
+// Modello a MOUSE:
+// · puntamento = punta dell'indice (un pallino)
+// · CLICK SINISTRO = "cenno" dell'indice: lo pieghi (tap nell'aria) e torni su
+// · TRASCINA = pollice+indice uniti (due cerchietti) → sposti finestre/file/app
+// · TASTO DESTRO = pollice+medio uniti
+const DRAG_ON = 0.26; // pollice+indice uniti = trascina (soglia rapporto)
+const DRAG_OFF = 0.42;
+const RCLICK_ON = 0.26; // pollice+MEDIO uniti = tasto destro
+const RCLICK_OFF = 0.42;
+const TAP_ARMA = 0.68; // indice ESTESO → pronto a cliccare (rapporto lunghezza/mano)
+const TAP_SCATTA = 0.5; // indice che si PIEGA (cenno) → scatta il click sinistro
 const SENSIBILITA = 1.9; // pallino un pelo più lento e preciso da guidare
 const VERSIONE_WASM = "0.10.35";
 
@@ -57,7 +66,13 @@ type Finestra = {
   w: number;
   h: number;
 };
-type Mano = { cx: number; cy: number; sx: number; sy: number; pinch: boolean };
+type Mano = {
+  cx: number; cy: number; sx: number; sy: number; // puntatore = punta dell'indice
+  tcx: number; tcy: number; // punta del pollice (per i due cerchietti del trascinamento)
+  drag: boolean; // pollice+indice uniti → trascina
+  destro: boolean; // pollice+medio uniti → tasto destro
+  curl: number; // estensione dell'indice (per il cenno del click)
+};
 
 export default function GestiOverlay() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -77,12 +92,18 @@ export default function GestiOverlay() {
     let landmarker: { detectForVideo: (v: HTMLVideoElement, t: number) => { landmarks?: { x: number; y: number }[][] }; close: () => void } | null = null;
     let stream: MediaStream | null = null;
     const filtri: OneEuro[] = [];
-    const pinchStato = [false, false];
+    const dragStato = [false, false]; // isteresi pollice+indice (trascina)
+    const rclickStato = [false, false]; // isteresi pollice+medio (tasto destro)
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
     let resize: { id: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
-    let selezionata: string | null = null; // finestra sotto il cursore (pallino che pulsa)
-    let mouseGiu = false; // il tasto virtuale è premuto (pinch tenuto)
+    let selezionata: string | null = null; // finestra sotto il puntatore (pallino che pulsa)
+    let mouseGiu = false; // il tasto sinistro è premuto (trascinamento in corso)
     let ultimaPos = { sx: 0, sy: 0 };
+    let tapArmato = false; // indice esteso → pronto a far scattare un click col cenno
+    let tapPos = { sx: 0, sy: 0, cx: 0, cy: 0 }; // dove parte il click (congelato a dito esteso)
+    let rclickArmato = false; // evita ripetizioni del tasto destro finché il pinch resta chiuso
+    let flashT = -1000; // istante dell'ultimo click, per il cerchietto-feedback
+    let flashPos = { cx: 0, cy: 0 };
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -109,16 +130,20 @@ export default function GestiOverlay() {
         pompaMouse();
       });
     };
-    const mouse = (op: "punta" | "giu" | "trascina" | "su", sx: number, sy: number) => {
+    const mouse = (op: "punta" | "giu" | "trascina" | "su" | "destro", sx: number, sy: number) => {
       const x = Math.round(sx);
       const y = Math.round(sy);
-      if (op === "giu" || op === "su") {
-        movePending = null; // scarta un movimento in coda a cavallo della transizione
-        transizioni.push({ op, x, y });
-      } else {
+      if (op === "punta" || op === "trascina") {
         movePending = { op, x, y };
+      } else {
+        movePending = null; // le transizioni (giu/su/destro) non si perdono e restano in ordine
+        transizioni.push({ op, x, y });
       }
       pompaMouse();
+    };
+    const flash = (cx: number, cy: number) => {
+      flashT = performance.now();
+      flashPos = { cx, cy };
     };
 
     // Resize delle finestre di ALTRE app: one-in-flight, l'ultimo vince.
@@ -217,35 +242,81 @@ export default function GestiOverlay() {
           ctx.restore();
         }
       }
-      for (const m of mani) {
+      // Flash del click: un cerchietto che si espande e svanisce.
+      const now = performance.now();
+      if (now - flashT < 220) {
+        const k = (now - flashT) / 220;
+        ctx.save();
+        ctx.globalAlpha = (1 - k) * 0.9;
+        ctx.strokeStyle = "#22d3ee";
+        ctx.lineWidth = 3;
+        ctx.shadowColor = "#22d3ee";
+        ctx.shadowBlur = 12;
         ctx.beginPath();
-        ctx.arc(m.cx, m.cy, m.pinch ? 11 : 17, 0, Math.PI * 2);
-        ctx.strokeStyle = m.pinch ? "#22d3ee" : "rgba(34,211,238,0.55)";
-        ctx.lineWidth = m.pinch ? 4 : 2;
+        ctx.arc(flashPos.cx, flashPos.cy, 8 + k * 22, 0, Math.PI * 2);
         ctx.stroke();
-        if (m.pinch) {
-          ctx.fillStyle = "rgba(34,211,238,0.35)";
+        ctx.restore();
+      }
+
+      for (const m of mani) {
+        if (m.drag) {
+          // TRASCINAMENTO: due cerchietti (indice + pollice) uniti da una linea.
+          ctx.save();
+          ctx.strokeStyle = "#22d3ee";
+          ctx.shadowColor = "#22d3ee";
+          ctx.shadowBlur = 10;
+          ctx.lineWidth = 2;
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(m.cx, m.cy);
+          ctx.lineTo(m.tcx, m.tcy);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = 3;
+          for (const [px, py] of [[m.cx, m.cy], [m.tcx, m.tcy]] as const) {
+            ctx.beginPath();
+            ctx.arc(px, py, 9, 0, Math.PI * 2);
+            ctx.fillStyle = "rgba(34,211,238,0.30)";
+            ctx.fill();
+            ctx.stroke();
+          }
+          ctx.restore();
+        } else {
+          // PUNTATORE: anello + centro preciso (il pallino celeste).
+          ctx.save();
+          ctx.shadowColor = "#22d3ee";
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(m.cx, m.cy, 15, 0, Math.PI * 2);
+          ctx.strokeStyle = m.destro ? "#a78bfa" : "rgba(34,211,238,0.6)";
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(m.cx, m.cy, 3.5, 0, Math.PI * 2);
+          ctx.fillStyle = m.destro ? "#a78bfa" : "#22d3ee";
           ctx.fill();
+          ctx.restore();
         }
       }
     };
 
     const gestisci = (mani: Mano[]) => {
-      const pin = mani.filter((m) => m.pinch);
-      const cursore = mani[0] ?? null;
-      if (cursore) {
-        const f = sotto(cursore.sx, cursore.sy);
+      const dragMani = mani.filter((m) => m.drag);
+      const m = mani[0] ?? null;
+      if (m) {
+        const f = sotto(m.sx, m.sy);
         selezionata = f ? f.id : null;
-        ultimaPos = { sx: cursore.sx, sy: cursore.sy };
+        ultimaPos = { sx: m.sx, sy: m.sy };
       }
 
-      // DUE MANI in pinch → RESIZE della finestra sotto (pannello ORION o qualsiasi app).
-      if (pin.length >= 2) {
+      // DUE MANI in pinch pollice-indice → RESIZE della finestra sotto (ORION o qualsiasi app).
+      if (dragMani.length >= 2) {
         if (mouseGiu) {
-          mouse("su", ultimaPos.sx, ultimaPos.sy); // chiudi un eventuale trascinamento
+          mouse("su", ultimaPos.sx, ultimaPos.sy);
           mouseGiu = false;
         }
-        const [a, b] = pin;
+        tapArmato = false;
+        const [a, b] = dragMani;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
           const f = selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
@@ -265,27 +336,54 @@ export default function GestiOverlay() {
       }
       resize = null;
 
-      // UNA MANO (o zero) → MOUSE VIRTUALE su tutto lo schermo.
-      const m = mani[0];
       if (!m) {
         if (mouseGiu) {
-          mouse("su", ultimaPos.sx, ultimaPos.sy); // la mano è sparita: non lasciare il tasto premuto
+          mouse("su", ultimaPos.sx, ultimaPos.sy); // mano sparita: non lasciare il tasto premuto
           mouseGiu = false;
         }
+        tapArmato = false;
         return;
       }
-      if (m.pinch && !mouseGiu) {
-        mouse("giu", m.sx, m.sy); // pinch = tasto giù (click/doppio/trascina lo decide il tempo)
-        mouseGiu = true;
-      } else if (!m.pinch && mouseGiu) {
+
+      // TRASCINAMENTO (pollice+indice): tasto sinistro tenuto giù + movimento.
+      if (m.drag) {
+        if (!mouseGiu) {
+          mouse("giu", m.sx, m.sy);
+          mouseGiu = true;
+        } else {
+          mouse("trascina", m.sx, m.sy);
+        }
+        tapArmato = false;
+        return;
+      }
+      if (mouseGiu) {
         mouse("su", m.sx, m.sy);
         mouseGiu = false;
-      } else if (m.pinch) {
-        mouse("trascina", m.sx, m.sy);
       }
-      // HOVER (dito senza pinch): NON muovo il cursore reale → si muove SOLO il
-      // pallino celeste. Il cursore vero agisce solo quando pinchi, e il click
-      // parte esatto dove sta il pallino (niente cursorino che gira per lo schermo).
+
+      // TASTO DESTRO (pollice+medio): uno scatto per gesto.
+      if (m.destro) {
+        if (!rclickArmato) {
+          mouse("destro", m.sx, m.sy);
+          flash(m.cx, m.cy);
+          rclickArmato = true;
+        }
+        return; // niente click sinistro mentre fai il destro
+      }
+      rclickArmato = false;
+
+      // CLICK SINISTRO = CENNO dell'indice: si arma a dito esteso (memorizzando il
+      // punto), scatta quando l'indice si piega. Il puntatore NON si sposta durante
+      // il cenno perché il click parte dal punto congelato.
+      if (m.curl > TAP_ARMA) {
+        tapArmato = true;
+        tapPos = { sx: m.sx, sy: m.sy, cx: m.cx, cy: m.cy };
+      } else if (tapArmato && m.curl < TAP_SCATTA) {
+        mouse("giu", tapPos.sx, tapPos.sy);
+        mouse("su", tapPos.sx, tapPos.sy); // due tap ravvicinati = doppio click (lo rileva il daemon)
+        flash(tapPos.cx, tapPos.cy);
+        tapArmato = false;
+      }
     };
 
     const loop = () => {
@@ -303,21 +401,32 @@ export default function GestiOverlay() {
       const lms = res.landmarks ?? [];
       for (let i = 0; i < Math.min(2, lms.length); i++) {
         const lm = lms[i];
-        // rapporto pinch = distanza pollice(4)-indice(8) / dimensione mano (polso 0 → nocca media 9)
+        // Riferimento = dimensione mano (polso 0 → nocca media 9): rende tutto
+        // indipendente da quanto la mano è lontana dalla telecamera.
         const ref = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y) || 0.0001;
-        const ratio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref;
-        const era = pinchStato[i];
-        const ora = era ? ratio < PINCH_OFF : ratio < PINCH_ON;
-        pinchStato[i] = ora;
-        const ax = 0.5 + ((lm[4].x + lm[8].x) / 2 - 0.5) * SENSIBILITA;
-        const ay = 0.5 + ((lm[4].y + lm[8].y) / 2 - 0.5) * SENSIBILITA;
+        const dragRatio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref; // pollice-indice
+        const rclickRatio = Math.hypot(lm[4].x - lm[12].x, lm[4].y - lm[12].y) / ref; // pollice-medio
+        const curl = Math.hypot(lm[8].x - lm[5].x, lm[8].y - lm[5].y) / ref; // estensione indice (tip 8 → nocca 5)
+        const drag = dragStato[i] ? dragRatio < DRAG_OFF : dragRatio < DRAG_ON;
+        dragStato[i] = drag;
+        // Il tasto destro non deve scattare mentre trascini: se sei in drag, ignora.
+        const destro = !drag && (rclickStato[i] ? rclickRatio < RCLICK_OFF : rclickRatio < RCLICK_ON);
+        rclickStato[i] = destro;
+        // Puntatore = punta dell'INDICE (landmark 8).
+        const ax = 0.5 + (lm[8].x - 0.5) * SENSIBILITA;
+        const ay = 0.5 + (lm[8].y - 0.5) * SENSIBILITA;
         if (!filtri[i * 2]) {
           filtri[i * 2] = new OneEuro();
           filtri[i * 2 + 1] = new OneEuro();
         }
         const cx = Math.max(0, Math.min(window.innerWidth, filtri[i * 2].filtra((1 - ax) * window.innerWidth, t)));
         const cy = Math.max(0, Math.min(window.innerHeight, filtri[i * 2 + 1].filtra(ay * window.innerHeight, t)));
-        mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, pinch: ora });
+        // Punta del pollice (per i due cerchietti del trascinamento), stessa mappatura.
+        const atx = 0.5 + (lm[4].x - 0.5) * SENSIBILITA;
+        const aty = 0.5 + (lm[4].y - 0.5) * SENSIBILITA;
+        const tcx = Math.max(0, Math.min(window.innerWidth, (1 - atx) * window.innerWidth));
+        const tcy = Math.max(0, Math.min(window.innerHeight, aty * window.innerHeight));
+        mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, tcx, tcy, drag, destro, curl });
       }
       disegna(mani);
       gestisci(mani);

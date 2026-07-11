@@ -92,6 +92,15 @@ function run() {
         ultimoSu = { t: Date.now(), x: x, y: y };
         return { ok: true };
       }
+      if (cmd === "DESTRO") {
+        const x = Number(p[1]);
+        const y = Number(p[2]);
+        const giu = $.CGEventCreateMouseEvent($(), $.kCGEventRightMouseDown, { x: x, y: y }, $.kCGMouseButtonRight);
+        $.CGEventPost($.kCGHIDEventTap, giu);
+        const su = $.CGEventCreateMouseEvent($(), $.kCGEventRightMouseUp, { x: x, y: y }, $.kCGMouseButtonRight);
+        $.CGEventPost($.kCGHIDEventTap, su);
+        return { ok: true };
+      }
       if (cmd === "LIST") {
         const lista = [];
         const ps = se.processes.whose({ visible: true })();
