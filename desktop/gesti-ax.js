@@ -14,6 +14,7 @@
 //   TRASCINA|x|y             → { ok }        (movimento col tasto premuto)
 //   SU|x|y                   → { ok }        (tasto sinistro su)
 //   LIST                     → { ok, finestre:[{app,indice,titolo,x,y,w,h}] }
+//   MOVE|app|indice|x|y      → { ok }        (sposta una finestra)
 //   SIZE|app|indice|w|h      → { ok }        (ridimensiona una finestra)
 ObjC.import("Foundation");
 ObjC.import("CoreGraphics");
@@ -137,6 +138,12 @@ function run() {
         const w = finestra(p[1], p[2]);
         if (!w) return { ok: false, errore: "finestra non trovata" };
         w.size = [Number(p[3]), Number(p[4])];
+        return { ok: true };
+      }
+      if (cmd === "MOVE") {
+        const w = finestra(p[1], p[2]);
+        if (!w) return { ok: false, errore: "finestra non trovata" };
+        w.position = [Number(p[3]), Number(p[4])];
         return { ok: true };
       }
       if (cmd === "CLOSE") {

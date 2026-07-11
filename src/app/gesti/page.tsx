@@ -4,23 +4,21 @@ import { useEffect, useRef } from "react";
 
 // Contenuto dell'OVERLAY nativo della Gesture Mode (caricato solo dalla finestra
 // trasparente di ORION Desktop). Traccia le mani in locale (MediaPipe) e manovra
-// le FINESTRE-pannello reali via il bridge window.orionDesktop.gesti*. Disegna solo
-// il cursore (sfondo trasparente). In un browser normale (senza bridge) è no-op.
+// le FINESTRE reali del computer via il bridge window.orionDesktop.gesti*. Disegna
+// solo il pallino (sfondo trasparente). In un browser normale (senza bridge) è no-op.
+//
+// Modello SEMPLICE (come prima, ma su TUTTO il PC, non solo i pannelli di ORION):
+// · si punta muovendo la mano → un solo pallino celeste segue il dito
+// · PINCH (pollice+indice uniti) = AGGANCIA e TRASCINA la finestra sotto il pallino
+//   (pannello di ORION o finestra di qualunque app/sito)
+// · DUE MANI in pinch = RIDIMENSIONA la finestra sotto
+// Niente click del mouse: solo spostare e ridimensionare finestre.
 
 // Pinch misurato come RAPPORTO (distanza pollice-indice / dimensione della mano):
 // così è indipendente da quanto la mano è lontana/piccola nell'inquadratura → una
-// mano aperta non viene più scambiata per un pinch. Isteresi per stabilità.
-// Modello a MOUSE:
-// · puntamento = punta dell'indice (un pallino)
-// · CLICK SINISTRO = "cenno" dell'indice: lo pieghi (tap nell'aria) e torni su
-// · TRASCINA = pollice+indice uniti (due cerchietti) → sposti finestre/file/app
-// · TASTO DESTRO = pollice+medio uniti
-const DRAG_ON = 0.26; // pollice+indice uniti = trascina (soglia rapporto)
-const DRAG_OFF = 0.42;
-const RCLICK_ON = 0.26; // pollice+MEDIO uniti = tasto destro
-const RCLICK_OFF = 0.42;
-const TAP_ARMA = 0.68; // indice ESTESO → pronto a cliccare (rapporto lunghezza/mano)
-const TAP_SCATTA = 0.5; // indice che si PIEGA (cenno) → scatta il click sinistro
+// mano aperta non viene scambiata per un pinch. Isteresi (ON/OFF) per stabilità.
+const PINCH_ON = 0.35; // dita che si uniscono → aggancia
+const PINCH_OFF = 0.55; // dita che si separano → rilascia (più largo: non si stacca da solo)
 const SENSIBILITA = 1.9; // pallino un pelo più lento e preciso da guidare
 const VERSIONE_WASM = "0.10.35";
 
@@ -53,8 +51,7 @@ class OneEuro {
 }
 
 // Una finestra manovrabile: pannello di ORION (via veloce Electron) o finestra di
-// QUALUNQUE app (via Accessibility). Serve solo al RESIZE e al pallino di selezione;
-// i click veri li fa il mouse virtuale sull'app reale sotto l'overlay.
+// QUALUNQUE app (via Accessibility).
 type Finestra = {
   id: string;
   esterna: boolean;
@@ -66,13 +63,7 @@ type Finestra = {
   w: number;
   h: number;
 };
-type Mano = {
-  cx: number; cy: number; sx: number; sy: number; // puntatore = punta dell'indice
-  tcx: number; tcy: number; // punta del pollice (per i due cerchietti del trascinamento)
-  drag: boolean; // pollice+indice uniti → trascina
-  destro: boolean; // pollice+medio uniti → tasto destro
-  curl: number; // estensione dell'indice (per il cenno del click)
-};
+type Mano = { cx: number; cy: number; sx: number; sy: number; pinch: boolean };
 
 export default function GestiOverlay() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -92,18 +83,11 @@ export default function GestiOverlay() {
     let landmarker: { detectForVideo: (v: HTMLVideoElement, t: number) => { landmarks?: { x: number; y: number }[][] }; close: () => void } | null = null;
     let stream: MediaStream | null = null;
     const filtri: OneEuro[] = [];
-    const dragStato = [false, false]; // isteresi pollice+indice (trascina)
-    const rclickStato = [false, false]; // isteresi pollice+medio (tasto destro)
+    const pinchStato = [false, false]; // isteresi del pinch, una per mano
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
+    let grab: { id: string; offX: number; offY: number } | null = null; // finestra agganciata + scarto pallino-origine
     let resize: { id: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
-    let selezionata: string | null = null; // finestra sotto il puntatore (pallino che pulsa)
-    let mouseGiu = false; // il tasto sinistro è premuto (trascinamento in corso)
-    let ultimaPos = { sx: 0, sy: 0 };
-    let tapArmato = false; // indice esteso → pronto a far scattare un click col cenno
-    let tapPos = { sx: 0, sy: 0, cx: 0, cy: 0 }; // dove parte il click (congelato a dito esteso)
-    let rclickArmato = false; // evita ripetizioni del tasto destro finché il pinch resta chiuso
-    let flashT = -1000; // istante dell'ultimo click, per il cerchietto-feedback
-    let flashPos = { cx: 0, cy: 0 };
+    let selezionata: string | null = null; // finestra sotto il pallino (angolo che pulsa)
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -112,41 +96,28 @@ export default function GestiOverlay() {
       };
     }
 
-    // ── MOUSE VIRTUALE: pump one-in-flight ────────────────────────────────────
-    // Le TRANSIZIONI (giu/su) non si perdono MAI e restano in ordine → i click
-    // sono affidabili; i MOVIMENTI (punta/trascina) si accavallano (l'ultimo
-    // vince) → il puntamento resta fluido anche se il daemon è più lento.
-    let mouseInVolo = false;
-    let movePending: { op: string; x: number; y: number } | null = null;
-    const transizioni: { op: string; x: number; y: number }[] = [];
-    const pompaMouse = () => {
-      if (mouseInVolo || !od.gestiMouse) return;
-      const next = transizioni.shift() ?? movePending;
-      if (!next) return;
-      if (next === movePending) movePending = null;
-      mouseInVolo = true;
-      od.gestiMouse(next).catch(() => {}).finally(() => {
-        mouseInVolo = false;
-        pompaMouse();
-      });
-    };
-    const mouse = (op: "punta" | "giu" | "trascina" | "su" | "destro", sx: number, sy: number) => {
-      const x = Math.round(sx);
-      const y = Math.round(sy);
-      if (op === "punta" || op === "trascina") {
-        movePending = { op, x, y };
-      } else {
-        movePending = null; // le transizioni (giu/su/destro) non si perdono e restano in ordine
-        transizioni.push({ op, x, y });
-      }
-      pompaMouse();
-    };
-    const flash = (cx: number, cy: number) => {
-      flashT = performance.now();
-      flashPos = { cx, cy };
+    // Spostamento delle finestre di ALTRE app: one-in-flight, l'ultimo vince
+    // (il daemon Accessibility è più lento del frame rate → non accodare all'infinito).
+    let spostaInVolo = false;
+    let spostaPending: { op: string; app?: string; indice?: number; x: number; y: number } | null = null;
+    const spostaEsterna = (f: Finestra, x: number, y: number) => {
+      if (!od.gestiEsterna) return;
+      spostaPending = { op: "sposta", app: f.app, indice: f.indice, x, y };
+      if (spostaInVolo) return;
+      const go = () => {
+        if (!spostaPending) return;
+        const p = spostaPending;
+        spostaPending = null;
+        spostaInVolo = true;
+        od.gestiEsterna(p).catch(() => {}).finally(() => {
+          spostaInVolo = false;
+          go();
+        });
+      };
+      go();
     };
 
-    // Resize delle finestre di ALTRE app: one-in-flight, l'ultimo vince.
+    // Resize delle finestre di ALTRE app: stesso schema one-in-flight.
     let resizeInVolo = false;
     let resizePending: { op: string; app?: string; indice?: number; w: number; h: number } | null = null;
     const ridimensionaEsterna = (f: Finestra, w: number, h: number) => {
@@ -169,7 +140,7 @@ export default function GestiOverlay() {
     const aggiornaBounds = async () => {
       try {
         const r = await od.gestiFinestre();
-        if (resize) return; // durante il resize la posizione ottimistica comanda
+        if (grab || resize) return; // mentre manovri comanda la posizione ottimistica
         const orion: Finestra[] = (r.finestre ?? []).map((f: { tipo: string; x: number; y: number; w: number; h: number }) => ({
           id: `orion:${f.tipo}`,
           esterna: false,
@@ -202,12 +173,21 @@ export default function GestiOverlay() {
       return found;
     };
     const rectDi = (id: string) => bounds.finestre.find((f) => f.id === id) || null;
+    const portaAvanti = (f: Finestra) => {
+      if (!f.esterna) od.gestiAvanti({ tipo: f.tipo }); // ORION: davanti a tutto tranne l'overlay
+    };
 
+    const sposta = (f: Finestra, x: number, y: number) => {
+      f.x = x;
+      f.y = y;
+      if (f.esterna) spostaEsterna(f, x, y);
+      else od.gestiSposta({ tipo: f.tipo, x, y });
+    };
     const ridimensiona = (f: Finestra, w: number, h: number, cx: number, cy: number) => {
       f.w = w;
       f.h = h;
       if (f.esterna) {
-        ridimensionaEsterna(f, w, h); // le app esterne restano ancorate in alto a sinistra
+        ridimensionaEsterna(f, w, h); // le app esterne restano ancorate all'angolo alto-sinistra
       } else {
         od.gestiRidimensiona({ tipo: f.tipo, w, h });
         od.gestiSposta({ tipo: f.tipo, x: cx - w / 2, y: cy - h / 2 });
@@ -223,8 +203,8 @@ export default function GestiOverlay() {
       cv.height = window.innerHeight;
       const ctx = cv.getContext("2d")!;
       ctx.clearRect(0, 0, cv.width, cv.height);
-      // PALLINO che pulsa (si illumina e si spegne) nell'angolo della finestra
-      // SELEZIONATA: indica quale pannello riceve gli swipe, senza bordi invadenti.
+      // PALLINO che pulsa nell'angolo della finestra SELEZIONATA: indica quale
+      // finestra riceverà il pinch, senza bordi invadenti.
       if (selezionata) {
         const f = rectDi(selezionata);
         if (f) {
@@ -242,88 +222,50 @@ export default function GestiOverlay() {
           ctx.restore();
         }
       }
-      // Flash del click: un cerchietto che si espande e svanisce.
-      const now = performance.now();
-      if (now - flashT < 220) {
-        const k = (now - flashT) / 220;
+
+      // UN SOLO pallino per mano (anche col pinch): pieno quando pinchi, anello +
+      // centro quando è aperto.
+      for (const m of mani) {
         ctx.save();
-        ctx.globalAlpha = (1 - k) * 0.9;
-        ctx.strokeStyle = "#22d3ee";
-        ctx.lineWidth = 3;
         ctx.shadowColor = "#22d3ee";
         ctx.shadowBlur = 12;
         ctx.beginPath();
-        ctx.arc(flashPos.cx, flashPos.cy, 8 + k * 22, 0, Math.PI * 2);
+        ctx.arc(m.cx, m.cy, m.pinch ? 11 : 16, 0, Math.PI * 2);
+        ctx.strokeStyle = m.pinch ? "#22d3ee" : "rgba(34,211,238,0.6)";
+        ctx.lineWidth = m.pinch ? 4 : 2.5;
         ctx.stroke();
-        ctx.restore();
-      }
-
-      for (const m of mani) {
-        if (m.drag) {
-          // TRASCINAMENTO: due cerchietti (indice + pollice) uniti da una linea.
-          ctx.save();
-          ctx.strokeStyle = "#22d3ee";
-          ctx.shadowColor = "#22d3ee";
-          ctx.shadowBlur = 10;
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.5;
-          ctx.beginPath();
-          ctx.moveTo(m.cx, m.cy);
-          ctx.lineTo(m.tcx, m.tcy);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-          ctx.lineWidth = 3;
-          for (const [px, py] of [[m.cx, m.cy], [m.tcx, m.tcy]] as const) {
-            ctx.beginPath();
-            ctx.arc(px, py, 9, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(34,211,238,0.30)";
-            ctx.fill();
-            ctx.stroke();
-          }
-          ctx.restore();
+        if (m.pinch) {
+          ctx.fillStyle = "rgba(34,211,238,0.30)";
+          ctx.fill();
         } else {
-          // PUNTATORE: anello + centro preciso (il pallino celeste).
-          ctx.save();
-          ctx.shadowColor = "#22d3ee";
-          ctx.shadowBlur = 12;
-          ctx.beginPath();
-          ctx.arc(m.cx, m.cy, 15, 0, Math.PI * 2);
-          ctx.strokeStyle = m.destro ? "#a78bfa" : "rgba(34,211,238,0.6)";
-          ctx.lineWidth = 2.5;
-          ctx.stroke();
           ctx.beginPath();
           ctx.arc(m.cx, m.cy, 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = m.destro ? "#a78bfa" : "#22d3ee";
+          ctx.fillStyle = "#22d3ee";
           ctx.fill();
-          ctx.restore();
         }
+        ctx.restore();
       }
     };
 
     const gestisci = (mani: Mano[]) => {
-      const dragMani = mani.filter((m) => m.drag);
-      const m = mani[0] ?? null;
-      if (m) {
-        const f = sotto(m.sx, m.sy);
+      const pin = mani.filter((m) => m.pinch);
+      const cursore = pin[0] ?? mani[0] ?? null;
+      if (cursore && !grab && !resize) {
+        const f = sotto(cursore.sx, cursore.sy);
         selezionata = f ? f.id : null;
-        ultimaPos = { sx: m.sx, sy: m.sy };
       }
 
-      // DUE MANI in pinch pollice-indice → RESIZE della finestra sotto (ORION o qualsiasi app).
-      if (dragMani.length >= 2) {
-        if (mouseGiu) {
-          mouse("su", ultimaPos.sx, ultimaPos.sy);
-          mouseGiu = false;
-        }
-        tapArmato = false;
-        const [a, b] = dragMani;
+      // DUE MANI in pinch → RIDIMENSIONA la finestra sotto (ORION o qualsiasi app).
+      if (pin.length >= 2) {
+        grab = null;
+        const [a, b] = pin;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
           const f = selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
           if (f) {
             resize = { id: f.id, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
             selezionata = f.id;
-            if (!f.esterna) od.gestiAvanti({ tipo: f.tipo });
+            portaAvanti(f);
           }
         } else {
           const f = rectDi(resize.id);
@@ -336,53 +278,22 @@ export default function GestiOverlay() {
       }
       resize = null;
 
-      if (!m) {
-        if (mouseGiu) {
-          mouse("su", ultimaPos.sx, ultimaPos.sy); // mano sparita: non lasciare il tasto premuto
-          mouseGiu = false;
-        }
-        tapArmato = false;
-        return;
-      }
-
-      // TRASCINAMENTO (pollice+indice): tasto sinistro tenuto giù + movimento.
-      if (m.drag) {
-        if (!mouseGiu) {
-          mouse("giu", m.sx, m.sy);
-          mouseGiu = true;
+      // UNA MANO in pinch → AGGANCIA e TRASCINA la finestra sotto.
+      if (pin.length === 1) {
+        const m = pin[0];
+        if (!grab) {
+          const f = sotto(m.sx, m.sy);
+          if (f) {
+            grab = { id: f.id, offX: m.sx - f.x, offY: m.sy - f.y };
+            selezionata = f.id;
+            portaAvanti(f);
+          }
         } else {
-          mouse("trascina", m.sx, m.sy);
+          const f = rectDi(grab.id);
+          if (f) sposta(f, m.sx - grab.offX, m.sy - grab.offY);
         }
-        tapArmato = false;
-        return;
-      }
-      if (mouseGiu) {
-        mouse("su", m.sx, m.sy);
-        mouseGiu = false;
-      }
-
-      // TASTO DESTRO (pollice+medio): uno scatto per gesto.
-      if (m.destro) {
-        if (!rclickArmato) {
-          mouse("destro", m.sx, m.sy);
-          flash(m.cx, m.cy);
-          rclickArmato = true;
-        }
-        return; // niente click sinistro mentre fai il destro
-      }
-      rclickArmato = false;
-
-      // CLICK SINISTRO = CENNO dell'indice: si arma a dito esteso (memorizzando il
-      // punto), scatta quando l'indice si piega. Il puntatore NON si sposta durante
-      // il cenno perché il click parte dal punto congelato.
-      if (m.curl > TAP_ARMA) {
-        tapArmato = true;
-        tapPos = { sx: m.sx, sy: m.sy, cx: m.cx, cy: m.cy };
-      } else if (tapArmato && m.curl < TAP_SCATTA) {
-        mouse("giu", tapPos.sx, tapPos.sy);
-        mouse("su", tapPos.sx, tapPos.sy); // due tap ravvicinati = doppio click (lo rileva il daemon)
-        flash(tapPos.cx, tapPos.cy);
-        tapArmato = false;
+      } else {
+        grab = null; // pinch rilasciato → mollo la finestra
       }
     };
 
@@ -401,32 +312,21 @@ export default function GestiOverlay() {
       const lms = res.landmarks ?? [];
       for (let i = 0; i < Math.min(2, lms.length); i++) {
         const lm = lms[i];
-        // Riferimento = dimensione mano (polso 0 → nocca media 9): rende tutto
-        // indipendente da quanto la mano è lontana dalla telecamera.
+        // rapporto pinch = distanza pollice(4)-indice(8) / dimensione mano (polso 0 → nocca media 9)
         const ref = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y) || 0.0001;
-        const dragRatio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref; // pollice-indice
-        const rclickRatio = Math.hypot(lm[4].x - lm[12].x, lm[4].y - lm[12].y) / ref; // pollice-medio
-        const curl = Math.hypot(lm[8].x - lm[5].x, lm[8].y - lm[5].y) / ref; // estensione indice (tip 8 → nocca 5)
-        const drag = dragStato[i] ? dragRatio < DRAG_OFF : dragRatio < DRAG_ON;
-        dragStato[i] = drag;
-        // Il tasto destro non deve scattare mentre trascini: se sei in drag, ignora.
-        const destro = !drag && (rclickStato[i] ? rclickRatio < RCLICK_OFF : rclickRatio < RCLICK_ON);
-        rclickStato[i] = destro;
-        // Puntatore = punta dell'INDICE (landmark 8).
-        const ax = 0.5 + (lm[8].x - 0.5) * SENSIBILITA;
-        const ay = 0.5 + (lm[8].y - 0.5) * SENSIBILITA;
+        const ratio = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / ref;
+        const pinch = pinchStato[i] ? ratio < PINCH_OFF : ratio < PINCH_ON;
+        pinchStato[i] = pinch;
+        // pallino = punto medio tra pollice e indice (come prima)
+        const ax = 0.5 + ((lm[4].x + lm[8].x) / 2 - 0.5) * SENSIBILITA;
+        const ay = 0.5 + ((lm[4].y + lm[8].y) / 2 - 0.5) * SENSIBILITA;
         if (!filtri[i * 2]) {
           filtri[i * 2] = new OneEuro();
           filtri[i * 2 + 1] = new OneEuro();
         }
         const cx = Math.max(0, Math.min(window.innerWidth, filtri[i * 2].filtra((1 - ax) * window.innerWidth, t)));
         const cy = Math.max(0, Math.min(window.innerHeight, filtri[i * 2 + 1].filtra(ay * window.innerHeight, t)));
-        // Punta del pollice (per i due cerchietti del trascinamento), stessa mappatura.
-        const atx = 0.5 + (lm[4].x - 0.5) * SENSIBILITA;
-        const aty = 0.5 + (lm[4].y - 0.5) * SENSIBILITA;
-        const tcx = Math.max(0, Math.min(window.innerWidth, (1 - atx) * window.innerWidth));
-        const tcy = Math.max(0, Math.min(window.innerHeight, aty * window.innerHeight));
-        mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, tcx, tcy, drag, destro, curl });
+        mani.push({ cx, cy, sx: bounds.origin.x + cx, sy: bounds.origin.y + cy, pinch });
       }
       disegna(mani);
       gestisci(mani);

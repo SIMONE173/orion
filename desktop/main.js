@@ -427,13 +427,15 @@ ipcMain.handle("os:gestiMouse", (_e, d) => {
   return axComando(`${cmd}|${x}|${y}`, 2000);
 });
 
-// Ridimensiona una finestra di UN'ALTRA app (le finestre di ORION passano da
-// os:gestiRidimensiona, via veloce Electron).
+// Sposta o ridimensiona una finestra di UN'ALTRA app (le finestre di ORION
+// passano dalle vie veloci Electron os:gestiSposta / os:gestiRidimensiona).
 ipcMain.handle("os:gestiEsterna", (_e, d) => {
   if (!accessibilitaOk(false)) return Promise.resolve({ ok: false, errore: "accessibilita" });
   const appNome = pulisciNomeApp(d && d.app);
   const indice = Math.max(1, Number((d && d.indice) || 1));
   if (!appNome) return Promise.resolve({ ok: false, errore: "app mancante" });
+  if (d && d.op === "sposta")
+    return axComando(`MOVE|${appNome}|${indice}|${Math.round(d.x)}|${Math.round(d.y)}`);
   if (d && d.op === "ridimensiona")
     return axComando(`SIZE|${appNome}|${indice}|${Math.max(240, Math.round(d.w))}|${Math.max(160, Math.round(d.h))}`);
   return Promise.resolve({ ok: false, errore: "op sconosciuta" });
