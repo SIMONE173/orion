@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   gestiRidimensiona: (dati) => ipcRenderer.send("os:gestiRidimensiona", dati),
   gestiChiudi: (dati) => ipcRenderer.send("os:gestiChiudi", dati),
   gestiAvanti: (dati) => ipcRenderer.send("os:gestiAvanti", dati),
+  // Mouse virtuale (dito = mouse vero su tutto il PC) + finestre di altre app.
+  gestiMouse: (dati) => ipcRenderer.invoke("os:gestiMouse", dati),
+  gestiEsterna: (dati) => ipcRenderer.invoke("os:gestiEsterna", dati),
   // Chiusura a comando: finestra (pulsante rosso) o scheda del browser (Cmd+W).
   chiudiFinestra: (dati) => ipcRenderer.invoke("os:chiudiFinestra", dati),
   // Stampa alla stampante di sistema: PDF generato da ORION, o file per nome.

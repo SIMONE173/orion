@@ -158,6 +158,9 @@ function finestraDiTipo(tipo) {
 
 function apriOverlayGesti() {
   if (finestraGesti && !finestraGesti.isDestroyed()) return;
+  // Coi gesti il dito diventa il mouse e manovra qualunque app: serve il permesso
+  // Accessibilità. Alla prima accensione lo chiediamo (no-op se già concesso).
+  if (!accessibilitaOk(false)) accessibilitaOk(true);
   const b = screen.getPrimaryDisplay().bounds;
   finestraGesti = new BrowserWindow({
     x: b.x,
@@ -381,6 +384,23 @@ function axComando(riga, timeoutMs = 4000) {
 
 const pulisciNomeApp = (v) => String(v || "").replace(/[|\n\r]/g, "").trim();
 
+// Elenco delle finestre di TUTTE le app, con cache (~1.2s, una LIST in volo): il
+// polling dei gesti resta leggero anche se System Events è lento.
+let axCacheFin = { t: 0, finestre: [] };
+let axListInVolo = false;
+function finestreEsterne() {
+  if (!accessibilitaOk(false)) return [];
+  const ora = Date.now();
+  if (ora - axCacheFin.t > 1200 && !axListInVolo) {
+    axListInVolo = true;
+    axComando("LIST").then((r) => {
+      axListInVolo = false;
+      if (r && r.ok && Array.isArray(r.finestre)) axCacheFin = { t: Date.now(), finestre: r.finestre };
+    });
+  }
+  return axCacheFin.finestre;
+}
+
 ipcMain.on("os:gestiOn", () => apriOverlayGesti());
 ipcMain.on("os:gestiOff", () => chiudiOverlayGesti());
 ipcMain.handle("os:gestiFinestre", () => {
@@ -391,7 +411,32 @@ ipcMain.handle("os:gestiFinestre", () => {
       const r = f.win.getBounds();
       return { tipo: f.tipo, x: r.x, y: r.y, w: r.width, h: r.height };
     }),
+    esterne: finestreEsterne(),
   };
+});
+
+// MOUSE VIRTUALE: il dito diventa il mouse vero del Mac. op = punta | giu |
+// trascina | su. I clic passano SOTTO l'overlay (che è click-through) e colpiscono
+// l'app reale. Timeout corto: dev'essere fluido.
+ipcMain.handle("os:gestiMouse", (_e, d) => {
+  if (!accessibilitaOk(false)) return Promise.resolve({ ok: false, errore: "accessibilita" });
+  const x = Math.round((d && d.x) || 0);
+  const y = Math.round((d && d.y) || 0);
+  const cmd = { punta: "PUNTA", giu: "GIU", trascina: "TRASCINA", su: "SU" }[d && d.op];
+  if (!cmd) return Promise.resolve({ ok: false, errore: "op sconosciuta" });
+  return axComando(`${cmd}|${x}|${y}`, 2000);
+});
+
+// Ridimensiona una finestra di UN'ALTRA app (le finestre di ORION passano da
+// os:gestiRidimensiona, via veloce Electron).
+ipcMain.handle("os:gestiEsterna", (_e, d) => {
+  if (!accessibilitaOk(false)) return Promise.resolve({ ok: false, errore: "accessibilita" });
+  const appNome = pulisciNomeApp(d && d.app);
+  const indice = Math.max(1, Number((d && d.indice) || 1));
+  if (!appNome) return Promise.resolve({ ok: false, errore: "app mancante" });
+  if (d && d.op === "ridimensiona")
+    return axComando(`SIZE|${appNome}|${indice}|${Math.max(240, Math.round(d.w))}|${Math.max(160, Math.round(d.h))}`);
+  return Promise.resolve({ ok: false, errore: "op sconosciuta" });
 });
 
 // Comando vocale: chiude una finestra (pulsante rosso) o la scheda del browser

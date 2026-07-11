@@ -1329,7 +1329,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "attiva_gesti",
     description:
-      "Attiva la MODALITÀ GESTI: l'utente può manovrare i pannelli di ORION con le mani davanti alla telecamera (pinch pollice+indice per agganciare e spostare un pannello, due mani per ridimensionarlo, rilascio sulla × o in alto per chiuderlo). I pannelli diventano finestre fluttuanti e il layout si ricorda. Usalo quando l'utente dice 'modalità gesti', 'voglio spostare i pannelli con le mani', 'controllo a gesti', 'fammi sistemare le finestre a mano'. È diverso dalla modalità visione (che assiste le attività manuali). A voce di' una frase breve tipo 'Modalità gesti attiva: muovi pure i pannelli con le mani'.",
+      "Attiva la MODALITÀ GESTI: la mano davanti alla telecamera diventa il MOUSE del computer. Il dito muove il cursore su TUTTO lo schermo (non solo i pannelli di ORION: qualsiasi app, sito, il Finder, il Dock); il PINCH (pollice+indice) è il tasto del mouse — pinch veloce = click, due pinch = doppio click (apri app/file), pinch tenuto e trascina = trascinamento (sposta finestre dalla barra del titolo, file nel cestino, selezioni); due mani in pinch = ridimensiona la finestra sotto. Usalo quando l'utente dice 'modalità gesti', 'voglio usare le mani', 'controllo a gesti', 'comandare col dito'. È SOLO Desktop e serve il permesso Accessibilità (lo chiede la prima volta). Diverso dalla modalità visione (che assiste le attività manuali). A voce una frase breve tipo 'Gesti attivi: il dito è il tuo mouse'.",
     input_schema: { type: "object", properties: {} },
   },
   {

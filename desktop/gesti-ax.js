@@ -1,11 +1,22 @@
 // Daemon JXA (lanciato con: osascript -l JavaScript gesti-ax.js).
-// Serve alla CHIUSURA A VOCE di finestre e schede via System Events (richiede
-// il permesso Accessibilità per ORION). Protocollo a righe su stdin/stdout,
-// una risposta JSON per ogni comando:
+// Due mestieri, stesso protocollo a righe su stdin/stdout (una risposta JSON per
+// ogni comando; richiede il permesso Accessibilità per ORION):
+//
+// 1) CHIUSURA A VOCE di finestre e schede (System Events):
 //   CLOSE|app|indice         → { ok }        (pulsante rosso della finestra)
 //   TAB|app                  → { ok }        (Cmd+W: chiude la scheda attiva)
 //   ATTIVA                   → { ok, app }   (app in primo piano)
+//
+// 2) GESTI = MOUSE VIRTUALE su tutto il computer:
+//   PUNTA|x|y                → { ok }        (muove il cursore vero)
+//   GIU|x|y                  → { ok }        (tasto sinistro giù; doppio click
+//                                             automatico se ravvicinato)
+//   TRASCINA|x|y             → { ok }        (movimento col tasto premuto)
+//   SU|x|y                   → { ok }        (tasto sinistro su)
+//   LIST                     → { ok, finestre:[{app,indice,titolo,x,y,w,h}] }
+//   SIZE|app|indice|w|h      → { ok }        (ridimensiona una finestra)
 ObjC.import("Foundation");
+ObjC.import("CoreGraphics");
 
 function run() {
   const se = Application("System Events");
@@ -15,6 +26,9 @@ function run() {
     const s = JSON.stringify(o) + "\n";
     out.writeData($(s).dataUsingEncoding($.NSUTF8StringEncoding));
   };
+  // Le finestre di ORION le manovra già Electron (via veloce): fuori dalla LIST.
+  const ESCLUDI = { ORION: 1, Electron: 1 };
+
   // Nome esatto, altrimenti il primo processo visibile che lo contiene
   // (l'utente dice "Chrome", il processo si chiama "Google Chrome").
   function trovaProcesso(q) {
@@ -40,10 +54,82 @@ function run() {
     return p.windows.at(Math.max(0, (Number(indice) || 1) - 1));
   }
 
+  // ── Mouse virtuale: eventi CG REALI (click e trascinamenti veri) ───────────
+  // Il doppio click nasce da solo: un GIU entro 450ms/14px dall'ultimo SU viene
+  // marcato clickState=2 (è quello che Finder/Dock vogliono per "aprire").
+  let ultimoSu = { t: 0, x: 0, y: 0 };
+  let statoClick = 1;
+  function eventoMouse(tipo, x, y, conStato) {
+    const e = $.CGEventCreateMouseEvent($(), tipo, { x: x, y: y }, $.kCGMouseButtonLeft);
+    if (conStato) $.CGEventSetIntegerValueField(e, $.kCGMouseEventClickState, statoClick);
+    $.CGEventPost($.kCGHIDEventTap, e);
+  }
+
   function esegui(riga) {
     const p = riga.split("|");
     const cmd = p[0];
     try {
+      if (cmd === "PUNTA") {
+        eventoMouse($.kCGEventMouseMoved, Number(p[1]), Number(p[2]), false);
+        return { ok: true };
+      }
+      if (cmd === "GIU") {
+        const x = Number(p[1]);
+        const y = Number(p[2]);
+        const ora = Date.now();
+        statoClick = ora - ultimoSu.t < 450 && Math.hypot(x - ultimoSu.x, y - ultimoSu.y) < 14 ? 2 : 1;
+        eventoMouse($.kCGEventLeftMouseDown, x, y, true);
+        return { ok: true };
+      }
+      if (cmd === "TRASCINA") {
+        eventoMouse($.kCGEventLeftMouseDragged, Number(p[1]), Number(p[2]), true);
+        return { ok: true };
+      }
+      if (cmd === "SU") {
+        const x = Number(p[1]);
+        const y = Number(p[2]);
+        eventoMouse($.kCGEventLeftMouseUp, x, y, true);
+        ultimoSu = { t: Date.now(), x: x, y: y };
+        return { ok: true };
+      }
+      if (cmd === "LIST") {
+        const lista = [];
+        const ps = se.processes.whose({ visible: true })();
+        for (const proc of ps) {
+          let nome;
+          try {
+            nome = proc.name();
+          } catch (e) {
+            continue;
+          }
+          if (ESCLUDI[nome]) continue;
+          let ws;
+          try {
+            ws = proc.windows();
+          } catch (e) {
+            continue;
+          }
+          for (let i = 0; i < ws.length; i++) {
+            try {
+              const pos = ws[i].position();
+              const sz = ws[i].size();
+              if (sz[0] < 160 || sz[1] < 120) continue; // palette e popup: fuori
+              let titolo = "";
+              try {
+                titolo = ws[i].title() || "";
+              } catch (e) {}
+              lista.push({ app: nome, indice: i + 1, titolo: String(titolo).slice(0, 60), x: pos[0], y: pos[1], w: sz[0], h: sz[1] });
+            } catch (e) {}
+          }
+        }
+        return { ok: true, finestre: lista };
+      }
+      if (cmd === "SIZE") {
+        const w = finestra(p[1], p[2]);
+        if (!w) return { ok: false, errore: "finestra non trovata" };
+        w.size = [Number(p[3]), Number(p[4])];
+        return { ok: true };
+      }
       if (cmd === "CLOSE") {
         const w = finestra(p[1], p[2]);
         if (!w) return { ok: false, errore: "finestra non trovata" };

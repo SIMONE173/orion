@@ -43,7 +43,20 @@ class OneEuro {
   }
 }
 
-type Finestra = { tipo: string; x: number; y: number; w: number; h: number };
+// Una finestra manovrabile: pannello di ORION (via veloce Electron) o finestra di
+// QUALUNQUE app (via Accessibility). Serve solo al RESIZE e al pallino di selezione;
+// i click veri li fa il mouse virtuale sull'app reale sotto l'overlay.
+type Finestra = {
+  id: string;
+  esterna: boolean;
+  tipo?: string;
+  app?: string;
+  indice?: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
 type Mano = { cx: number; cy: number; sx: number; sy: number; pinch: boolean };
 
 export default function GestiOverlay() {
@@ -66,9 +79,10 @@ export default function GestiOverlay() {
     const filtri: OneEuro[] = [];
     const pinchStato = [false, false];
     let bounds: { origin: { x: number; y: number }; finestre: Finestra[] } = { origin: { x: 0, y: 0 }, finestre: [] };
-    let grab: { tipo: string; offX: number; offY: number } | null = null;
-    let resize: { tipo: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
+    let resize: { id: string; dist0: number; w0: number; h0: number; cx: number; cy: number } | null = null;
     let selezionata: string | null = null; // finestra sotto il cursore (pallino che pulsa)
+    let mouseGiu = false; // il tasto virtuale è premuto (pinch tenuto)
+    let ultimaPos = { sx: 0, sy: 0 };
 
     if (!od?.gestiFinestre) {
       return () => {
@@ -77,9 +91,77 @@ export default function GestiOverlay() {
       };
     }
 
+    // ── MOUSE VIRTUALE: pump one-in-flight ────────────────────────────────────
+    // Le TRANSIZIONI (giu/su) non si perdono MAI e restano in ordine → i click
+    // sono affidabili; i MOVIMENTI (punta/trascina) si accavallano (l'ultimo
+    // vince) → il puntamento resta fluido anche se il daemon è più lento.
+    let mouseInVolo = false;
+    let movePending: { op: string; x: number; y: number } | null = null;
+    const transizioni: { op: string; x: number; y: number }[] = [];
+    const pompaMouse = () => {
+      if (mouseInVolo || !od.gestiMouse) return;
+      const next = transizioni.shift() ?? movePending;
+      if (!next) return;
+      if (next === movePending) movePending = null;
+      mouseInVolo = true;
+      od.gestiMouse(next).catch(() => {}).finally(() => {
+        mouseInVolo = false;
+        pompaMouse();
+      });
+    };
+    const mouse = (op: "punta" | "giu" | "trascina" | "su", sx: number, sy: number) => {
+      const x = Math.round(sx);
+      const y = Math.round(sy);
+      if (op === "giu" || op === "su") {
+        movePending = null; // scarta un movimento in coda a cavallo della transizione
+        transizioni.push({ op, x, y });
+      } else {
+        movePending = { op, x, y };
+      }
+      pompaMouse();
+    };
+
+    // Resize delle finestre di ALTRE app: one-in-flight, l'ultimo vince.
+    let resizeInVolo = false;
+    let resizePending: { op: string; app?: string; indice?: number; w: number; h: number } | null = null;
+    const ridimensionaEsterna = (f: Finestra, w: number, h: number) => {
+      if (!od.gestiEsterna) return;
+      resizePending = { op: "ridimensiona", app: f.app, indice: f.indice, w, h };
+      if (resizeInVolo) return;
+      const go = () => {
+        if (!resizePending) return;
+        const p = resizePending;
+        resizePending = null;
+        resizeInVolo = true;
+        od.gestiEsterna(p).catch(() => {}).finally(() => {
+          resizeInVolo = false;
+          go();
+        });
+      };
+      go();
+    };
+
     const aggiornaBounds = async () => {
       try {
-        bounds = await od.gestiFinestre();
+        const r = await od.gestiFinestre();
+        if (resize) return; // durante il resize la posizione ottimistica comanda
+        const orion: Finestra[] = (r.finestre ?? []).map((f: { tipo: string; x: number; y: number; w: number; h: number }) => ({
+          id: `orion:${f.tipo}`,
+          esterna: false,
+          tipo: f.tipo,
+          x: f.x, y: f.y, w: f.w, h: f.h,
+        }));
+        const esterne: Finestra[] = (r.esterne ?? []).map(
+          (f: { app: string; indice: number; x: number; y: number; w: number; h: number }) => ({
+            id: `app:${f.app}#${f.indice}`,
+            esterna: true,
+            app: f.app,
+            indice: f.indice,
+            x: f.x, y: f.y, w: f.w, h: f.h,
+          })
+        );
+        // ORION per ultimo: a parità di punto, il pannello vince sull'app sotto.
+        bounds = { origin: r.origin, finestre: [...esterne, ...orion] };
       } catch {
         /* noop */
       }
@@ -94,7 +176,20 @@ export default function GestiOverlay() {
       }
       return found;
     };
-    const rectDi = (tipo: string) => bounds.finestre.find((f) => f.tipo === tipo) || null;
+    const rectDi = (id: string) => bounds.finestre.find((f) => f.id === id) || null;
+
+    const ridimensiona = (f: Finestra, w: number, h: number, cx: number, cy: number) => {
+      f.w = w;
+      f.h = h;
+      if (f.esterna) {
+        ridimensionaEsterna(f, w, h); // le app esterne restano ancorate in alto a sinistra
+      } else {
+        od.gestiRidimensiona({ tipo: f.tipo, w, h });
+        od.gestiSposta({ tipo: f.tipo, x: cx - w / 2, y: cy - h / 2 });
+        f.x = cx - w / 2;
+        f.y = cy - h / 2;
+      }
+    };
 
     const disegna = (mani: Mano[]) => {
       const cv = canvasRef.current;
@@ -137,51 +232,58 @@ export default function GestiOverlay() {
 
     const gestisci = (mani: Mano[]) => {
       const pin = mani.filter((m) => m.pinch);
-      const cursore = pin[0] ?? mani[0] ?? null;
-      // Pallino di selezione: la finestra sotto il cursore (quella che pinchando agganci).
+      const cursore = mani[0] ?? null;
       if (cursore) {
         const f = sotto(cursore.sx, cursore.sy);
-        if (f) selezionata = f.tipo;
+        selezionata = f ? f.id : null;
+        ultimaPos = { sx: cursore.sx, sy: cursore.sy };
       }
 
+      // DUE MANI in pinch → RESIZE della finestra sotto (pannello ORION o qualsiasi app).
       if (pin.length >= 2) {
-        // DUE MANI (allarga/restringi) → ridimensiona, ancorato al centro.
+        if (mouseGiu) {
+          mouse("su", ultimaPos.sx, ultimaPos.sy); // chiudi un eventuale trascinamento
+          mouseGiu = false;
+        }
         const [a, b] = pin;
         const dist = Math.hypot(a.sx - b.sx, a.sy - b.sy);
         if (!resize) {
-          const f = grab ? rectDi(grab.tipo) : selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
+          const f = selezionata ? rectDi(selezionata) : sotto((a.sx + b.sx) / 2, (a.sy + b.sy) / 2);
           if (f) {
-            resize = { tipo: f.tipo, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
-            selezionata = f.tipo;
-            od.gestiAvanti({ tipo: f.tipo });
+            resize = { id: f.id, dist0: dist || 1, w0: f.w, h0: f.h, cx: f.x + f.w / 2, cy: f.y + f.h / 2 };
+            selezionata = f.id;
+            if (!f.esterna) od.gestiAvanti({ tipo: f.tipo });
           }
         } else {
-          const s = Math.min(4, Math.max(0.3, dist / resize.dist0));
-          const w = resize.w0 * s;
-          const h = resize.h0 * s;
-          od.gestiRidimensiona({ tipo: resize.tipo, w, h });
-          od.gestiSposta({ tipo: resize.tipo, x: resize.cx - w / 2, y: resize.cy - h / 2 });
+          const f = rectDi(resize.id);
+          if (f) {
+            const s = Math.min(4, Math.max(0.3, dist / resize.dist0));
+            ridimensiona(f, resize.w0 * s, resize.h0 * s, resize.cx, resize.cy);
+          }
         }
-        grab = null;
         return;
       }
       resize = null;
 
-      if (pin.length === 1) {
-        // PINCH (una mano) → aggancia e sposta liberamente la finestra.
-        const m = pin[0];
-        if (!grab) {
-          const f = sotto(m.sx, m.sy);
-          if (f) {
-            grab = { tipo: f.tipo, offX: m.sx - f.x, offY: m.sy - f.y };
-            selezionata = f.tipo;
-            od.gestiAvanti({ tipo: f.tipo });
-          }
-        } else {
-          od.gestiSposta({ tipo: grab.tipo, x: m.sx - grab.offX, y: m.sy - grab.offY });
+      // UNA MANO (o zero) → MOUSE VIRTUALE su tutto lo schermo.
+      const m = mani[0];
+      if (!m) {
+        if (mouseGiu) {
+          mouse("su", ultimaPos.sx, ultimaPos.sy); // la mano è sparita: non lasciare il tasto premuto
+          mouseGiu = false;
         }
+        return;
+      }
+      if (m.pinch && !mouseGiu) {
+        mouse("giu", m.sx, m.sy); // pinch = tasto giù (click/doppio/trascina lo decide il tempo)
+        mouseGiu = true;
+      } else if (!m.pinch && mouseGiu) {
+        mouse("su", m.sx, m.sy);
+        mouseGiu = false;
+      } else if (m.pinch) {
+        mouse("trascina", m.sx, m.sy);
       } else {
-        grab = null;
+        mouse("punta", m.sx, m.sy);
       }
     };
 
