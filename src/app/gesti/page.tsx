@@ -10,9 +10,9 @@ import { useEffect, useRef } from "react";
 // Pinch misurato come RAPPORTO (distanza pollice-indice / dimensione della mano):
 // così è indipendente da quanto la mano è lontana/piccola nell'inquadratura → una
 // mano aperta non viene più scambiata per un pinch. Isteresi per stabilità.
-const PINCH_ON = 0.4; // sotto questo rapporto = pinch
-const PINCH_OFF = 0.62; // sopra = mano aperta
-const SENSIBILITA = 2.4; // zona centrale della camera → tutto lo schermo
+const PINCH_ON = 0.26; // pinch SOLO a dita davvero unite (prima scattava troppo presto)
+const PINCH_OFF = 0.42; // si rilascia aprendo poco → click e doppio-click facili
+const SENSIBILITA = 1.9; // pallino un pelo più lento e preciso da guidare
 const VERSIONE_WASM = "0.10.35";
 
 class OneEuro {
@@ -282,9 +282,10 @@ export default function GestiOverlay() {
         mouseGiu = false;
       } else if (m.pinch) {
         mouse("trascina", m.sx, m.sy);
-      } else {
-        mouse("punta", m.sx, m.sy);
       }
+      // HOVER (dito senza pinch): NON muovo il cursore reale → si muove SOLO il
+      // pallino celeste. Il cursore vero agisce solo quando pinchi, e il click
+      // parte esatto dove sta il pallino (niente cursorino che gira per lo schermo).
     };
 
     const loop = () => {
