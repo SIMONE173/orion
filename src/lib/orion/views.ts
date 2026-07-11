@@ -228,6 +228,14 @@ export type Azione =
   | { tipo: "chiudi_finestra"; app?: string; scheda?: boolean }
   | { tipo: "crea_file"; nome: string; tipoElemento: "file" | "cartella"; posizione?: string }
   | { tipo: "rinomina_file"; da: string; a: string }
+  // Stampa (solo Desktop): contenuto di ORION reso PDF al volo, o un file del computer.
+  | {
+      tipo: "stampa_contenuto";
+      titolo: string;
+      testo?: string;
+      documento?: Extract<Vista, { tipo: "documento" }>["dati"]["documento"];
+    }
+  | { tipo: "stampa_file"; query: string }
   // Creative Workspace (solo Desktop): lavorare DENTRO i software.
   | { tipo: "esegui_comando"; comando: string; cwd?: string; etichetta?: string; riporta?: boolean }
   | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string };

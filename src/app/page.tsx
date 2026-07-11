@@ -54,6 +54,9 @@ type OrionDesktop = {
   gestiOff?: () => void;
   // Chiude una finestra del computer o una scheda del browser (Accessibility).
   chiudiFinestra?: (d: { app?: string; scheda?: boolean }) => Promise<{ ok: boolean; errore?: string }>;
+  // Stampa alla stampante di sistema: PDF generato da ORION, oppure file per nome.
+  stampaDati?: (d: { base64: string; nome?: string }) => Promise<{ ok: boolean; nome?: string; errore?: string }>;
+  stampaFile?: (query: string) => Promise<{ ok: boolean; nome?: string; errore?: string }>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
   // Solo desktop: chiude le finestre-pannello (per tipo, o "tutto").
@@ -353,6 +356,47 @@ export default function Home() {
           else if (r.errore === "quale_app") speakRef.current?.("Dimmi di quale app devo chiudere la finestra.");
           else speakRef.current?.("Non sono riuscito a chiudere la finestra.");
         });
+        break;
+      }
+      case "stampa_file": {
+        const d = desktopBridge();
+        if (!d?.stampaFile) {
+          speakRef.current?.("Stampare i file del computer è possibile con ORION Desktop aggiornato.");
+          break;
+        }
+        d.stampaFile(a.query).then((r) => {
+          if (r.ok) speakRef.current?.(`In stampa: ${r.nome ?? "il file"}.`);
+          else if (r.errore === "non trovato") speakRef.current?.(`Non ho trovato "${a.query}" sul computer.`);
+          else if (r.errore === "nessuna_stampante") speakRef.current?.("Non trovo una stampante configurata sul Mac.");
+          else speakRef.current?.("La stampa non è partita.");
+        });
+        break;
+      }
+      case "stampa_contenuto": {
+        const d = desktopBridge();
+        (async () => {
+          // Il PDF si genera qui (pdf-lib è client-side); poi Desktop → stampante,
+          // web → il PDF viene scaricato (dal browser non si comanda la stampante).
+          const { bytesDocumentoPdf, bytesTestoPdf } = await import("@/components/panels/pdf");
+          const bytes = a.documento ? await bytesDocumentoPdf(a.documento) : await bytesTestoPdf(a.titolo, a.testo ?? "");
+          if (d?.stampaDati) {
+            let bin = "";
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            const r = await d.stampaDati({ base64: btoa(bin), nome: a.titolo });
+            if (r.ok) speakRef.current?.("In stampa.");
+            else if (r.errore === "nessuna_stampante") speakRef.current?.("Non trovo una stampante configurata sul Mac.");
+            else speakRef.current?.("La stampa non è partita.");
+          } else {
+            const blob = new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            const el = document.createElement("a");
+            el.href = url;
+            el.download = `${a.titolo.replace(/\s+/g, "_")}.pdf`;
+            el.click();
+            URL.revokeObjectURL(url);
+            speakRef.current?.("Dal browser non posso comandare la stampante: ti ho scaricato il PDF, stampalo da lì.");
+          }
+        })().catch(() => speakRef.current?.("Non sono riuscito a preparare la stampa."));
         break;
       }
       case "crea_file": {

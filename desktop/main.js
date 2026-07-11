@@ -573,6 +573,67 @@ ipcMain.handle("os:cestina", async (_e, query) => {
   }
 });
 
+// ── STAMPA: manda alla stampante di sistema (coda CUPS via lpr) ──────────────
+// Due vie: un FILE del computer trovato per nome, oppure DATI PDF generati al
+// volo da ORION (agenda, documenti, testi) scritti in un temporaneo e stampati.
+function stampaConSistema(percorso) {
+  return new Promise((resolve) => {
+    const win32 = process.platform === "win32";
+    const p = spawn(
+      win32 ? "powershell" : "lpr",
+      win32 ? ["-NoProfile", "-Command", `Start-Process -FilePath "${percorso}" -Verb Print`] : [percorso],
+      { stdio: ["ignore", "ignore", "pipe"] }
+    );
+    let err = "";
+    p.stderr.on("data", (d) => (err += d.toString()));
+    p.on("error", (e) => resolve({ ok: false, errore: String(e && e.message ? e.message : e) }));
+    p.on("exit", (code) => {
+      if (code === 0) return resolve({ ok: true });
+      const bassa = err.toLowerCase();
+      resolve({
+        ok: false,
+        errore:
+          bassa.includes("no default destination") || bassa.includes("scheduler") || bassa.includes("unable to")
+            ? "nessuna_stampante"
+            : err.trim() || `stampa fallita (codice ${code})`,
+      });
+    });
+  });
+}
+
+// Stampa un PDF generato da ORION (base64 → file temporaneo → stampante).
+ipcMain.handle("os:stampaDati", async (_e, d) => {
+  try {
+    const base64 = String((d && d.base64) || "").replace(/^data:[^;]+;base64,/, "");
+    if (!base64) return { ok: false, errore: "dati mancanti" };
+    const nome = String((d && d.nome) || "documento").replace(/[^\w.\-]+/g, "_").slice(0, 60);
+    const percorso = path.join(os.tmpdir(), `orion-stampa-${Date.now()}-${nome}.pdf`);
+    fs.writeFileSync(percorso, Buffer.from(base64, "base64"));
+    const esito = await stampaConSistema(percorso);
+    // Pulizia dopo lo spool (la coda di stampa legge il file subito).
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(percorso);
+      } catch {
+        /* già rimosso */
+      }
+    }, 60000);
+    return esito.ok ? { ok: true, nome } : esito;
+  } catch (err) {
+    return { ok: false, errore: String(err && err.message ? err.message : err) };
+  }
+});
+
+// Stampa un file del computer trovato per nome (PDF, immagini, testo).
+ipcMain.handle("os:stampaFile", async (_e, query) => {
+  const q = String(query || "").trim();
+  if (!q) return { ok: false, errore: "nome mancante" };
+  const [trovato] = cercaFile(q, 1);
+  if (!trovato) return { ok: false, errore: "non trovato" };
+  const esito = await stampaConSistema(trovato);
+  return esito.ok ? { ok: true, percorso: trovato, nome: path.basename(trovato) } : esito;
+});
+
 // Riconoscimento vocale offline: prepara il modello (scarica la prima volta).
 ipcMain.handle("os:sttPronto", async () => {
   try {

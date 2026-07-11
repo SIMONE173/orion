@@ -1193,6 +1193,25 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { testo: { type: "string" } }, required: ["testo"] },
   },
   {
+    name: "stampa",
+    description:
+      "SOLO Desktop: STAMPA davvero alla stampante di sistema. cosa='documento' → un documento/foto archiviato in ORION (identifica con nome/cliente_nome o id); cosa='agenda' → l'agenda di un giorno o di un intervallo (data/data_a, senza = oggi); cosa='file' → un FILE del computer trovato per nome (nome); cosa='testo' → un testo che componi TU (titolo + testo: es. 'stampami questa lettera', dettata o preparata da te). Usalo per 'stampami…', 'stampa il referto di Rossi', 'stampami l'agenda di domani', 'stampa il PDF sulla scrivania'. Conferma a voce in una frase breve ('In stampa.'). Sul WEB spiega che la stampa diretta c'è su ORION Desktop (il PDF viene scaricato).",
+    input_schema: {
+      type: "object",
+      properties: {
+        cosa: { type: "string", enum: ["documento", "agenda", "file", "testo"] },
+        nome: { type: "string", description: "Titolo del documento ORION o nome del file del computer" },
+        cliente_nome: { type: "string", description: "Per i documenti: il cliente a cui appartiene" },
+        id: { type: "integer", description: "Id del documento, se noto" },
+        data: { type: "string", description: "Per l'agenda: giorno YYYY-MM-DD (senza = oggi)" },
+        data_a: { type: "string", description: "Per l'agenda: fine intervallo YYYY-MM-DD" },
+        titolo: { type: "string", description: "Per cosa='testo': l'intestazione del foglio" },
+        testo: { type: "string", description: "Per cosa='testo': il contenuto da stampare" },
+      },
+      required: ["cosa"],
+    },
+  },
+  {
     name: "vai_in_pausa",
     description:
       "Mette ORION in modalità RIPOSO/standby. Usalo per 'riposati', 'vai in pausa', 'mettiti in standby', 'a dopo', 'ci sentiamo dopo'. Saluta brevemente; l'utente ti risveglierà battendo le mani due volte o toccando lo schermo.",
@@ -3538,6 +3557,59 @@ const handlers: Record<string, Handler> = {
     result: { ok: true, app: input.app ?? "in primo piano", scheda: !!input.scheda },
     azione: { tipo: "chiudi_finestra", app: input.app ? String(input.app) : undefined, scheda: !!input.scheda },
   }),
+
+  // Stampa alla stampante di sistema (Desktop). Riusa gli altri strumenti per
+  // recuperare il contenuto: documento → visore, agenda → mostra_agenda.
+  stampa: async (input, ctx) => {
+    const cosa = String(input.cosa ?? "").toLowerCase();
+
+    if (cosa === "file") {
+      const nome = String(input.nome ?? "").trim();
+      if (!nome) return { result: { ok: false, errore: "serve il nome del file da stampare" } };
+      return {
+        result: { ok: true, invio: "stampante", nota: "Sto mandando il file alla stampante; se qualcosa non va lo dico a voce." },
+        azione: { tipo: "stampa_file", query: nome },
+      };
+    }
+
+    if (cosa === "agenda") {
+      const esito = await dispatch("mostra_agenda", { data_da: input.data, data_a: input.data_a ?? input.data }, ctx);
+      if (!esito.vista || esito.vista.tipo !== "agenda") return { result: esito.result };
+      const dati = esito.vista.dati as Extract<Vista, { tipo: "agenda" }>["dati"];
+      const righe = dati.appuntamenti.map(
+        (a) =>
+          `${a.inizio.slice(11, 16)}–${a.fine.slice(11, 16)}  ${a.titolo}` +
+          `${a.cliente_nome && !a.titolo.includes(a.cliente_nome) ? ` · ${a.cliente_nome}` : ""}` +
+          `${a.stato === "da_confermare" ? "   (da confermare)" : ""}`
+      );
+      const giorno = String(input.data ?? new Date().toISOString().slice(0, 10));
+      const fine = String(input.data_a ?? giorno);
+      const titolo = fine !== giorno ? `Agenda ${giorno} → ${fine}` : `Agenda di ${giorno}`;
+      return {
+        result: { ok: true, appuntamenti: righe.length, invio: "stampante" },
+        azione: { tipo: "stampa_contenuto", titolo, testo: righe.length ? righe.join("\n") : "Nessun appuntamento." },
+      };
+    }
+
+    if (cosa === "documento") {
+      const esito = await dispatch("apri_documento", { id: input.id, titolo: input.nome, cliente_nome: input.cliente_nome }, ctx);
+      // Omonimi/candidati o non trovato: passa il result a ORION che chiederà quale.
+      if (!esito.vista || esito.vista.tipo !== "documento") return { result: esito.result };
+      const documento = (esito.vista.dati as Extract<Vista, { tipo: "documento" }>["dati"]).documento;
+      return {
+        result: { ok: true, stampa: documento.titolo, invio: "stampante" },
+        azione: { tipo: "stampa_contenuto", titolo: documento.titolo, documento },
+      };
+    }
+
+    // Testo libero composto da ORION ("stampami questa lettera…").
+    const testo = String(input.testo ?? "").trim();
+    if (!testo) return { result: { ok: false, errore: "serve il testo da stampare (o indica cosa: documento/agenda/file)" } };
+    return {
+      result: { ok: true, invio: "stampante" },
+      azione: { tipo: "stampa_contenuto", titolo: String(input.titolo ?? "Documento ORION"), testo },
+    };
+  },
 
   crea_file_locale: (input) => ({
     result: { ok: true, nome: input.nome, tipo: input.tipoElemento, posizione: input.posizione ?? "scrivania" },

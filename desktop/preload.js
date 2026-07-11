@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   gestiAvanti: (dati) => ipcRenderer.send("os:gestiAvanti", dati),
   // Chiusura a comando: finestra (pulsante rosso) o scheda del browser (Cmd+W).
   chiudiFinestra: (dati) => ipcRenderer.invoke("os:chiudiFinestra", dati),
+  // Stampa alla stampante di sistema: PDF generato da ORION, o file per nome.
+  stampaDati: (dati) => ipcRenderer.invoke("os:stampaDati", dati),
+  stampaFile: (query) => ipcRenderer.invoke("os:stampaFile", query),
   // Modalità AFFIANCAMENTO: cattura schermo + overlay che disegna le evidenze.
   catturaSchermo: () => ipcRenderer.invoke("os:catturaSchermo"),
   affiancaOn: () => ipcRenderer.send("os:affiancaOn"),

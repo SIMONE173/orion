@@ -49,7 +49,10 @@ function scarica(bytes: Uint8Array, nomeFile: string) {
 const A4 = { w: 595, h: 842 };
 const MARGIN = 56;
 
-export async function scaricaDocumentoPdf(doc: Extract<Vista, { tipo: "documento" }>["dati"]["documento"]) {
+// Costruisce il PDF di un documento e ne RESTITUISCE i byte (per scaricare o STAMPARE).
+export async function bytesDocumentoPdf(
+  doc: Extract<Vista, { tipo: "documento" }>["dati"]["documento"]
+): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -100,11 +103,15 @@ export async function scaricaDocumentoPdf(doc: Extract<Vista, { tipo: "documento
     y -= lineH;
   }
 
-  scarica(await pdf.save(), `${doc.titolo.replace(/\s+/g, "_")}.pdf`);
+  return pdf.save();
 }
 
-// PDF generico da testo libero (usato dalla "modalità appunti").
-export async function scaricaTestoPdf(titolo: string, testo: string) {
+export async function scaricaDocumentoPdf(doc: Extract<Vista, { tipo: "documento" }>["dati"]["documento"]) {
+  scarica(await bytesDocumentoPdf(doc), `${doc.titolo.replace(/\s+/g, "_")}.pdf`);
+}
+
+// PDF generico da testo libero: byte (per scaricare o STAMPARE).
+export async function bytesTestoPdf(titolo: string, testo: string): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -128,7 +135,12 @@ export async function scaricaTestoPdf(titolo: string, testo: string) {
     y -= lineH;
   }
 
-  scarica(await pdf.save(), `${(titolo || "Appunti").replace(/\s+/g, "_")}.pdf`);
+  return pdf.save();
+}
+
+// PDF generico da testo libero (usato dalla "modalità appunti").
+export async function scaricaTestoPdf(titolo: string, testo: string) {
+  scarica(await bytesTestoPdf(titolo, testo), `${(titolo || "Appunti").replace(/\s+/g, "_")}.pdf`);
 }
 
 export async function scaricaFatturaPdf(f: Extract<Vista, { tipo: "fattura" }>["dati"]) {
