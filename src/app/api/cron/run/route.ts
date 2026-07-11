@@ -9,11 +9,12 @@ import {
   logCommunication,
   logEvento,
   logAudit,
+  utenteIdPerNome,
 } from "@/lib/data";
 import { inviaMessaggioWhatsApp } from "@/lib/whatsapp";
 import { processaScadenzeOfferte } from "@/lib/slots";
 import { sincronizzaCalendario } from "@/lib/gcal";
-import { inviaPushATutti } from "@/lib/push";
+import { inviaPushATutti, inviaPushAUtente } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
 import { backupGiornaliero } from "@/lib/db";
@@ -122,18 +123,43 @@ export async function POST(req: NextRequest) {
     });
 
     // Azienda: avvisa dei compiti in ritardo (una volta, finché non si aggiornano).
+    // MIRATO: la notifica va all'ASSEGNATARIO (risolto via organico/account);
+    // solo i compiti senza un destinatario riconoscibile vanno a tutto il team.
     await runWithTenant(tenantId, async () => {
       const ritardo = compitiDaNotificare();
       if (!ritardo.length) return;
       totDovuti += ritardo.length;
-      const corpo =
-        ritardo.length === 1
-          ? `In ritardo: ${ritardo[0].titolo}${ritardo[0].assegnatario ? ` (${ritardo[0].assegnatario})` : ""}`
-          : `${ritardo.length} compiti in ritardo: ${ritardo.slice(0, 3).map((c) => c.titolo).join("; ")}${ritardo.length > 3 ? "…" : ""}`;
-      const r = await inviaPushATutti({ titolo: "Compiti in ritardo", corpo, url: "/" });
-      if (r.inviati > 0) {
-        segnaCompitiNotificati(ritardo.map((c) => c.id));
-        totInviati += r.inviati;
+
+      const perUtente = new Map<number, typeof ritardo>();
+      const senzaDestinatario: typeof ritardo = [];
+      for (const c of ritardo) {
+        const uid = c.assegnatario ? utenteIdPerNome(c.assegnatario) : null;
+        if (uid) {
+          if (!perUtente.has(uid)) perUtente.set(uid, []);
+          perUtente.get(uid)!.push(c);
+        } else senzaDestinatario.push(c);
+      }
+
+      const corpoDi = (lista: typeof ritardo) =>
+        lista.length === 1
+          ? `In ritardo: ${lista[0].titolo}${lista[0].assegnatario ? ` (${lista[0].assegnatario})` : ""}`
+          : `${lista.length} compiti in ritardo: ${lista.slice(0, 3).map((c) => c.titolo).join("; ")}${lista.length > 3 ? "…" : ""}`;
+
+      const notificati: number[] = [];
+      for (const [uid, lista] of perUtente) {
+        const r = await inviaPushAUtente(uid, { titolo: "Compiti in ritardo", corpo: corpoDi(lista), url: "/" });
+        // Se la persona non ha dispositivi iscritti, il compito resta "da
+        // notificare": passa al giro per tutto il team qui sotto.
+        if (r.inviati > 0) notificati.push(...lista.map((c) => c.id));
+        else senzaDestinatario.push(...lista);
+      }
+      if (senzaDestinatario.length) {
+        const r = await inviaPushATutti({ titolo: "Compiti in ritardo", corpo: corpoDi(senzaDestinatario), url: "/" });
+        if (r.inviati > 0) notificati.push(...senzaDestinatario.map((c) => c.id));
+      }
+      if (notificati.length) {
+        segnaCompitiNotificati(notificati);
+        totInviati += notificati.length;
       }
     });
 

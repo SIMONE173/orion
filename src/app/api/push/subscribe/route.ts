@@ -15,7 +15,8 @@ export async function POST(req: NextRequest) {
     if (!endpoint || !p256dh || !auth) {
       return NextResponse.json({ ok: false, errore: "Iscrizione incompleta" }, { status: 400 });
     }
-    const r = await conTenant(() => salvaSubscription({ endpoint, p256dh, auth }));
+    // L'iscrizione appartiene alla PERSONA (push mirate), non solo al tenant.
+    const r = await conTenant((u) => salvaSubscription({ endpoint, p256dh, auth }, u.id));
     if (!r.ok) return NextResponse.json({ ok: false, errore: "Non autenticato" }, { status: 401 });
     return NextResponse.json({ ok: true });
   } catch (e) {

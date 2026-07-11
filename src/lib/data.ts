@@ -58,6 +58,7 @@ export type Azienda = {
   sedi: string | null;
   codice_aziendale: string | null;
   memoria_operativa: string | null; // JSON: organigramma, processi, regole…
+  permessi: string | null; // JSON { area: [classi di ruolo] } — aree riservate
   piva: string | null;
   codice_fiscale: string | null;
   indirizzo: string | null;
@@ -845,12 +846,164 @@ export function ultimaConsegna(reparto?: string | null): Consegna | undefined {
 // ── Briefing per ruolo + triage delle priorità ────────────────────────────────
 
 // Classifica il ruolo testuale in una delle quattro "lenti" del briefing.
-function classeRuolo(ruolo?: string | null): "titolare" | "responsabile" | "amministrativo" | "operatore" {
+export type ClasseRuolo = "titolare" | "responsabile" | "amministrativo" | "operatore";
+export function classeRuolo(ruolo?: string | null): ClasseRuolo {
   const r = (ruolo ?? "").toLowerCase();
   if (/titolar|amministrator delegat|ceo|direttore|propriet|fondator|owner/.test(r)) return "titolare";
   if (/responsabil|capo|manager|coordinator|preposto|caporeparto/.test(r)) return "responsabile";
   if (/ammininistrat|segret|contabil|ufficio|backoffice|hr|risorse uman/.test(r)) return "amministrativo";
   return "operatore";
+}
+
+// ── AREE RISERVATE: permessi reali per ruolo (solo in azienda) ────────────────
+// "Chi può vedere cosa" non è solo memoria del prompt: è APPLICATO negli
+// strumenti (dispatch dei tool) e nelle route. Il titolare cambia gli accessi
+// a voce (imposta_permessi); i default sono prudenti. Senza azienda (autonomo/
+// personale) non esiste alcuna riserva.
+
+export const AREE_PERMESSI = ["finanza", "pagamenti", "fatture", "esporta", "azienda_config"] as const;
+export type AreaPermessi = (typeof AREE_PERMESSI)[number];
+
+const PERMESSI_DEFAULT: Record<AreaPermessi, ClasseRuolo[]> = {
+  finanza: ["titolare", "amministrativo"], // incassi, analisi economica, report valore
+  pagamenti: ["titolare", "amministrativo"],
+  fatture: ["titolare", "amministrativo"],
+  esporta: ["titolare"], // export completo dei dati
+  azienda_config: ["titolare"], // configurazione azienda e questi stessi permessi
+};
+
+function esAreaPermessi(v: unknown): v is AreaPermessi {
+  return typeof v === "string" && (AREE_PERMESSI as readonly string[]).includes(v);
+}
+
+// Regole correnti del tenant: default + le modifiche del titolare (JSON su aziende).
+export function permessiAzienda(): Record<AreaPermessi, ClasseRuolo[]> {
+  const regole = { ...PERMESSI_DEFAULT };
+  const az = getAzienda();
+  if (!az?.permessi) return regole;
+  try {
+    const salvate = JSON.parse(az.permessi) as Record<string, unknown>;
+    for (const [area, ruoli] of Object.entries(salvate)) {
+      if (esAreaPermessi(area) && Array.isArray(ruoli)) {
+        const puliti = ruoli.filter((r): r is ClasseRuolo =>
+          ["titolare", "responsabile", "amministrativo", "operatore"].includes(String(r))
+        );
+        if (puliti.length) regole[area] = puliti;
+      }
+    }
+  } catch {
+    /* JSON corrotto → restano i default prudenti */
+  }
+  return regole;
+}
+
+// Cambia chi accede a un'area. Il titolare è SEMPRE incluso (mai chiudersi fuori).
+export function salvaPermessiArea(area: AreaPermessi, ruoli: ClasseRuolo[]) {
+  const regole = permessiAzienda();
+  regole[area] = Array.from(new Set<ClasseRuolo>(["titolare", ...ruoli]));
+  db().prepare("UPDATE aziende SET permessi = ?, updated_at = ? WHERE tenant_id = ?").run(JSON.stringify(regole), nowISO(), T());
+  return regole;
+}
+
+// Il controllo usato da dispatch e route: l'utente corrente può toccare l'area?
+// Senza azienda o senza utente (canali di sistema: cron, proattiva) → libero.
+export function permessoArea(area: AreaPermessi, utenteId?: number | null): { ok: boolean; ammessi: ClasseRuolo[] } {
+  const regole = permessiAzienda();
+  const ammessi = regole[area];
+  if (!getAzienda() || !utenteId) return { ok: true, ammessi };
+  const u = db().prepare("SELECT ruolo FROM utenti WHERE id = ?").get(utenteId) as { ruolo: string | null } | undefined;
+  return { ok: ammessi.includes(classeRuolo(u?.ruolo)), ammessi };
+}
+
+// ── STAFFETTA DEL TEAM: messaggi interni fra colleghi ─────────────────────────
+// "Di' a Marco che…" → il messaggio aspetta il destinatario e ORION glielo
+// consegna a voce appena apre ORION (più una push mirata subito).
+
+export type MessaggioTeam = {
+  id: number;
+  da_utente_id: number | null;
+  da_nome: string | null;
+  per_nome: string | null;
+  per_utente_id: number | null;
+  per_reparto: string | null;
+  testo: string;
+  urgente: number;
+  consegnato: number;
+  created_at: string;
+};
+
+// Da un nome parlato ("Marco", "la Bianchi") all'account ORION del collega:
+// prima l'organigramma (dove il collegamento persona→utente è esplicito), poi
+// i nomi degli account del tenant. null = persona nota ma senza account (ok:
+// il messaggio resta agganciato al nome e si risolve alla lettura).
+export function utenteIdPerNome(nome: string): number | null {
+  const q = `%${nome.trim().toLowerCase()}%`;
+  const org = db()
+    .prepare(
+      "SELECT utente_id FROM organico WHERE tenant_id = ? AND attivo = 1 AND utente_id IS NOT NULL AND LOWER(nome) LIKE ? LIMIT 1"
+    )
+    .get(T(), q) as { utente_id: number } | undefined;
+  if (org) return org.utente_id;
+  const u = db()
+    .prepare("SELECT id FROM utenti WHERE tenant_id = ? AND nome IS NOT NULL AND LOWER(nome) LIKE ? LIMIT 1")
+    .get(T(), q) as { id: number } | undefined;
+  return u?.id ?? null;
+}
+
+export function lasciaMessaggioTeam(m: {
+  daUtenteId?: number | null;
+  daNome?: string | null;
+  perNome?: string | null;
+  perReparto?: string | null;
+  testo: string;
+  urgente?: boolean;
+}): MessaggioTeam {
+  const perUtenteId = m.perNome ? utenteIdPerNome(m.perNome) : null;
+  const r = db()
+    .prepare(
+      `INSERT INTO messaggi_team (tenant_id, da_utente_id, da_nome, per_nome, per_utente_id, per_reparto, testo, urgente, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      T(),
+      m.daUtenteId ?? null,
+      m.daNome ?? null,
+      m.perNome ?? null,
+      perUtenteId,
+      m.perReparto ?? null,
+      m.testo,
+      m.urgente ? 1 : 0,
+      nowISO()
+    );
+  return db().prepare("SELECT * FROM messaggi_team WHERE id = ?").get(Number(r.lastInsertRowid)) as MessaggioTeam;
+}
+
+// I messaggi che aspettano QUESTA persona: indirizzati al suo account, al suo
+// reparto, o al suo nome (lasciati prima che avesse l'account o senza aggancio).
+export function messaggiTeamPerUtente(utenteId: number): MessaggioTeam[] {
+  const u = db().prepare("SELECT nome, reparto FROM utenti WHERE id = ?").get(utenteId) as
+    | { nome: string | null; reparto: string | null }
+    | undefined;
+  const nome = (u?.nome ?? "").trim().toLowerCase();
+  const reparto = (u?.reparto ?? "").trim().toLowerCase();
+  return db()
+    .prepare(
+      `SELECT * FROM messaggi_team WHERE tenant_id = ? AND consegnato = 0 AND da_utente_id IS NOT ?
+       AND (
+         per_utente_id = ?
+         OR (per_reparto IS NOT NULL AND ? != '' AND LOWER(per_reparto) = ?)
+         OR (per_utente_id IS NULL AND per_nome IS NOT NULL AND ? != ''
+             AND (INSTR(?, LOWER(per_nome)) > 0 OR INSTR(LOWER(per_nome), ?) > 0))
+       )
+       ORDER BY urgente DESC, created_at ASC`
+    )
+    .all(T(), utenteId, utenteId, reparto, reparto, nome, nome, nome) as MessaggioTeam[];
+}
+
+export function segnaMessaggiTeamConsegnati(ids: number[]) {
+  if (!ids.length) return;
+  const marca = db().prepare("UPDATE messaggi_team SET consegnato = 1, consegnato_at = ? WHERE tenant_id = ? AND id = ?");
+  for (const id of ids) marca.run(nowISO(), T(), id);
 }
 
 // Briefing intelligente SCOPED sul ruolo/reparto di chi apre ORION in azienda.
@@ -1841,16 +1994,21 @@ export function rimuoviAttesa(id: number): boolean {
 
 // ── Notifiche push ──────────────────────────────────────────────────────────
 
-export function salvaSubscription(s: PushSub) {
+export function salvaSubscription(s: PushSub, utenteId?: number | null) {
   db()
     .prepare(
-      `INSERT INTO push_subscriptions (tenant_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(endpoint) DO UPDATE SET tenant_id = excluded.tenant_id, p256dh = excluded.p256dh, auth = excluded.auth`
+      `INSERT INTO push_subscriptions (tenant_id, utente_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(endpoint) DO UPDATE SET tenant_id = excluded.tenant_id, utente_id = excluded.utente_id, p256dh = excluded.p256dh, auth = excluded.auth`
     )
-    .run(T(), s.endpoint, s.p256dh, s.auth, nowISO());
+    .run(T(), utenteId ?? null, s.endpoint, s.p256dh, s.auth, nowISO());
 }
 
-export function listSubscriptions(): PushSub[] {
+// Tutte le iscrizioni del tenant, o SOLO quelle di una persona (push mirate).
+export function listSubscriptions(utenteId?: number): PushSub[] {
+  if (utenteId !== undefined)
+    return db()
+      .prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id = ? AND utente_id = ?")
+      .all(T(), utenteId) as PushSub[];
   return db().prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE tenant_id = ?").all(T()) as PushSub[];
 }
 

@@ -71,6 +71,16 @@ import {
   getCalendarAccount,
   clientiDormienti,
   statisticheValore,
+  permessoArea,
+  permessiAzienda,
+  salvaPermessiArea,
+  AREE_PERMESSI,
+  lasciaMessaggioTeam,
+  messaggiTeamPerUtente,
+  segnaMessaggiTeamConsegnati,
+  utenteIdPerNome,
+  type AreaPermessi,
+  type ClasseRuolo,
   type VoceMemoria,
   type Compito,
   type EntitaEsterna,
@@ -520,6 +530,44 @@ export const TOOLS: Anthropic.Tool[] = [
         problemi: { type: "string" },
         suggerimenti: { type: "string" },
       },
+    },
+  },
+  {
+    name: "lascia_messaggio",
+    description:
+      "AZIENDA — STAFFETTA DEL TEAM. Lascia un messaggio interno a un COLLEGA o a un REPARTO: ORION lo consegna a voce appena quella persona apre ORION, e le manda subito una notifica sul suo dispositivo. Usalo per 'di' a Marco che…', 'lascia detto alla segreteria che…', 'avvisa il magazzino che domani…', 'quando arriva Laura dille che…'. Passa 'destinatario' (nome della persona) OPPURE 'reparto', e il testo del messaggio (fedele a ciò che l'utente vuole dire, senza riscriverlo). urgente=true se va segnalato come urgente. NON è WhatsApp né email (quelli vanno FUORI, ai clienti): questo resta DENTRO il team su ORION. Conferma a voce in una frase ('Riferisco a Marco appena apre ORION').",
+    input_schema: {
+      type: "object",
+      properties: {
+        destinatario: { type: "string", description: "Nome del collega (es. 'Marco', 'la dottoressa Bianchi')" },
+        reparto: { type: "string", description: "In alternativa: il reparto destinatario (es. 'magazzino', 'segreteria')" },
+        testo: { type: "string", description: "Il messaggio da riferire, fedele" },
+        urgente: { type: "boolean" },
+      },
+      required: ["testo"],
+    },
+  },
+  {
+    name: "messaggi_dal_team",
+    description:
+      "AZIENDA — STAFFETTA DEL TEAM. Mostra i messaggi interni che i colleghi hanno lasciato all'UTENTE CORRENTE e li segna come consegnati. Usalo per 'ho messaggi?', 'qualcuno mi ha lasciato detto qualcosa?', 'novità dai colleghi?'. I messaggi in attesa ti arrivano comunque nel briefing di apertura: questo serve per controllare a metà giornata. Consegnali a voce con naturalezza ('Marco ti ha lasciato detto che…'). NB: NON sono i messaggi WhatsApp dei clienti (per quelli usa mostra_messaggi).",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "imposta_permessi",
+    description:
+      "AZIENDA — SOLO IL TITOLARE. Decide CHI può accedere alle AREE RISERVATE di ORION (la protezione è reale: gli strumenti rifiutano chi non è autorizzato). Aree: 'finanza' (incassi, analisi economica, report di valore), 'pagamenti' (registrare/vedere pagamenti), 'fatture' (preparare/emettere), 'esporta' (esportazione completa dei dati), 'azienda_config' (configurazione azienda e questi stessi permessi). Ruoli: titolare (sempre incluso, non escludibile), responsabile, amministrativo, operatore. Esempi: 'anche i responsabili possono vedere gli incassi' → area=finanza, ruoli=[amministrativo,responsabile]; 'le fatture le gestisco solo io' → area=fatture, ruoli=[]. Usalo anche nel colloquio iniziale quando il titolare spiega chi può vedere cosa. Conferma a voce con chiarezza chi ora accede all'area.",
+    input_schema: {
+      type: "object",
+      properties: {
+        area: { type: "string", enum: ["finanza", "pagamenti", "fatture", "esporta", "azienda_config"] },
+        ruoli: {
+          type: "array",
+          items: { type: "string", enum: ["titolare", "responsabile", "amministrativo", "operatore"] },
+          description: "Le classi di ruolo ammesse (oltre al titolare, sempre incluso)",
+        },
+      },
+      required: ["area", "ruoli"],
     },
   },
   {
@@ -1647,7 +1695,7 @@ const handlers: Record<string, Handler> = {
     return { result: { ok: true, totale: organico.length }, vista: { tipo: "organico", dati: { organico } } };
   },
 
-  assegna_compito: (input, ctx) => {
+  assegna_compito: async (input, ctx) => {
     let cliente_id: number | null = null;
     if (input.cliente_nome) {
       const found = cercaCliente(String(input.cliente_nome));
@@ -1672,6 +1720,22 @@ const handlers: Record<string, Handler> = {
       riferimento: compito.riferimento ?? null,
       cliente_id,
     });
+    // Push MIRATA all'assegnatario (non a tutto il team), se ha un account.
+    if (compito.assegnatario) {
+      const uid = utenteIdPerNome(compito.assegnatario);
+      if (uid && uid !== ctx.utenteId) {
+        try {
+          const { inviaPushAUtente } = await import("../push");
+          await inviaPushAUtente(uid, {
+            titolo: "Nuovo compito per te",
+            corpo: `${assegnatoDa ? `${assegnatoDa}: ` : ""}${compito.titolo}${compito.scadenza ? ` (entro ${compito.scadenza.slice(0, 10)})` : ""}`,
+            url: "/",
+          });
+        } catch {
+          /* push non configurate: pazienza */
+        }
+      }
+    }
     return { result: { ok: true, compito }, vista: { tipo: "compiti", titolo: "Compito assegnato", dati: { compiti: listCompiti({ soloAttivi: true }) } } };
   },
 
@@ -1724,6 +1788,88 @@ const handlers: Record<string, Handler> = {
     });
     logEvento({ tipo: "consegne", descrizione: `Passaggio di consegne${reparto ? ` (${reparto})` : ""}${daNome ? ` da ${daNome}` : ""}`, soggetto: daNome });
     return { result: { ok: true, consegna } };
+  },
+
+  // ── Staffetta del team ──────────────────────────────────────────────────────
+  lascia_messaggio: async (input, ctx) => {
+    if (!getAzienda()) return { result: { ok: false, errore: "La staffetta del team vale solo negli ambienti aziendali." } };
+    const testo = String(input.testo ?? "").trim();
+    if (!testo) return { result: { ok: false, errore: "Serve il testo del messaggio." } };
+    const destinatario = input.destinatario ? String(input.destinatario).trim() : null;
+    const reparto = input.reparto ? String(input.reparto).trim() : null;
+    if (!destinatario && !reparto) return { result: { ok: false, errore: "Serve il destinatario (persona) o il reparto." } };
+    const daNome = ctx.utenteId ? getUtente(ctx.utenteId)?.nome ?? null : null;
+    const msg = lasciaMessaggioTeam({
+      daUtenteId: ctx.utenteId ?? null,
+      daNome,
+      perNome: destinatario,
+      perReparto: reparto,
+      testo,
+      urgente: Boolean(input.urgente),
+    });
+    logEvento({
+      tipo: "messaggio_team",
+      descrizione: `Messaggio${daNome ? ` da ${daNome}` : ""} per ${destinatario ?? `reparto ${reparto}`}`,
+      soggetto: destinatario ?? reparto,
+    });
+    // Notifica SUBITO la persona sul suo dispositivo (se ha un account e push attive).
+    let notificato = false;
+    if (msg.per_utente_id) {
+      try {
+        const { inviaPushAUtente } = await import("../push");
+        const r = await inviaPushAUtente(msg.per_utente_id, {
+          titolo: msg.urgente ? "Messaggio urgente dal team" : "Messaggio dal team",
+          corpo: `${daNome ?? "Un collega"}: ${testo.slice(0, 120)}${testo.length > 120 ? "…" : ""}`,
+          url: "/",
+        });
+        notificato = r.inviati > 0;
+      } catch {
+        /* push non configurate: il messaggio resta comunque in attesa */
+      }
+    }
+    return {
+      result: {
+        ok: true,
+        destinatario: destinatario ?? `reparto ${reparto}`,
+        account_riconosciuto: Boolean(msg.per_utente_id),
+        notifica_inviata: notificato,
+        nota: "Il messaggio verrà consegnato a voce quando il destinatario apre ORION. Conferma in una frase.",
+      },
+    };
+  },
+
+  messaggi_dal_team: (_input, ctx) => {
+    if (!getAzienda() || !ctx.utenteId) return { result: { ok: true, messaggi: [] } };
+    const messaggi = messaggiTeamPerUtente(ctx.utenteId);
+    segnaMessaggiTeamConsegnati(messaggi.map((m) => m.id));
+    return {
+      result: {
+        ok: true,
+        messaggi: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
+        nota: messaggi.length ? "Consegnali a voce con naturalezza, prima gli urgenti." : "Nessun messaggio in attesa.",
+      },
+    };
+  },
+
+  // ── Aree riservate (permessi per ruolo) ─────────────────────────────────────
+  imposta_permessi: (input) => {
+    const area = String(input.area ?? "") as AreaPermessi;
+    if (!(AREE_PERMESSI as readonly string[]).includes(area))
+      return { result: { ok: false, errore: `Area sconosciuta. Aree valide: ${AREE_PERMESSI.join(", ")}.` } };
+    if (!getAzienda()) return { result: { ok: false, errore: "I permessi per ruolo valgono solo negli ambienti aziendali." } };
+    const ruoli = (Array.isArray(input.ruoli) ? input.ruoli : []).filter((r: unknown): r is ClasseRuolo =>
+      ["titolare", "responsabile", "amministrativo", "operatore"].includes(String(r))
+    );
+    const regole = salvaPermessiArea(area, ruoli);
+    return {
+      result: {
+        ok: true,
+        area,
+        ammessi: regole[area],
+        permessi_correnti: regole,
+        nota: "Confermato e applicato: gli strumenti ora rifiutano chi non è in lista. Il titolare è sempre incluso.",
+      },
+    };
   },
 
   verbale_riunione: (input) => {
@@ -2455,20 +2601,43 @@ const handlers: Record<string, Handler> = {
   },
 
   briefing: (_input, ctx) => {
-    const dati = briefingOggi();
+    let dati = briefingOggi();
     // In azienda il briefing PARLATO è role-aware (operatore/responsabile/titolare/
     // amministrativo): aggiungo i dati scoped al result, il pannello resta generico.
     const azienda = getAzienda();
     if (azienda && ctx.utenteId) {
+      // AREA RISERVATA: chi non è autorizzato alla finanza non deve vedere gli
+      // importi nemmeno dal briefing (né a voce né nel pannello).
+      if (!permessoArea("finanza", ctx.utenteId).ok) {
+        dati = { ...dati, importoInSospeso: 0, pagamentiInSospeso: 0 };
+      }
       const u = getUtente(ctx.utenteId);
       const az = briefingAzienda(u?.ruolo ?? null, u?.reparto ?? null);
-      return { result: { ...dati, azienda: az }, vista: { tipo: "briefing", dati } };
+      // STAFFETTA: i messaggi lasciati dai colleghi arrivano col buongiorno.
+      const messaggi = messaggiTeamPerUtente(ctx.utenteId);
+      segnaMessaggiTeamConsegnati(messaggi.map((m) => m.id));
+      return {
+        result: {
+          ...dati,
+          azienda: az,
+          messaggi_team: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
+          ...(messaggi.length
+            ? { nota_messaggi: "Consegna a voce i messaggi_team all'inizio del briefing ('Marco ti ha lasciato detto che…'), prima gli urgenti." }
+            : {}),
+        },
+        vista: { tipo: "briefing", dati },
+      };
     }
     return { result: dati, vista: { tipo: "briefing", dati } };
   },
 
-  analisi_proattiva: () => {
-    const dati = analisiProattiva();
+  analisi_proattiva: (_input, ctx) => {
+    let dati = analisiProattiva();
+    // AREA RISERVATA: la segnalazione sui pagamenti contiene gli importi →
+    // fuori dalla vista di chi non è autorizzato alla finanza (in azienda).
+    if (getAzienda() && ctx.utenteId && !permessoArea("finanza", ctx.utenteId).ok) {
+      dati = { segnalazioni: dati.segnalazioni.filter((s) => s.categoria !== "pagamenti") };
+    }
     return { result: dati, vista: { tipo: "proattiva", dati } };
   },
 
@@ -3716,6 +3885,19 @@ const handlers: Record<string, Handler> = {
   }),
 };
 
+// AREE RISERVATE: quali strumenti toccano dati protetti per ruolo (in azienda).
+// Il controllo sta QUI, nel dispatch: vale qualunque strada prenda il modello.
+const AREA_DI_TOOL: Record<string, AreaPermessi> = {
+  analisi_economica: "finanza",
+  report_valore: "finanza",
+  registra_pagamento: "pagamenti",
+  prepara_fattura: "fatture",
+  emetti_fattura: "fatture",
+  esporta_dati: "esporta",
+  configura_azienda: "azienda_config",
+  imposta_permessi: "azienda_config",
+};
+
 export async function dispatch(
   name: string,
   input: unknown,
@@ -3723,6 +3905,19 @@ export async function dispatch(
 ): Promise<Esito> {
   const h = handlers[name];
   if (!h) return { result: { ok: false, errore: `Strumento sconosciuto: ${name}` } };
+  const area = AREA_DI_TOOL[name];
+  if (area) {
+    const p = permessoArea(area, ctx.utenteId);
+    if (!p.ok)
+      return {
+        result: {
+          ok: false,
+          errore: "area_riservata",
+          area,
+          nota: "L'utente corrente NON è autorizzato a quest'area (permessi decisi dal titolare). Rispondi con garbo SENZA rivelare alcun dato né numero: es. 'È un'informazione riservata al titolare — se vuoi posso lasciargli un messaggio'. Non aggirare il blocco.",
+        },
+      };
+  }
   try {
     return await h(input, ctx);
   } catch (e) {

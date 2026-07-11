@@ -506,6 +506,25 @@ function migrate(d: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_offerte_tenant ON offerte_slot(tenant_id, stato);
     CREATE INDEX IF NOT EXISTS idx_offerte_cliente ON offerte_slot(tenant_id, cliente_id, stato);
+
+    -- ── STAFFETTA DEL TEAM: messaggi interni fra colleghi ───────────────────
+    -- "Di' a Marco che…": ORION consegna il messaggio a voce quando il
+    -- destinatario apre ORION (briefing) e gli manda subito una push mirata.
+    CREATE TABLE IF NOT EXISTS messaggi_team (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      da_utente_id INTEGER,
+      da_nome TEXT,
+      per_nome TEXT,
+      per_utente_id INTEGER,
+      per_reparto TEXT,
+      testo TEXT NOT NULL,
+      urgente INTEGER NOT NULL DEFAULT 0,
+      consegnato INTEGER NOT NULL DEFAULT 0,
+      consegnato_at TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_msgteam_attesa ON messaggi_team(tenant_id, consegnato);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
@@ -589,6 +608,12 @@ function migrate(d: Database.Database) {
     // Come si apre un software collegato (nome app o URL): per la routine del
     // mattino, ORION lo apre da solo e poi lo guarda.
     "ALTER TABLE connessioni ADD COLUMN apertura TEXT",
+    // AREE RISERVATE (permessi per ruolo in azienda): JSON { area: [classi] }
+    // deciso a voce dal titolare; i default vivono in data.ts.
+    "ALTER TABLE aziende ADD COLUMN permessi TEXT",
+    // Push MIRATE: a chi appartiene l'iscrizione (per notificare la singola
+    // persona: compito assegnato, messaggio del team), non tutto il tenant.
+    "ALTER TABLE push_subscriptions ADD COLUMN utente_id INTEGER",
   ];
   for (const sql of alters) {
     try {

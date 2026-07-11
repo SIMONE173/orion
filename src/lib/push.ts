@@ -1,5 +1,5 @@
 import webpush from "web-push";
-import { listSubscriptions, rimuoviSubscription } from "./data";
+import { listSubscriptions, rimuoviSubscription, type PushSub } from "./data";
 
 // La chiave PUBBLICA può stare nel codice (è pubblica per natura).
 // La chiave PRIVATA arriva SOLO da env (segreta): su Railway → variabile VAPID_PRIVATE_KEY.
@@ -26,13 +26,11 @@ export function pushConfigurato(): boolean {
   return Boolean(PRIVATE_KEY);
 }
 
-export async function inviaPushATutti(payload: {
-  titolo: string;
-  corpo: string;
-  url?: string;
-}): Promise<{ inviati: number; configurato: boolean }> {
+async function inviaA(
+  subs: PushSub[],
+  payload: { titolo: string; corpo: string; url?: string }
+): Promise<{ inviati: number; configurato: boolean }> {
   if (!preparaVapid()) return { inviati: 0, configurato: false };
-  const subs = listSubscriptions();
   const body = JSON.stringify({
     title: payload.titolo,
     body: payload.corpo,
@@ -56,4 +54,17 @@ export async function inviaPushATutti(payload: {
     })
   );
   return { inviati, configurato: true };
+}
+
+export async function inviaPushATutti(payload: { titolo: string; corpo: string; url?: string }) {
+  return inviaA(listSubscriptions(), payload);
+}
+
+// Push MIRATA: solo i dispositivi di UNA persona (compito assegnato, messaggio
+// del team). In azienda evita l'effetto megafono della push a tutto il tenant.
+export async function inviaPushAUtente(
+  utenteId: number,
+  payload: { titolo: string; corpo: string; url?: string }
+) {
+  return inviaA(listSubscriptions(utenteId), payload);
 }

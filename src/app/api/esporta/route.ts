@@ -7,6 +7,7 @@ import {
   listFatture,
   listNoteTutte,
   logAudit,
+  permessoArea,
 } from "@/lib/data";
 
 export const runtime = "nodejs";
@@ -58,7 +59,13 @@ export async function GET(req: NextRequest) {
   const da = req.nextUrl.searchParams.get("da") ?? annoFa();
   const a = req.nextUrl.searchParams.get("a") ?? annoAvanti();
 
-  const r = await conTenant(() => {
+  const r = await conTenant((u) => {
+    // AREA RISERVATA: in azienda l'export completo dei dati spetta solo ai
+    // ruoli autorizzati dal titolare (default: solo lui).
+    if (!permessoArea("esporta", u.id).ok) {
+      logAudit({ canale: "api", azione: "export_dati", dettaglio: `${cosa}: NEGATO (area riservata)` });
+      return { riservato: true as const };
+    }
     let contenuto: string | null = null;
 
     switch (cosa) {
@@ -96,6 +103,12 @@ export async function GET(req: NextRequest) {
   });
 
   if (!r.ok) return NextResponse.json({ ok: false, errore: "Non autenticato" }, { status: 401 });
+  if (typeof r.data === "object" && r.data !== null && "riservato" in r.data) {
+    return NextResponse.json(
+      { ok: false, errore: "Export riservato: chiedi al titolare di autorizzare il tuo ruolo (area 'esporta')." },
+      { status: 403 }
+    );
+  }
   if (r.data === null) {
     return NextResponse.json(
       { ok: false, errore: "Parametro 'cosa' non valido: clienti | appuntamenti | pagamenti | fatture | note" },
