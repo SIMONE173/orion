@@ -238,7 +238,9 @@ export type Azione =
   | { tipo: "stampa_file"; query: string }
   // Creative Workspace (solo Desktop): lavorare DENTRO i software.
   | { tipo: "esegui_comando"; comando: string; cwd?: string; etichetta?: string; riporta?: boolean }
-  | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string };
+  | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string }
+  // ORION su misura: ricolora interfaccia e nucleo (null = torna all'originale).
+  | { tipo: "tema"; tema: { accento: string; nucleo?: string | null; sfondo?: string | null; nome?: string | null } | null };
 
 // Pillola tappabile mostrata dopo una risposta: una frase breve che l'utente
 // direbbe ("Fagli la fattura"), che al tap viene inviata come suo messaggio.

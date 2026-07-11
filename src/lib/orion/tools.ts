@@ -1333,6 +1333,21 @@ export const TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "personalizza_aspetto",
+    description:
+      "ORION SU MISURA: ricolora TUTTA l'estetica — interfaccia, testi in evidenza, bordi, bagliori, il NUCLEO (la sfera) e le sfumature dello sfondo — secondo i gusti dell'utente. TU sei il designer: da QUALSIASI desiderio ('mettimi rosso Ferrari', 'tema tramonto', 'verde Matrix', 'oro elegante', 'stile Iron Man', 'sbizzarrisciti tu') scegli TU i colori esatti in esadecimale. Parametri: 'accento' = colore principale dell'interfaccia (scegli un tono medio-vivo e LEGGIBILE su fondo scuro, mai troppo scuro o pallido); 'nucleo' = colore della sfera se vuoi differenziarla dall'accento (scenografico: es. accento oro + nucleo ambra); 'sfondo' = tinta delle sfumature dello sfondo (facoltativa); 'nome' = battezza SEMPRE il tema con un nome evocativo ('Rosso Marte', 'Alba Dorata') e usalo a voce. Con reset=true torna all'ORION originale ciano ('rimetti com'era', 'torna normale'). Il cambio avviene in diretta con un'onda di colore dal nucleo e resta salvato per l'utente su ogni suo dispositivo. Lo sfondo resta scuro (leggibilità): giochi con i colori, non col nero di base. A voce UNA frase evocativa, da sarto: 'Ecco il tuo ORION Rosso Marte'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        accento: { type: "string", description: "Colore principale in hex, es. #ff2d55" },
+        nucleo: { type: "string", description: "Colore della sfera in hex (default: accento)" },
+        sfondo: { type: "string", description: "Tinta delle sfumature di sfondo in hex (default: accento)" },
+        nome: { type: "string", description: "Nome evocativo del tema, es. 'Rosso Marte'" },
+        reset: { type: "boolean", description: "true = torna al tema originale di ORION" },
+      },
+    },
+  },
+  {
     name: "riassumi_link",
     description:
       "Scarica il contenuto di un LINK (articolo, pagina web, o video di YouTube) e te lo restituisce come testo, così puoi RIASSUMERLO a voce. Usalo per 'riassumimi questo articolo/pagina/video: <url>', 'di cosa parla questo link'. Passa 'url' completo. Dopo aver ricevuto il testo, fai un riassunto chiaro e sintetico (i punti principali). NB: per i video di YouTube i sottotitoli a volte non sono accessibili: se manca il testo, dillo con naturalezza.",
@@ -1530,7 +1545,14 @@ const handlers: Record<string, Handler> = {
     if (!ctx.utenteId) return { result: { ok: false, errore: "nessun_utente" } };
     if (input.nome) setNomeUtente(ctx.utenteId, String(input.nome));
     const voci = leggiVoci(input.preferenze);
-    const prefs: Record<string, unknown> = {};
+    // Fonde nelle preferenze ESISTENTI (non sovrascrivere: lì vive anche il
+    // tema estetico salvato da personalizza_aspetto).
+    let prefs: Record<string, unknown> = {};
+    try {
+      prefs = JSON.parse(getUtente(ctx.utenteId)?.preferenze || "{}") || {};
+    } catch {
+      /* preferenze corrotte: riparto pulito */
+    }
     for (const v of voci) prefs[v.tema] = v.dettaglio;
     if (input.ruolo) prefs["ruolo"] = String(input.ruolo);
     if (input.reparto) prefs["reparto"] = String(input.reparto);
@@ -2832,6 +2854,52 @@ const handlers: Record<string, Handler> = {
     result: { ok: true, gesti: "attivi", nota: "L'utente può ora spostare/ridimensionare/chiudere i pannelli con le mani." },
     azione: { tipo: "apri_gesti" },
   }),
+
+  // ORION su misura: valida gli hex scelti dal modello, salva il tema nelle
+  // preferenze dell'utente (così lo ritrova su ogni dispositivo) e lo applica
+  // a schermo in diretta (onda di colore dal nucleo).
+  personalizza_aspetto: (input, ctx) => {
+    const hex = (v: unknown): string | null => {
+      if (typeof v !== "string") return null;
+      const m = /^#?([0-9a-f]{6})$/i.exec(v.trim());
+      return m ? `#${m[1].toLowerCase()}` : null;
+    };
+    const salva = (tema: unknown) => {
+      if (!ctx.utenteId) return;
+      let prefs: Record<string, unknown> = {};
+      try {
+        prefs = JSON.parse(getUtente(ctx.utenteId)?.preferenze || "{}") || {};
+      } catch {
+        /* preferenze corrotte: riparto pulito */
+      }
+      if (tema) prefs["tema"] = tema;
+      else delete prefs["tema"];
+      setPreferenzeUtente(ctx.utenteId, JSON.stringify(prefs));
+    };
+    if (input.reset) {
+      salva(null);
+      return {
+        result: { ok: true, tema: "originale", nota: "ORION è tornato al suo ciano originale. Una frase breve." },
+        azione: { tipo: "tema", tema: null },
+      };
+    }
+    const accento = hex(input.accento);
+    if (!accento)
+      return {
+        result: { ok: false, errore: "Serve 'accento' esadecimale (es. #ff2d55): traduci tu il desiderio dell'utente in un colore." },
+      };
+    const tema = {
+      accento,
+      nucleo: hex(input.nucleo),
+      sfondo: hex(input.sfondo),
+      nome: input.nome ? String(input.nome).slice(0, 40) : null,
+    };
+    salva(tema);
+    return {
+      result: { ok: true, tema, nota: "Tema applicato in diretta con l'onda di colore e salvato per l'utente. UNA frase evocativa col nome del tema." },
+      azione: { tipo: "tema", tema },
+    };
+  },
 
   chiudi_vista: (input) => {
     const vista = String(input.vista ?? "tutto").toLowerCase().trim() || "tutto";

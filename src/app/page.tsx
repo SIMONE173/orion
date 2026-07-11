@@ -20,6 +20,7 @@ import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
 import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
 import { useClapWake } from "@/components/useClapWake";
+import { applicaTema, type Tema } from "@/lib/tema";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista, Azione } from "@/lib/orion/views";
 
@@ -452,6 +453,10 @@ export default function Home() {
         });
         break;
       }
+      case "tema":
+        // ORION su misura: nuovo look in diretta, con l'onda di colore dal nucleo.
+        applicaTema(a.tema as Tema | null, { morph: true });
+        break;
       default:
         break;
     }
@@ -781,6 +786,9 @@ export default function Home() {
         setAutenticato(Boolean(s.autenticato));
         nomeUtenteRef.current = s.nome || s.utente?.nome || null;
         if (s.abbonamento) setAbbonamento(s.abbonamento as StatoAbb);
+        // ORION su misura: il tema del profilo vince su quello in cache locale
+        // (così l'account porta il suo look su ogni dispositivo, senza onda).
+        if (s.autenticato) applicaTema((s.tema as Tema | null) ?? null);
       } catch {
         setAutenticato(false);
       }

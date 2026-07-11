@@ -16,6 +16,14 @@ export async function GET() {
       onboardingCompleto: u.onboarding_completo === 1,
       nome: u.nome ?? profilo.nome,
       abbonamento: statoAbbonamento(),
+      // ORION su misura: il tema estetico dell'utente (segue l'account ovunque).
+      tema: (() => {
+        try {
+          return JSON.parse(u.preferenze || "{}")?.tema ?? null;
+        } catch {
+          return null;
+        }
+      })(),
       // Continuità: ultimi messaggi per ripopolare la conversazione al reload.
       storico: messaggiRecenti(40).map((m) => ({ role: m.ruolo, content: m.contenuto })),
     };
