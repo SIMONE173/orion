@@ -43,3 +43,6 @@ trailer-render/
 *.tgz
 voce/
 data/backups/
+
+# Rapporti degli stress test (contengono trascrizioni)
+stress/rapporti/

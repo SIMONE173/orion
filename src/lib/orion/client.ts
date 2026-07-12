@@ -153,6 +153,10 @@ export async function runConversation(
       };
     });
 
+  // Contabilità del turno: token reali spesi (per giro e totali). Torna al
+  // chiamante: osservabilità dei costi in produzione e negli stress test.
+  const consumo = { input: 0, output: 0, cacheScrittura: 0, cacheLettura: 0, chiamate: 0 };
+
   try {
     for (let giro = 0; giro < MAX_GIRI; giro++) {
       const resp = await client.messages.create({
@@ -164,6 +168,11 @@ export async function runConversation(
         tools: TOOLS,
         messages: conCacheSullaCoda(messages),
       });
+      consumo.chiamate++;
+      consumo.input += resp.usage.input_tokens;
+      consumo.output += resp.usage.output_tokens;
+      consumo.cacheScrittura += resp.usage.cache_creation_input_tokens ?? 0;
+      consumo.cacheLettura += resp.usage.cache_read_input_tokens ?? 0;
 
       // Conserva l'intero contenuto (inclusi i blocchi thinking firmati) nella storia.
       messages.push({ role: "assistant", content: resp.content });
@@ -220,7 +229,7 @@ export async function runConversation(
         "Problema di autorizzazione con l'API. Verifica la chiave e che l'account abbia accesso al modello.";
     }
 
-    return { testo, viste, errore };
+    return { testo, viste, errore, consumo };
   }
 
   // Estrai le pillole dalla riga [suggerimenti: ...] e PULISCI il testo prima di
@@ -241,5 +250,5 @@ export async function runConversation(
   let suggerimenti = onboardingCompleto ? suggerimentiAI : [];
   if (onboardingCompleto && !suggerimenti.length) suggerimenti = suggerimentiPerViste(visteDedup);
 
-  return { testo, viste: visteDedup, azioni, suggerimenti: suggerimenti.length ? suggerimenti : undefined };
+  return { testo, viste: visteDedup, azioni, suggerimenti: suggerimenti.length ? suggerimenti : undefined, consumo };
 }

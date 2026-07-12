@@ -253,4 +253,7 @@ export type RisultatoConversazione = {
   // Fino a 3 azioni successive suggerite, contestuali al turno appena concluso.
   suggerimenti?: Suggerimento[];
   errore?: "no_key" | "auth" | "credito" | "rate_limit" | "api_error";
+  // Token reali spesi nel turno (tutte le chiamate del giro di tool): dà
+  // osservabilità dei costi in produzione e alimenta gli stress test.
+  consumo?: { input: number; output: number; cacheScrittura: number; cacheLettura: number; chiamate: number };
 };
