@@ -77,12 +77,19 @@ const SELECT_UTENTE = `SELECT id, email, nome, created_at,
   COALESCE(onboarding_completo, 0) AS onboarding_completo, preferenze
   FROM utenti`;
 
+// Nel DB non vive MAI il token di sessione, solo la sua impronta SHA-256: un
+// furto del database non regala sessioni valide (il token vero ce l'ha solo
+// il cookie del browser). Il costo è zero: una hash per richiesta.
+function improntaToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 export function creaSessione(utenteId: number): string {
   const token = crypto.randomBytes(32).toString("hex");
   const now = Date.now();
   db()
     .prepare("INSERT INTO sessioni (token, utente_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
-    .run(token, utenteId, new Date(now).toISOString(), new Date(now + GIORNI_SESSIONE).toISOString());
+    .run(improntaToken(token), utenteId, new Date(now).toISOString(), new Date(now + GIORNI_SESSIONE).toISOString());
   return token;
 }
 
@@ -96,7 +103,7 @@ export function utenteDaSessione(token: string | undefined | null): Utente | nul
               s.expires_at
        FROM sessioni s JOIN utenti u ON u.id = s.utente_id WHERE s.token = ?`
     )
-    .get(token) as (Utente & { expires_at: string }) | undefined;
+    .get(improntaToken(token)) as (Utente & { expires_at: string }) | undefined;
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) {
     eliminaSessione(token);
@@ -104,6 +111,14 @@ export function utenteDaSessione(token: string | undefined | null): Utente | nul
   }
   const { expires_at: _scade, ...utente } = row;
   return utente;
+}
+
+// Igiene: via le sessioni scadute (il cron la chiama ogni giorno). Le sessioni
+// legacy in chiaro (pre-impronta) non matchano più nessun cookie: si eliminano
+// qui riconoscendole dalla scadenza passata o restano inerti fino ad allora.
+export function eliminaSessioniScadute(): number {
+  const r = db().prepare("DELETE FROM sessioni WHERE expires_at < ?").run(new Date().toISOString());
+  return r.changes;
 }
 
 // ── Stato per-utente (onboarding, preferenze, aggancio azienda) ──────────────
@@ -137,7 +152,7 @@ export function getUtente(utenteId: number): Utente | null {
 }
 
 export function eliminaSessione(token: string) {
-  db().prepare("DELETE FROM sessioni WHERE token = ?").run(token);
+  db().prepare("DELETE FROM sessioni WHERE token = ?").run(improntaToken(token));
 }
 
 export function tuttiITenant(): number[] {

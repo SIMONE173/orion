@@ -15,7 +15,7 @@ import { inviaMessaggioWhatsApp } from "@/lib/whatsapp";
 import { processaScadenzeOfferte } from "@/lib/slots";
 import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti, inviaPushAUtente } from "@/lib/push";
-import { tuttiITenant } from "@/lib/auth";
+import { tuttiITenant, eliminaSessioniScadute } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
 import { backupGiornaliero, controllaIntegrita, percorsoBackupOggi } from "@/lib/db";
 import { caricaBackupRemoto } from "@/lib/backup-remoto";
@@ -93,6 +93,13 @@ export async function POST(req: NextRequest) {
   // del giorno). Un DB perso senza backup = studio fermo: non deve succedere.
   // FORTEZZA: prima il controllo di salute (un backup corrotto è una falsa
   // sicurezza), poi la copia locale, poi la copia CIFRATA fuori da Railway.
+  // Igiene delle sessioni: via quelle scadute (una volta per giro, costa nulla).
+  try {
+    eliminaSessioniScadute();
+  } catch {
+    /* mai bloccare il cron per la pulizia */
+  }
+
   let backupFatto = false;
   let backupRemoto: string | null = null;
   const salute = controllaIntegrita();

@@ -25,8 +25,8 @@ export async function POST(req: NextRequest) {
     if (!email || !email.includes("@")) {
       return NextResponse.json({ ok: false, errore: "Email non valida." }, { status: 400 });
     }
-    if (password.length < 6) {
-      return NextResponse.json({ ok: false, errore: "La password deve avere almeno 6 caratteri." }, { status: 400 });
+    if (password.length < 8) {
+      return NextResponse.json({ ok: false, errore: "La password deve avere almeno 8 caratteri." }, { status: 400 });
     }
     if (trovaUtenteByEmail(email)) {
       return NextResponse.json({ ok: false, errore: "Esiste già un account con questa email." }, { status: 409 });

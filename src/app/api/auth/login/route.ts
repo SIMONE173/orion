@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
 
     const utente = trovaUtenteByEmail(email);
     if (!utente || !verifyPassword(password, utente.password_hash)) {
+      // Visibilità operativa: i tentativi falliti restano nei log del server
+      // (mai la password). Una raffica sulla stessa email si nota subito.
+      console.warn(`[auth] login FALLITO per ${email} da ${ipRichiesta(req)}`);
       return NextResponse.json({ ok: false, errore: "Email o password non corretti." }, { status: 401 });
     }
 
