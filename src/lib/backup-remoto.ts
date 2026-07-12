@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import crypto from "node:crypto";
 import zlib from "node:zlib";
 import fs from "node:fs";
@@ -90,16 +90,28 @@ async function ruota(s3: S3Client, prefisso: string, conserva: number) {
 
 // Carica il backup del giorno (già creato da backupGiornaliero) su R2.
 // La domenica la copia va anche tra i settimanali. Ritorna cosa ha fatto.
+// AUTO-RIPARANTE: con soloSeManca=true carica solo se l'oggetto di oggi non è
+// già nel bucket — così un upload saltato (variabili arrivate dopo, rete kaput)
+// si recupera al giro successivo del cron, senza ricaricare ogni 15 minuti.
 export async function caricaBackupRemoto(
-  percorsoFile: string
-): Promise<{ ok: boolean; caricati?: string[]; errore?: string; configurato: boolean }> {
+  percorsoFile: string,
+  opz: { soloSeManca?: boolean } = {}
+): Promise<{ ok: boolean; caricati?: string[]; giaPresente?: boolean; errore?: string; configurato: boolean }> {
   if (!backupRemotoConfigurato()) return { ok: false, configurato: false };
   try {
-    const dati = fs.readFileSync(percorsoFile);
-    const cifrato = cifraBackup(dati);
     const oggi = new Date();
     const giorno = oggi.toISOString().slice(0, 10);
     const s3 = client();
+    if (opz.soloSeManca) {
+      try {
+        await s3.send(new HeadObjectCommand({ Bucket: bucket(), Key: `giornalieri/orion-${giorno}.db.gz.enc` }));
+        return { ok: true, giaPresente: true, configurato: true }; // già al sicuro
+      } catch {
+        /* non c'è (404) → si carica */
+      }
+    }
+    const dati = fs.readFileSync(percorsoFile);
+    const cifrato = cifraBackup(dati);
     const caricati: string[] = [];
 
     const putConChiave = async (key: string) => {

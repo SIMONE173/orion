@@ -17,7 +17,7 @@ import { sincronizzaCalendario } from "@/lib/gcal";
 import { inviaPushATutti, inviaPushAUtente } from "@/lib/push";
 import { tuttiITenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
-import { backupGiornaliero, controllaIntegrita } from "@/lib/db";
+import { backupGiornaliero, controllaIntegrita, percorsoBackupOggi } from "@/lib/db";
 import { caricaBackupRemoto } from "@/lib/backup-remoto";
 
 export const runtime = "nodejs";
@@ -102,9 +102,13 @@ export async function POST(req: NextRequest) {
   try {
     const percorso = await backupGiornaliero();
     backupFatto = percorso !== null;
-    if (percorso && salute.ok) {
-      const r = await caricaBackupRemoto(percorso);
-      if (r.ok) backupRemoto = (r.caricati ?? []).join(", ");
+    // AUTO-RIPARANTE: anche se il locale di oggi esisteva già (percorso null),
+    // se nel bucket manca la copia di oggi la si carica ora (es. variabili R2
+    // configurate a giornata iniziata, o upload fallito al giro precedente).
+    const daCaricare = percorso ?? percorsoBackupOggi();
+    if (daCaricare && salute.ok) {
+      const r = await caricaBackupRemoto(daCaricare, { soloSeManca: true });
+      if (r.ok) backupRemoto = r.giaPresente ? "già al sicuro" : (r.caricati ?? []).join(", ");
       else if (r.configurato) console.error("[cron] backup remoto fallito:", r.errore);
     }
   } catch (e) {

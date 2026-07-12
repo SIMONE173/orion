@@ -727,6 +727,15 @@ export async function backupGiornaliero(conserva = 7): Promise<string | null> {
   return destinazione;
 }
 
+// Il percorso del backup locale di OGGI, se esiste già (serve alla copia
+// remota auto-riparante: locale fatto ma bucket vuoto → si carica comunque).
+export function percorsoBackupOggi(): string | null {
+  const dir = process.env.DATA_DIR || path.join(process.cwd(), "data");
+  const oggi = new Date().toISOString().slice(0, 10);
+  const p = path.join(dir, "backups", `orion-${oggi}.db`);
+  return fs.existsSync(p) ? p : null;
+}
+
 // Formattazione date locali "YYYY-MM-DDTHH:MM".
 function localISO(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
