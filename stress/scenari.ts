@@ -9,6 +9,7 @@ import {
   creaAccount,
   dice,
   riapre,
+  nuovaConversazione,
   verifica,
   haVista,
   haAzione,
@@ -25,6 +26,11 @@ import {
 
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Suffisso del giro (env STRESS_SUFFIX): ogni ri-esecuzione parte con account
+// vergini, senza lo stato dei giri precedenti.
+const SUF = process.env.STRESS_SUFFIX ?? "";
+const mail = (base: string) => `stress-${base}${SUF}@test.orion`;
+
 // ════════════════════════════════════════════════════════════════════════════
 // LOTTO 1 — FONDAMENTA: la fisioterapista autonoma, dalla Chiamata 0 al lavoro
 // vero (agenda, clienti, pagamenti, promemoria, memoria, finanza, tema).
@@ -32,7 +38,7 @@ const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function lottoFondamenta() {
   const S = "fondamenta";
   annota(`\n## Lotto 1 — Fondamenta (fisioterapista autonoma)\n`);
-  const chiara = await creaAccount(`stress-fisio@test.orion`, "Chiara");
+  const chiara = await creaAccount(mail("fisio"), "Chiara");
   const T = tenantDi(chiara.email);
 
   // — Chiamata 0 —
@@ -67,8 +73,9 @@ export async function lottoFondamenta() {
   // — Agenda + clienti —
   r = await dice(chiara, "Segnami la signora Bianchi martedì prossimo alle 15.");
   trascriviTurno("Chiara", "nuovo appuntamento", r);
-  if (conta("appuntamenti", T) === 0) {
-    r = await dice(chiara, "Sì, è una cliente nuova: creala pure, si chiama Anna Bianchi.");
+  // ORION (giustamente) chiede se creare la scheda della cliente nuova: si risponde.
+  if (conta("clienti", T, "LOWER(nome) LIKE ?", ["%bianchi%"]) === 0) {
+    r = await dice(chiara, "Sì, creale pure la scheda: Anna Bianchi, numero 333 445 6677.");
     trascriviTurno("Chiara", "conferma nuova cliente", r);
   }
   verifica(S, "DB: la cliente Bianchi esiste", conta("clienti", T, "LOWER(nome) LIKE ?", ["%bianchi%"]) >= 1);
@@ -85,6 +92,11 @@ export async function lottoFondamenta() {
   // — Pagamenti / finanza —
   r = await dice(chiara, "La Bianchi ha pagato 60 euro per la seduta di oggi, in contanti.");
   trascriviTurno("Chiara", "registra pagamento", r);
+  // Se ORION chiede a quale seduta collegarlo, si risponde (utente vero).
+  if (conta("pagamenti", T) === 0) {
+    r = await dice(chiara, "Collegalo alla seduta di martedì con la Bianchi, registralo pure.");
+    trascriviTurno("Chiara", "chiarisce il pagamento", r);
+  }
   verifica(S, "DB: pagamento registrato", conta("pagamenti", T) >= 1);
 
   r = await dice(chiara, "Quanto ho incassato questo mese?");
@@ -119,7 +131,7 @@ export async function lottoFondamenta() {
 export async function lottoAzienda() {
   const S = "azienda";
   annota(`\n## Lotto 2 — Azienda (officina, 2 utenti)\n`);
-  const tit = await creaAccount(`stress-officina-tit@test.orion`, "Salvo");
+  const tit = await creaAccount(mail("officina-tit"), "Salvo");
   const T = tenantDi(tit.email);
 
   // — Chiamata 0 aziendale —
@@ -147,13 +159,21 @@ export async function lottoAzienda() {
   if (!azienda?.codice_aziendale) throw new Error("senza codice aziendale il lotto non può proseguire");
 
   // — Il dipendente si aggancia col codice —
-  const marco = await creaAccount(`stress-officina-marco@test.orion`, null as unknown as string);
+  const marco = await creaAccount(mail("officina-marco"), null as unknown as string);
   r = await riapre(marco);
   trascriviTurno("(apertura Marco)", "", r);
   r = await dice(marco, `Faccio parte di un'azienda che usa già ORION: il mio codice aziendale è ${azienda.codice_aziendale}. Sono Marco, il meccanico.`);
   trascriviTurno("Marco", "aggancio con codice", r);
-  const uMarco = riga<{ azienda_id: number | null; tenant_id: number | null }>("SELECT azienda_id, tenant_id FROM utenti WHERE email = ?", marco.email);
+  // Marco risponde alla domanda sulle preferenze e CHIUDE il suo onboarding
+  // (senza questo, alla riapertura ORION continua il colloquio, non il briefing).
+  r = await dice(marco, "Aggiornami a voce quando apro ORION, senza riepiloghi scritti. Direi che ci siamo, possiamo lavorare.");
+  trascriviTurno("Marco", "preferenze personali", r);
+  const uMarco = riga<{ azienda_id: number | null; tenant_id: number | null; onboarding_completo: number }>(
+    "SELECT azienda_id, tenant_id, COALESCE(onboarding_completo,0) AS onboarding_completo FROM utenti WHERE email = ?",
+    marco.email
+  );
   verifica(S, "DB: Marco agganciato all'azienda (stesso tenant)", uMarco?.tenant_id === T, JSON.stringify(uMarco));
+  verifica(S, "DB: onboarding di Marco completato", uMarco?.onboarding_completo === 1, `flag=${uMarco?.onboarding_completo}`);
 
   // — PERMESSI VERI: il meccanico non vede i soldi —
   r = await dice(marco, "Quanto abbiamo incassato questo mese in officina?");
@@ -170,6 +190,11 @@ export async function lottoAzienda() {
   // — Compito assegnato —
   r = await dice(tit, "Assegna a Marco il tagliando completo della Fiat Punto del cliente Verdi, entro giovedì.");
   trascriviTurno("Salvo", "assegna compito", r);
+  // Se ORION chiede di creare prima il cliente Verdi, si conferma.
+  if (conta("compiti", T, "LOWER(assegnatario) LIKE ?", ["%marco%"]) === 0) {
+    r = await dice(tit, "Sì, crea pure il cliente Verdi e assegna il compito a Marco.");
+    trascriviTurno("Salvo", "conferma cliente e compito", r);
+  }
   verifica(S, "DB: compito assegnato a Marco", conta("compiti", T, "LOWER(assegnatario) LIKE ?", ["%marco%"]) >= 1);
 
   // — Marco riapre: briefing con messaggio + compito —
@@ -211,7 +236,7 @@ export async function lottoAzienda() {
 export async function lottoGestionale() {
   const S = "gestionale";
   annota(`\n## Lotto 3 — Gestionale esistente (studio legale)\n`);
-  const avv = await creaAccount(`stress-legale@test.orion`, "Avv. Ferri");
+  const avv = await creaAccount(mail("legale"), "Avv. Ferri");
   const T = tenantDi(avv.email);
 
   let r = await riapre(avv);
@@ -240,14 +265,16 @@ export async function lottoGestionale() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tipo: "cliente",
-        chiave: "CL-2024-091",
-        titolo: "Rossi Mario — pratica recupero crediti",
-        dati: { nome: "Mario Rossi", telefono: "+39 333 111 2233", pratica: "recupero crediti", stato: "in corso" },
+        chiave_esterna: "CL-2024-091",
+        nome: "Mario Rossi",
+        telefono: "+39 333 111 2233",
+        note: "Pratica recupero crediti, in corso",
       }),
     });
-    verifica(S, "Ingest: il webhook accetta il dato del gestionale", ing.ok, `status=${ing.status}`);
+    const ingEsito = (await ing.json().catch(() => ({}))) as { ok?: boolean; clienti?: number; ignorati?: number };
+    verifica(S, "Ingest: il webhook IMPORTA il cliente (conteggi)", ing.ok && (ingEsito.clienti ?? 0) >= 1, JSON.stringify(ingEsito));
     await pausa(300);
-    verifica(S, "DB: il dato esterno è arrivato", conta("entita_esterne", T) >= 1 || conta("clienti", T, "LOWER(nome) LIKE ?", ["%rossi%"]) >= 1);
+    verifica(S, "DB: il dato esterno è arrivato", conta("clienti", T, "LOWER(nome) LIKE ?", ["%rossi%"]) >= 1);
 
     r = await dice(avv, "Cosa mi sai dire del cliente Mario Rossi?");
     trascriviTurno("Ferri", "interroga il dato ingerito", r);
@@ -264,10 +291,16 @@ export async function lottoGestionale() {
 export async function lottoTappeto() {
   const S = "tappeto";
   annota(`\n## Lotto 4 — Tappeto delle funzioni\n`);
-  const chiara = await creaAccount(`stress-fisio@test.orion`, "Chiara");
+  const chiara = await creaAccount(mail("fisio"), "Chiara");
   const T = tenantDi(chiara.email);
 
-  const colpi: { nome: string; frase: string; desktop?: boolean; check: (r: Awaited<ReturnType<typeof dice>>) => [boolean, string?] }[] = [
+  const colpi: {
+    nome: string;
+    frase: string;
+    desktop?: boolean;
+    nuovaChat?: boolean; // conversazione fresca (es. pilota "desktop": ambiente coerente dal primo turno)
+    check: (r: Awaited<ReturnType<typeof dice>>) => [boolean, string?];
+  }[] = [
     {
       nome: "Schema/lavagna",
       frase: "Fammi uno schema sui benefici della riabilitazione post-operatoria.",
@@ -291,11 +324,14 @@ export async function lottoTappeto() {
     {
       nome: "Email senza account (degrado garbato)",
       frase: "Leggimi le email di oggi.",
-      check: (r) => [rispostaSana(r) && /collega|configur|account|non.*collegat/i.test(r.testo), r.testo.slice(0, 100)],
+      // Comportamento IDEALE: apre direttamente il pannello di collegamento.
+      check: (r) => [haVista(r, "email_connect") || /collega|configur|account|pannello|non.*collegat/i.test(r.testo), r.testo.slice(0, 100)],
     },
     {
       nome: "Lista d'attesa",
-      frase: "Metti il signor Esposito in lista d'attesa: se si libera un posto questa settimana chiamalo.",
+      // Col numero incluso: senza, ORION (giustamente) lo chiede prima di
+      // inserire — la lista d'attesa serve al riempi-buchi via WhatsApp.
+      frase: "Metti il signor Esposito in lista d'attesa, numero 334 555 6677: se si libera un posto questa settimana avvisalo.",
       check: () => [conta("lista_attesa", T) >= 1],
     },
     {
@@ -312,6 +348,7 @@ export async function lottoTappeto() {
       nome: "Apri app (Desktop)",
       frase: "Apri la Calcolatrice.",
       desktop: true,
+      nuovaChat: true, // da qui in poi: pilota Desktop, conversazione fresca
       check: (r) => [haAzione(r, "apri_app"), (r.azioni ?? []).map((a) => a.tipo).join(",")],
     },
     {
@@ -337,6 +374,7 @@ export async function lottoTappeto() {
       console.log("   ⛔ budget raggiunto: mi fermo qui nel tappeto");
       break;
     }
+    if (colpo.nuovaChat) nuovaConversazione(chiara);
     const r = await dice(chiara, colpo.frase, { desktop: colpo.desktop });
     trascriviTurno("Chiara", colpo.frase, r);
     const [ok, dettaglio] = colpo.check(r);

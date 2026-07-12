@@ -104,6 +104,12 @@ export async function riapre(p: Pilota): Promise<Risposta> {
   return dice(p, "", { avvio: true });
 }
 
+// Conversazione NUOVA sullo stesso account (es. il pilota "desktop": ambiente
+// coerente dal primo turno, senza il contesto misto della chat precedente).
+export function nuovaConversazione(p: Pilota) {
+  p.storia = [];
+}
+
 // ── Lente sul database (verità, non parole) ──────────────────────────────────
 let _db: Database.Database | null = null;
 export function dbLocale(): Database.Database {
