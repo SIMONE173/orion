@@ -129,6 +129,30 @@ export async function runConversation(
   const modello = scegliModello(storico, avvio, allegato, onboardingCompleto);
   const usaThinking = modello === MODEL; // il rapido risponde diretto (velocità)
 
+  // PROMPT CACHING, parte due. Il blocco FISSO (106 strumenti + sistema
+  // stabile, ~28k token) è già a cache dentro buildSystem. Qui si aggiunge il
+  // breakpoint MOBILE sull'ultimo messaggio: nei giri di tool e nei turni
+  // successivi la conversazione già letta (coi tool result, che pesano) si
+  // riusa dal cache invece di essere ripagata per intero a ogni chiamata.
+  const conCacheSullaCoda = (msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] =>
+    msgs.map((m, i) => {
+      if (i !== msgs.length - 1) return m;
+      // Ultimo messaggio: breakpoint sull'ultimo blocco (solo tipi che lo
+      // supportano; una stringa diventa blocco testo).
+      if (typeof m.content === "string") {
+        if (!m.content) return m;
+        return { ...m, content: [{ type: "text" as const, text: m.content, cache_control: { type: "ephemeral" as const } }] };
+      }
+      return {
+        ...m,
+        content: m.content.map((b, j) =>
+          j === m.content.length - 1 && (b.type === "text" || b.type === "tool_result" || b.type === "tool_use")
+            ? { ...b, cache_control: { type: "ephemeral" as const } }
+            : b
+        ),
+      };
+    });
+
   try {
     for (let giro = 0; giro < MAX_GIRI; giro++) {
       const resp = await client.messages.create({
@@ -138,7 +162,7 @@ export async function runConversation(
         ...(usaThinking ? { thinking: { type: "adaptive" as const } } : {}),
         system,
         tools: TOOLS,
-        messages,
+        messages: conCacheSullaCoda(messages),
       });
 
       // Conserva l'intero contenuto (inclusi i blocchi thinking firmati) nella storia.
