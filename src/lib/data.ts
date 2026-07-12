@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
 import { cifra } from "./crypto";
@@ -1646,7 +1647,20 @@ export function creaCliente(c: Partial<Cliente> & { nome: string }): Cliente {
       c.piva ?? null, c.codice_fiscale ?? null, c.indirizzo ?? null,
       c.cap ?? null, c.comune ?? null, c.provincia ?? null, nowISO()
     );
-  return getCliente(Number(r.lastInsertRowid))!;
+  const cliente = getCliente(Number(r.lastInsertRowid))!;
+  emettiEventoUscita("cliente_creato", ritrattoCliente(cliente));
+  return cliente;
+}
+
+// Il ritratto del cliente per il canale d'uscita (chiave del gestionale inclusa).
+function ritrattoCliente(c: Cliente) {
+  return {
+    orion_id: c.id,
+    chiave_esterna: (c as unknown as { origine_chiave?: string | null }).origine_chiave ?? null,
+    nome: c.nome,
+    telefono: c.telefono ?? null,
+    email: c.email ?? null,
+  };
 }
 
 export function aggiornaCliente(id: number, c: Partial<Cliente>): Cliente | undefined {
@@ -1662,6 +1676,9 @@ export function aggiornaCliente(id: number, c: Partial<Cliente>): Cliente | unde
   if (updates.length) {
     values.push(id, T());
     db().prepare(`UPDATE clienti SET ${updates.join(", ")} WHERE id = ? AND tenant_id = ?`).run(...values);
+    const cliente = getCliente(id);
+    if (cliente) emettiEventoUscita("cliente_aggiornato", ritrattoCliente(cliente));
+    return cliente;
   }
   return getCliente(id);
 }
@@ -1722,6 +1739,60 @@ export function trovaConflitti(inizio: string, fine: string, escludiId?: number)
     .all(...(escludiId ? [t, fine, inizio, escludiId] : [t, fine, inizio])) as Appuntamento[];
 }
 
+// ── CANALE D'USCITA: ORION scrive nel gestionale del cliente ─────────────────
+// Le modifiche ad agenda/clienti vengono EMESSE (outbox, stessa transazione
+// logica) e poi consegnate firmate al webhook del gestionale/Zapier (uscita.ts).
+// Solo per il tenant che ha attivato il canale; l'INGRESSO (ingest) non
+// ri-emette mai → nessun eco a rimbalzo.
+
+export function connessioneUscita(): { id: number } | undefined {
+  return db()
+    .prepare("SELECT id FROM connessioni WHERE tenant_id = ? AND attivo = 1 AND webhook_uscita IS NOT NULL LIMIT 1")
+    .get(T()) as { id: number } | undefined;
+}
+
+export function emettiEventoUscita(evento: string, payload: Record<string, unknown>) {
+  const conn = connessioneUscita();
+  if (!conn) return; // canale non attivo: zero costi, zero righe
+  db()
+    .prepare(
+      `INSERT INTO eventi_uscita (tenant_id, connessione_id, evento, payload, prossimo_tentativo, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(T(), conn.id, evento, JSON.stringify(payload), nowISO(), nowISO());
+}
+
+// Attiva (o spegne, url=null) la scrittura verso un sistema collegato. Genera
+// il segreto di firma HMAC che il ricevente userà per verificare l'autenticità.
+export function attivaCanaleUscita(connessioneId: number, url: string | null): { segreto: string | null } {
+  if (!url) {
+    db()
+      .prepare("UPDATE connessioni SET webhook_uscita = NULL, segreto_uscita = NULL, updated_at = ? WHERE id = ? AND tenant_id = ?")
+      .run(nowISO(), connessioneId, T());
+    return { segreto: null };
+  }
+  const segreto = crypto.randomBytes(24).toString("hex");
+  db()
+    .prepare("UPDATE connessioni SET webhook_uscita = ?, segreto_uscita = ?, updated_at = ? WHERE id = ? AND tenant_id = ?")
+    .run(url.trim(), cifra(segreto), nowISO(), connessioneId, T());
+  return { segreto };
+}
+
+// Il ritratto dell'appuntamento che viaggia verso il gestionale: include la
+// CHIAVE ESTERNA se il record è nato lì (così il sistema ritrova il suo).
+function ritrattoAppuntamento(a: Appuntamento) {
+  return {
+    orion_id: a.id,
+    chiave_esterna: (a as unknown as { origine_chiave?: string | null }).origine_chiave ?? null,
+    titolo: a.titolo,
+    inizio: a.inizio,
+    fine: a.fine,
+    stato: a.stato,
+    cliente: a.cliente_nome ?? null,
+    note: a.note ?? null,
+  };
+}
+
 export function creaAppuntamento(a: {
   cliente_id?: number | null;
   titolo: string;
@@ -1736,7 +1807,9 @@ export function creaAppuntamento(a: {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(T(), a.cliente_id ?? null, a.titolo, a.inizio, a.fine, a.stato ?? "da_confermare", a.note ?? null, nowISO());
-  return getAppuntamento(Number(r.lastInsertRowid))!;
+  const app = getAppuntamento(Number(r.lastInsertRowid))!;
+  emettiEventoUscita("appuntamento_creato", ritrattoAppuntamento(app));
+  return app;
 }
 
 export function spostaAppuntamento(id: number, inizio: string, fine: string): Appuntamento | undefined {
@@ -1746,12 +1819,16 @@ export function spostaAppuntamento(id: number, inizio: string, fine: string): Ap
       "UPDATE appuntamenti SET inizio = ?, fine = ?, promemoria_inviato = 0, gcal_dirty = CASE WHEN gcal_id IS NULL THEN gcal_dirty ELSE 1 END WHERE id = ? AND tenant_id = ?"
     )
     .run(inizio, fine, id, T());
-  return getAppuntamento(id);
+  const app = getAppuntamento(id);
+  if (app) emettiEventoUscita("appuntamento_spostato", ritrattoAppuntamento(app));
+  return app;
 }
 
 export function aggiornaStatoAppuntamento(id: number, stato: string): Appuntamento | undefined {
   db().prepare("UPDATE appuntamenti SET stato = ? WHERE id = ? AND tenant_id = ?").run(stato, id, T());
-  return getAppuntamento(id);
+  const app = getAppuntamento(id);
+  if (app) emettiEventoUscita("appuntamento_stato", ritrattoAppuntamento(app)); // conferme e disdette passano da qui
+  return app;
 }
 
 export function eliminaAppuntamento(id: number): boolean {
@@ -1762,10 +1839,11 @@ export function eliminaAppuntamento(id: number): boolean {
       .prepare("INSERT INTO gcal_tombstones (tenant_id, gcal_id, created_at) VALUES (?, ?, ?)")
       .run(T(), app.gcal_id, nowISO());
   }
-  return (
+  const fatto =
     db().prepare("UPDATE appuntamenti SET stato = 'cancellato' WHERE id = ? AND tenant_id = ?").run(id, T())
-      .changes > 0
-  );
+      .changes > 0;
+  if (fatto && app) emettiEventoUscita("appuntamento_cancellato", ritrattoAppuntamento({ ...app, stato: "cancellato" }));
+  return fatto;
 }
 
 // ── Anti no-show: promemoria automatici degli appuntamenti ──────────────────

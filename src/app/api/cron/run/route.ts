@@ -19,6 +19,7 @@ import { tuttiITenant, eliminaSessioniScadute } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
 import { backupGiornaliero, controllaIntegrita, percorsoBackupOggi } from "@/lib/db";
 import { caricaBackupRemoto } from "@/lib/backup-remoto";
+import { consegnaEventiUscita } from "@/lib/uscita";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -194,6 +195,17 @@ export async function POST(req: NextRequest) {
         totPromemoriaApp += await promemoriaAppuntamenti();
       } catch (e) {
         console.error("[cron] promemoria appuntamenti:", e instanceof Error ? e.message : e);
+      }
+    });
+
+    // Canale d'uscita: riconsegna al gestionale gli eventi rimasti in attesa
+    // (rete di sicurezza coi tentativi a distanza crescente; la partenza
+    // immediata avviene a fine turno di conversazione).
+    await runWithTenant(tenantId, async () => {
+      try {
+        await consegnaEventiUscita(50);
+      } catch (e) {
+        console.error("[cron] canale d'uscita:", e instanceof Error ? e.message : e);
       }
     });
 

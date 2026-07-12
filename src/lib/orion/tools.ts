@@ -79,6 +79,7 @@ import {
   messaggiTeamPerUtente,
   segnaMessaggiTeamConsegnati,
   utenteIdPerNome,
+  attivaCanaleUscita,
   chiediApprovazione,
   approvazioniPerMe,
   esitiApprovazioniDaComunicare,
@@ -706,6 +707,20 @@ export const TOOLS: Anthropic.Tool[] = [
         apertura: { type: "string", description: "COME si apre: il nome dell'app installata (es. 'GesCom') se è un programma, oppure l'indirizzo/URL se è un sito. Serve ad ORION per aprirlo da solo al mattino (routine del mattino su Desktop)." },
       },
       required: ["nome"],
+    },
+  },
+  {
+    name: "attiva_scrittura_gestionale",
+    description:
+      "ECOSISTEMA — CANALE D'USCITA. Fa sì che ORION SCRIVA nel sistema che il professionista già usa: da quel momento ogni appuntamento creato/spostato/confermato/disdetto e ogni cliente creato/aggiornato viene SPEDITO (firmato) al webhook del suo gestionale — direttamente o tramite un ponte come Zapier/Make che lo scrive in migliaia di app. Usalo quando l'utente dice 'voglio che gli appuntamenti finiscano anche nel mio gestionale', 'scrivi anche su <sistema>', 'sincronizza verso il mio software'. Serve: 'sistema' (il nome di un sistema GIÀ collegato con collega_sistema) e 'url' (l'indirizzo https del webhook ricevente — es. un Catch Hook di Zapier; se l'utente non ce l'ha, spiegagli con semplicità come crearlo su Zapier e digli che può incollare l'URL qui con la tastiera). Con disattiva=true spegne la scrittura. Il risultato include il SEGRETO DI FIRMA (mostrato solo una volta): invita a salvarlo. NB per Google Calendar non serve: c'è già la sincronia nativa a due vie (collega_calendario).",
+    input_schema: {
+      type: "object",
+      properties: {
+        sistema: { type: "string", description: "Nome del sistema già collegato (es. 'Cliens')" },
+        url: { type: "string", description: "URL https del webhook che riceve gli eventi" },
+        disattiva: { type: "boolean", description: "true = spegne la scrittura verso questo sistema" },
+      },
+      required: ["sistema"],
     },
   },
   {
@@ -2141,6 +2156,44 @@ const handlers: Record<string, Handler> = {
         ingest: conn.token ? { endpoint: "/api/integrazioni/ingest", token: conn.token } : null,
       },
       vista: { tipo: "integrazioni", dati: { connessioni: listConnessioni() } },
+    };
+  },
+
+  // CANALE D'USCITA: ORION scrive nel gestionale del cliente.
+  attiva_scrittura_gestionale: (input) => {
+    const nome = String(input.sistema ?? "").trim().toLowerCase();
+    const url = input.url ? String(input.url).trim() : null;
+    const spegni = input.disattiva === true;
+    if (!nome) return { result: { ok: false, errore: "Serve il nome del sistema collegato." } };
+    const conn = listConnessioni().find((c) => c.nome.toLowerCase().includes(nome));
+    if (!conn)
+      return {
+        result: { ok: false, errore: "Sistema non trovato: va prima registrato con collega_sistema.", sistemi: listConnessioni().map((c) => c.nome) },
+      };
+    if (spegni) {
+      attivaCanaleUscita(conn.id, null);
+      logEvento({ tipo: "uscita_disattivata", descrizione: `Scrittura verso "${conn.nome}" disattivata`, soggetto: conn.nome });
+      return { result: { ok: true, sistema: conn.nome, scrittura: "disattivata" } };
+    }
+    if (!url || !/^https?:\/\//i.test(url))
+      return {
+        result: {
+          ok: false,
+          errore: "serve_url",
+          nota: "Serve l'indirizzo (URL https) del webhook che riceve gli eventi: quello del suo gestionale o di un ponte come Zapier/Make ('Catch Hook'). Spiegaglielo con semplicità e digli che può incollarlo qui con la tastiera.",
+        },
+      };
+    const { segreto } = attivaCanaleUscita(conn.id, url);
+    logEvento({ tipo: "uscita_attivata", descrizione: `ORION ora scrive verso "${conn.nome}"`, soggetto: conn.nome });
+    return {
+      result: {
+        ok: true,
+        sistema: conn.nome,
+        scrittura: "attiva",
+        eventi: ["appuntamento_creato", "appuntamento_spostato", "appuntamento_stato", "appuntamento_cancellato", "cliente_creato", "cliente_aggiornato"],
+        segreto_firma: segreto,
+        nota: "Ogni evento arriva firmato (header X-Orion-Firma, HMAC-SHA256 del corpo con questo segreto): il suo sistema può verificarne l'autenticità. Il segreto compare SOLO ora: digli di salvarlo. A voce conferma in una frase e spiega che da adesso ciò che ORION cambia in agenda arriva anche al suo sistema.",
+      },
     };
   },
 

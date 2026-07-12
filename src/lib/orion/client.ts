@@ -232,6 +232,13 @@ export async function runConversation(
     return { testo, viste, errore, consumo };
   }
 
+  // CANALE D'USCITA: le modifiche fatte in questo turno (appuntamenti, clienti)
+  // partono SUBITO verso il gestionale del cliente, senza far aspettare la
+  // risposta (fire-and-forget; il cron è la rete di sicurezza con i ritentativi).
+  void import("../uscita")
+    .then((u) => u.consegnaEventiUscita(10))
+    .catch(() => {});
+
   // Estrai le pillole dalla riga [suggerimenti: ...] e PULISCI il testo prima di
   // salvarlo/leggerlo: il parlato non deve mai contenere quella riga.
   const { testoPulito, suggerimenti: suggerimentiAI } = estraiSuggerimenti(testo);

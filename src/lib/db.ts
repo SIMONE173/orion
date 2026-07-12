@@ -565,6 +565,26 @@ function migrate(d: Database.Database) {
       deciso_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_approvazioni_stato ON approvazioni(tenant_id, stato, esito_comunicato);
+
+    -- ── CANALE D'USCITA verso il gestionale del cliente (outbox) ─────────────
+    -- Ogni modifica che ORION fa ad agenda/clienti viene EMESSA qui nella
+    -- stessa transazione, poi consegnata (firmata HMAC) al webhook del
+    -- gestionale/Zapier: subito dopo il turno e, come rete di sicurezza, dal
+    -- cron con tentativi a distanza crescente. Ordine preservato per canale.
+    CREATE TABLE IF NOT EXISTS eventi_uscita (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL,
+      connessione_id INTEGER NOT NULL,
+      evento TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      tentativi INTEGER NOT NULL DEFAULT 0,
+      consegnato INTEGER NOT NULL DEFAULT 0,
+      prossimo_tentativo TEXT NOT NULL,
+      ultimo_errore TEXT,
+      created_at TEXT NOT NULL,
+      consegnato_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_uscita_attesa ON eventi_uscita(tenant_id, consegnato, prossimo_tentativo);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
@@ -654,6 +674,10 @@ function migrate(d: Database.Database) {
     // Push MIRATE: a chi appartiene l'iscrizione (per notificare la singola
     // persona: compito assegnato, messaggio del team), non tutto il tenant.
     "ALTER TABLE push_subscriptions ADD COLUMN utente_id INTEGER",
+    // CANALE D'USCITA: dove ORION SCRIVE gli eventi (webhook del gestionale o
+    // di Zapier) e il segreto con cui li firma (HMAC, cifrato a riposo).
+    "ALTER TABLE connessioni ADD COLUMN webhook_uscita TEXT",
+    "ALTER TABLE connessioni ADD COLUMN segreto_uscita TEXT",
   ];
   for (const sql of alters) {
     try {
