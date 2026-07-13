@@ -27,6 +27,21 @@ export async function GET(req: NextRequest) {
     from: process.env.MAIL_FROM || "(default) ORION <no-reply@orionvision.it>",
     chiave: key ? `${key.slice(0, 3)}…(${key.length} caratteri)` : "(vuota)",
   };
+  // Stato del dominio su Resend (senza inviare nulla).
+  if (req.nextUrl.searchParams.get("status") === "1" && key.startsWith("re_")) {
+    try {
+      const r = await fetch("https://api.resend.com/domains", {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      const corpo = (await r.text()).slice(0, 600);
+      info.domini_status = r.status;
+      info.domini = corpo;
+    } catch (e) {
+      info.domini_errore = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   const to = req.nextUrl.searchParams.get("to");
   if (to && key.startsWith("re_")) {
     try {
