@@ -2,33 +2,48 @@ import nodemailer from "nodemailer";
 
 // ──────────────────────────────────────────────────────────────────────────
 // INVIO EMAIL DI SISTEMA (codici di verifica / 2FA). Transazionali, dal
-// dominio di ORION — diverse dalle email dei CLIENTI (src/lib/email.ts, che
-// usano l'account IMAP/SMTP collegato dal professionista).
+// dominio di ORION — diverse dalle email dei CLIENTI (src/lib/email.ts).
 //
-// Config via env (SMTP: Resend, Postmark, Gmail app-password…):
-//   MAIL_HOST, MAIL_PORT (587), MAIL_USER, MAIL_PASS,
-//   MAIL_FROM ("ORION <no-reply@orionvision.it>"), MAIL_SECURE ("1" per 465).
+// Due strade, in ordine di preferenza:
+//  1) API HTTP di Resend (RESEND_API_KEY, o MAIL_PASS che inizia con "re_"):
+//     va su HTTPS/443, mai bloccata dagli host, veloce. CONSIGLIATA.
+//  2) SMTP classico (MAIL_HOST/PORT/USER/PASS) con timeout stretti, così un
+//     problema di rete non blocca MAI la registrazione dell'utente.
+// Se niente è configurato: in sviluppo il codice viene restituito al chiamante
+// (mostrato solo fuori produzione), così il flusso è collaudabile senza email.
 //
-// Se non configurato: DEGRADO utile in sviluppo — il codice NON viene spedito
-// ma restituito al chiamante (che lo mostra solo fuori produzione) e scritto
-// nei log, così il flusso è collaudabile senza un vero server email.
+// Env: MAIL_FROM ("ORION <no-reply@orionvision.it>"); per SMTP anche
+// MAIL_HOST/MAIL_PORT/MAIL_USER/MAIL_PASS/MAIL_SECURE("1" per 465).
 // ──────────────────────────────────────────────────────────────────────────
 
-export function mailerConfigurato(): boolean {
+const MITTENTE = process.env.MAIL_FROM || "ORION <no-reply@orionvision.it>";
+const TIMEOUT_MS = 10_000;
+
+function chiaveResend(): string | null {
+  const k = (process.env.RESEND_API_KEY || process.env.MAIL_PASS || "").trim();
+  return k.startsWith("re_") ? k : null;
+}
+function smtpConfigurato(): boolean {
   return Boolean(process.env.MAIL_HOST && process.env.MAIL_USER && process.env.MAIL_PASS);
 }
-
-const MITTENTE = process.env.MAIL_FROM || "ORION <no-reply@orionvision.it>";
+export function mailerConfigurato(): boolean {
+  return Boolean(chiaveResend()) || smtpConfigurato();
+}
 
 let _tx: nodemailer.Transporter | null = null;
 function transport(): nodemailer.Transporter | null {
-  if (!mailerConfigurato()) return null;
+  if (!smtpConfigurato()) return null;
   if (_tx) return _tx;
   _tx = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
     port: Number(process.env.MAIL_PORT || 587),
     secure: process.env.MAIL_SECURE === "1",
     auth: { user: process.env.MAIL_USER!, pass: process.env.MAIL_PASS! },
+    // Timeout stretti: se l'SMTP non risponde, si fallisce in fretta (mai un
+    // hang che blocca la registrazione).
+    connectionTimeout: TIMEOUT_MS,
+    greetingTimeout: TIMEOUT_MS,
+    socketTimeout: TIMEOUT_MS,
   });
   return _tx;
 }
@@ -51,24 +66,49 @@ function corpoCodice(codice: string, scopo: "signup" | "login"): { testo: string
   return { testo, html, oggetto: `${codice} — ${titolo} · ORION` };
 }
 
+async function inviaViaResend(key: string, email: string, oggetto: string, testo: string, html: string): Promise<boolean> {
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: MITTENTE, to: [email], subject: oggetto, text: testo, html }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (r.ok) return true;
+    const dettaglio = await r.text().catch(() => "");
+    console.error(`[mailer] Resend API ${r.status}: ${dettaglio.slice(0, 300)}`);
+    return false;
+  } catch (e) {
+    console.error("[mailer] Resend API errore:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
 // Invia il codice. Ritorna { inviata, codiceDev? }: codiceDev è valorizzato solo
-// quando il mailer NON è configurato e non siamo in produzione (per i test).
+// quando NON c'è mailer e non siamo in produzione (per i test).
 export async function inviaCodice(
   email: string,
   codice: string,
   scopo: "signup" | "login"
 ): Promise<{ inviata: boolean; codiceDev?: string }> {
-  const tx = transport();
-  if (!tx) {
-    console.warn(`[mailer] NON configurato: codice ${scopo} per ${email} = ${codice} (non spedito)`);
-    return { inviata: false, ...(process.env.NODE_ENV !== "production" ? { codiceDev: codice } : {}) };
-  }
   const { testo, html, oggetto } = corpoCodice(codice, scopo);
-  try {
-    await tx.sendMail({ from: MITTENTE, to: email, subject: oggetto, text: testo, html });
-    return { inviata: true };
-  } catch (e) {
-    console.error("[mailer] invio fallito:", e instanceof Error ? e.message : e);
-    return { inviata: false };
+
+  const key = chiaveResend();
+  if (key) {
+    return { inviata: await inviaViaResend(key, email, oggetto, testo, html) };
   }
+
+  const tx = transport();
+  if (tx) {
+    try {
+      await tx.sendMail({ from: MITTENTE, to: email, subject: oggetto, text: testo, html });
+      return { inviata: true };
+    } catch (e) {
+      console.error("[mailer] SMTP invio fallito:", e instanceof Error ? e.message : e);
+      return { inviata: false };
+    }
+  }
+
+  console.warn(`[mailer] NON configurato: codice ${scopo} per ${email} = ${codice} (non spedito)`);
+  return { inviata: false, ...(process.env.NODE_ENV !== "production" ? { codiceDev: codice } : {}) };
 }
