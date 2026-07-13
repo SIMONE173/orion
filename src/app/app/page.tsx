@@ -21,6 +21,7 @@ import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
 import { useClapWake } from "@/components/useClapWake";
 import { applicaTema, type Tema } from "@/lib/tema";
+import { PIANI } from "@/lib/prezzi";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista, Azione } from "@/lib/orion/views";
 
@@ -28,7 +29,8 @@ type Msg = { role: "user" | "assistant"; content: string };
 
 type StatoAbb = {
   configurato: boolean;
-  stato: "demo" | "prova" | "attivo" | "scaduto" | "annullato";
+  stato: "demo" | "da_attivare" | "prova" | "attivo" | "scaduto" | "annullato";
+  piano: "pro" | "azienda" | null;
   inProva: boolean;
   giorniProvaRimasti: number;
   attivo: boolean;
@@ -817,9 +819,13 @@ export default function Home() {
     setAutenticato(false);
   }, []);
 
-  const avviaCheckout = useCallback(async () => {
+  const avviaCheckout = useCallback(async (piano: "pro" | "azienda") => {
     try {
-      const r = await fetch("/api/stripe/checkout", { method: "POST" });
+      const r = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ piano }),
+      });
       const d = await r.json();
       if (d?.ok && d.url) window.location.href = d.url;
     } catch {
@@ -902,30 +908,57 @@ export default function Home() {
     return <AuthScreen onAuth={() => setAutenticato(true)} />;
   }
 
-  // Paywall: solo se Stripe è attivo E l'accesso non è consentito (prova scaduta,
-  // niente abbonamento). In modalità demo (Stripe spento) non blocca nulla.
+  // Paywall / scelta piano: se Stripe è attivo E l'accesso non è consentito
+  // (mai avviato = "da_attivare", oppure prova/abbonamento scaduto). In modalità
+  // demo (Stripe spento) non blocca nulla.
   if (abbonamento?.configurato && !abbonamento.accessoConsentito) {
+    const scaduto = abbonamento.stato === "scaduto";
     return (
       <main className="flex min-h-screen flex-col items-center justify-center px-5 py-10">
-        <div className="fade-in w-full max-w-md text-center">
-          <OrionCore state="idle" size={110} />
-          <h1 className="mt-6 text-2xl font-semibold text-slate-50">La prova è terminata</h1>
-          <p className="mt-3 text-slate-300">
-            Spero che ORION ti sia stato utile in questi giorni. Attiva l&apos;abbonamento per
-            continuare ad averlo al tuo fianco — agenda, clienti, promemoria e tutto il resto.
+        <div className="fade-in w-full max-w-3xl text-center">
+          <OrionCore state="idle" size={92} />
+          <h1 className="mt-5 text-2xl font-semibold text-slate-50">
+            {scaduto ? "Riattiva il tuo ORION" : "Scegli il tuo ORION"}
+          </h1>
+          <p className="mt-2 text-slate-400">
+            {scaduto
+              ? "La tua prova o il tuo abbonamento è terminato. Scegli un piano per continuare."
+              : "7 giorni di prova gratuita. Nessun addebito ora: disdici quando vuoi durante la prova."}
           </p>
-          <button
-            onClick={avviaCheckout}
-            className="mt-7 w-full rounded-xl bg-cyan-500/90 px-6 py-3.5 font-medium text-slate-900 transition hover:bg-cyan-400"
-          >
-            Attiva l&apos;abbonamento
-          </button>
-          <button
-            onClick={logout}
-            className="mt-3 text-sm text-slate-500 hover:text-slate-300"
-          >
-            Esci
-          </button>
+
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            {(["pro", "azienda"] as const).map((p) => {
+              const info = PIANI[p];
+              return (
+                <div key={p} className="glass flex flex-col rounded-2xl border border-white/10 p-6 text-left">
+                  <div className="text-xs uppercase tracking-wider text-cyan-300">{info.sottotitolo}</div>
+                  <div className="mt-1 text-xl font-semibold text-slate-50">{info.nome}</div>
+                  <div className="mt-3 flex items-end gap-1">
+                    <span className="text-4xl font-bold text-slate-50">€{info.prezzo}</span>
+                    <span className="mb-1 text-sm text-slate-400">/{info.periodo.replace("al ", "")}</span>
+                  </div>
+                  <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-300">
+                    {info.caratteristiche.map((c) => (
+                      <li key={c} className="flex gap-2">
+                        <span className="text-cyan-400">✓</span> {c}
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    onClick={() => avviaCheckout(p)}
+                    className="mt-6 w-full rounded-xl bg-cyan-500/90 px-6 py-3 font-medium text-slate-900 transition hover:bg-cyan-400"
+                  >
+                    {scaduto ? `Attiva ${info.nome}` : "Inizia la prova di 7 giorni"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="mt-5 text-xs text-slate-500">
+            Pagamenti sicuri con Stripe · Disdici in qualsiasi momento · La carta serve solo per attivare la prova
+          </p>
+          <button onClick={logout} className="mt-4 text-sm text-slate-500 hover:text-slate-300">Esci</button>
         </div>
       </main>
     );

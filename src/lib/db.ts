@@ -708,6 +708,8 @@ function migrate(d: Database.Database) {
     // utenti GIÀ esistenti restano abilitati (grandfathered); i NUOVI account
     // partono da 0 (impostato esplicitamente in creaUtente) e devono verificare.
     "ALTER TABLE utenti ADD COLUMN email_verificata INTEGER NOT NULL DEFAULT 1",
+    // ABBONAMENTO: quale piano ha scelto (pro | azienda).
+    "ALTER TABLE abbonamenti ADD COLUMN piano TEXT",
   ];
   for (const sql of alters) {
     try {

@@ -15,7 +15,7 @@ export async function GET() {
       // dipendente fa il suo): leggi il flag dell'utente, non del tenant.
       onboardingCompleto: u.onboarding_completo === 1,
       nome: u.nome ?? profilo.nome,
-      abbonamento: statoAbbonamento(),
+      abbonamento: statoAbbonamento(u.email),
       // ORION su misura: il tema estetico dell'utente (segue l'account ovunque).
       tema: (() => {
         try {

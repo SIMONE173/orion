@@ -33,15 +33,20 @@ export async function POST(req: NextRequest) {
         const subId = typeof s.subscription === "string" ? s.subscription : s.subscription?.id ?? null;
         if (tenant && customer) {
           let periodo: string | null = null;
+          let stato = "attivo";
+          let piano: string | null = null;
           if (subId) {
             const sub = await stripe().subscriptions.retrieve(subId);
             periodo = iso((sub as unknown as { current_period_end: number }).current_period_end);
+            stato = sub.status === "trialing" ? "prova" : "attivo";
+            piano = (sub.metadata?.piano as string) || null;
           }
           runWithTenant(tenant, () =>
             salvaAbbonamento({
               stripe_customer_id: customer,
               stripe_subscription_id: subId,
-              stato: "attivo",
+              stato,
+              piano,
               periodo_fine: periodo,
             })
           );
@@ -54,11 +59,19 @@ export async function POST(req: NextRequest) {
         const customer = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
         const tenant = tenantDaStripeCustomer(customer);
         if (tenant) {
-          const attivo = sub.status === "active" || sub.status === "trialing";
-          const stato = sub.cancel_at_period_end ? "annullato" : attivo ? "attivo" : "scaduto";
+          // 'trialing' = in prova; 'active' = pagante; disdetta programmata =
+          // 'annullato' (accesso fino a fine periodo); il resto = scaduto.
+          const stato = sub.cancel_at_period_end
+            ? "annullato"
+            : sub.status === "trialing"
+            ? "prova"
+            : sub.status === "active"
+            ? "attivo"
+            : "scaduto";
           const periodo = iso((sub as unknown as { current_period_end: number }).current_period_end);
+          const piano = (sub.metadata?.piano as string) || null;
           runWithTenant(tenant, () =>
-            salvaAbbonamento({ stripe_subscription_id: sub.id, stato, periodo_fine: periodo })
+            salvaAbbonamento({ stripe_subscription_id: sub.id, stato, piano, periodo_fine: periodo })
           );
         }
         break;

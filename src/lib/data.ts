@@ -197,6 +197,7 @@ export type Abbonamento = {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   stato: string;
+  piano: string | null;
   periodo_fine: string | null;
   created_at: string;
   updated_at: string;
@@ -204,7 +205,8 @@ export type Abbonamento = {
 
 export type StatoAbbonamento = {
   configurato: boolean;
-  stato: "demo" | "prova" | "attivo" | "scaduto" | "annullato";
+  stato: "demo" | "da_attivare" | "prova" | "attivo" | "scaduto" | "annullato";
+  piano: "pro" | "azienda" | null;
   inProva: boolean;
   giorniProvaRimasti: number;
   attivo: boolean;
@@ -2294,10 +2296,18 @@ export function tenantDaPhoneNumberId(phoneNumberId: string): number | null {
 
 // ── Abbonamento (Stripe, Fase 3) ─────────────────────────────────────────────
 
-const STRIPE_CONFIG = Boolean(
-  (process.env.STRIPE_SECRET_KEY || "").trim() && (process.env.STRIPE_PRICE_ID || "").trim()
-);
-const GIORNI_PROVA = 14;
+// Lette a ogni chiamata (non a import-time): così i test possono configurarle
+// e riflettono eventuali cambi di env senza riavvio.
+function stripeConfig(): boolean {
+  return Boolean(
+    (process.env.STRIPE_SECRET_KEY || "").trim() &&
+      ((process.env.STRIPE_PRICE_PRO || "").trim() || (process.env.STRIPE_PRICE_AZIENDA || "").trim())
+  );
+}
+// Email che ha sempre accesso senza pagare (il proprietario).
+function adminEmail(): string {
+  return (process.env.ORION_ADMIN_EMAIL || "").trim().toLowerCase();
+}
 
 export function getAbbonamento(): Abbonamento | undefined {
   return db().prepare("SELECT * FROM abbonamenti WHERE tenant_id = ?").get(T()) as
@@ -2309,6 +2319,7 @@ export function salvaAbbonamento(a: {
   stripe_customer_id?: string | null;
   stripe_subscription_id?: string | null;
   stato?: string;
+  piano?: string | null;
   periodo_fine?: string | null;
 }): Abbonamento {
   const t = T();
@@ -2316,12 +2327,13 @@ export function salvaAbbonamento(a: {
   const prec = getAbbonamento();
   db()
     .prepare(
-      `INSERT INTO abbonamenti (tenant_id, stripe_customer_id, stripe_subscription_id, stato, periodo_fine, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO abbonamenti (tenant_id, stripe_customer_id, stripe_subscription_id, stato, piano, periodo_fine, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(tenant_id) DO UPDATE SET
          stripe_customer_id = COALESCE(excluded.stripe_customer_id, abbonamenti.stripe_customer_id),
          stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, abbonamenti.stripe_subscription_id),
          stato = excluded.stato,
+         piano = COALESCE(excluded.piano, abbonamenti.piano),
          periodo_fine = excluded.periodo_fine,
          updated_at = excluded.updated_at`
     )
@@ -2329,7 +2341,8 @@ export function salvaAbbonamento(a: {
       t,
       a.stripe_customer_id ?? prec?.stripe_customer_id ?? null,
       a.stripe_subscription_id ?? prec?.stripe_subscription_id ?? null,
-      a.stato ?? prec?.stato ?? "prova",
+      a.stato ?? prec?.stato ?? "da_attivare",
+      a.piano ?? prec?.piano ?? null,
       a.periodo_fine ?? null,
       now,
       now
@@ -2346,52 +2359,51 @@ export function tenantDaStripeCustomer(customerId: string): number | null {
 }
 
 // Stato calcolato dell'abbonamento del tenant corrente (per paywall e UI).
-export function statoAbbonamento(): StatoAbbonamento {
-  if (!STRIPE_CONFIG) {
-    return {
-      configurato: false,
-      stato: "demo",
-      inProva: false,
-      giorniProvaRimasti: 0,
-      attivo: false,
-      accessoConsentito: true,
-      periodoFine: null,
-    };
+// Modello: la prova di 7 giorni la gestisce STRIPE (carta richiesta). Senza un
+// abbonamento in prova/attivo → nessun accesso (paywall). `email` opzionale per
+// il bypass del proprietario (ORION_ADMIN_EMAIL).
+export function statoAbbonamento(email?: string | null): StatoAbbonamento {
+  const configurato = stripeConfig();
+  const base = { configurato, piano: null as StatoAbbonamento["piano"], inProva: false, giorniProvaRimasti: 0, attivo: false, periodoFine: null as string | null };
+
+  // Modalità demo (Stripe non configurato): tutto aperto, nessun paywall.
+  if (!configurato) return { ...base, stato: "demo", attivo: true, accessoConsentito: true };
+
+  // Proprietario: accesso pieno senza pagare.
+  const admin = adminEmail();
+  if (email && admin && email.trim().toLowerCase() === admin) {
+    return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
   }
-  const t = T();
+
   const ab = getAbbonamento();
   const ora = Date.now();
-
-  // Abbonamento attivo (o annullato ma ancora nel periodo pagato).
   const periodoFine = ab?.periodo_fine ?? null;
   const periodoValido = periodoFine ? new Date(periodoFine).getTime() > ora : false;
-  if ((ab?.stato === "attivo" || ab?.stato === "annullato") && periodoValido) {
+  const piano = (ab?.piano === "azienda" || ab?.piano === "pro" ? ab.piano : null) as StatoAbbonamento["piano"];
+
+  // In prova (trialing) o attivo o annullato-ma-ancora-nel-periodo → accesso.
+  if ((ab?.stato === "prova" || ab?.stato === "attivo" || ab?.stato === "annullato") && periodoValido) {
+    const inProva = ab.stato === "prova";
+    const giorniRimasti = inProva && periodoFine ? Math.max(0, Math.ceil((new Date(periodoFine).getTime() - ora) / 86_400_000)) : 0;
     return {
-      configurato: true,
+      ...base,
       stato: ab.stato as StatoAbbonamento["stato"],
-      inProva: false,
-      giorniProvaRimasti: 0,
+      piano,
+      inProva,
+      giorniProvaRimasti: giorniRimasti,
       attivo: ab.stato === "attivo",
       accessoConsentito: true,
       periodoFine,
     };
   }
 
-  // Altrimenti: prova gratuita calcolata dalla data di creazione dell'account.
-  const u = db().prepare("SELECT created_at FROM utenti WHERE id = ?").get(t) as
-    | { created_at: string }
-    | undefined;
-  const inizio = u ? new Date(u.created_at).getTime() : ora;
-  const fineProva = inizio + GIORNI_PROVA * 24 * 60 * 60 * 1000;
-  const giorniRimasti = Math.max(0, Math.ceil((fineProva - ora) / (24 * 60 * 60 * 1000)));
-  const inProva = giorniRimasti > 0;
+  // Nessun abbonamento ancora avviato → deve iniziare la prova (con carta).
+  // Abbonamento scaduto/non pagato → paywall.
   return {
-    configurato: true,
-    stato: inProva ? "prova" : "scaduto",
-    inProva,
-    giorniProvaRimasti: giorniRimasti,
-    attivo: false,
-    accessoConsentito: inProva,
+    ...base,
+    stato: ab ? "scaduto" : "da_attivare",
+    piano,
+    accessoConsentito: false,
     periodoFine,
   };
 }
