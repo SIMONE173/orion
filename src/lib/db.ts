@@ -585,6 +585,32 @@ function migrate(d: Database.Database) {
       consegnato_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_uscita_attesa ON eventi_uscita(tenant_id, consegnato, prossimo_tentativo);
+
+    -- ── SICUREZZA ACCOUNT: verifica email + 2FA a codice ─────────────────────
+    -- Codici usa-e-getta (6 cifre) inviati via email: nel DB solo l'IMPRONTA,
+    -- mai il codice in chiaro. scopo = 'signup' (verifica email) | 'login' (2FA).
+    CREATE TABLE IF NOT EXISTS codici_verifica (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      codice_hash TEXT NOT NULL,
+      scopo TEXT NOT NULL,
+      tentativi INTEGER NOT NULL DEFAULT 0,
+      scadenza TEXT NOT NULL,
+      usato INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_codici_email ON codici_verifica(email, scopo, usato);
+
+    -- Dispositivi fidati: dopo la 2FA l'utente può "ricordare" il browser per
+    -- 30 giorni e non rifare il codice a ogni accesso (solo l'impronta del token).
+    CREATE TABLE IF NOT EXISTS dispositivi_fidati (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      utente_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL,
+      scadenza TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dispositivi_utente ON dispositivi_fidati(utente_id, token_hash);
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
@@ -678,6 +704,10 @@ function migrate(d: Database.Database) {
     // di Zapier) e il segreto con cui li firma (HMAC, cifrato a riposo).
     "ALTER TABLE connessioni ADD COLUMN webhook_uscita TEXT",
     "ALTER TABLE connessioni ADD COLUMN segreto_uscita TEXT",
+    // SICUREZZA: l'email dell'account è stata verificata? DEFAULT 1 così gli
+    // utenti GIÀ esistenti restano abilitati (grandfathered); i NUOVI account
+    // partono da 0 (impostato esplicitamente in creaUtente) e devono verificare.
+    "ALTER TABLE utenti ADD COLUMN email_verificata INTEGER NOT NULL DEFAULT 1",
   ];
   for (const sql of alters) {
     try {

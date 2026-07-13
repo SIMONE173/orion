@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { creaUtente, creaSessione, trovaUtenteByEmail } from "@/lib/auth";
-import { COOKIE_SESSIONE, MAX_AGE_SESSIONE } from "@/lib/sessione";
+import { creaUtente, trovaUtenteByEmail, creaCodiceVerifica } from "@/lib/auth";
 import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
+import { inviaCodice } from "@/lib/mailer";
+import { emailValida } from "@/lib/validazione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// REGISTRAZIONE: crea l'account come NON verificato e invia un codice all'email.
+// Nessuna sessione finché il codice non è confermato (/api/auth/verifica) → non
+// ci si può più registrare con email inesistenti.
 export async function POST(req: NextRequest) {
   try {
-    // Anti abuso: max 5 registrazioni all'ora per IP.
     const lim = rateLimit(`signup:${ipRichiesta(req)}`, 5, 60 * 60 * 1000);
     if (!lim.ok) {
       return NextResponse.json(
@@ -22,8 +25,8 @@ export async function POST(req: NextRequest) {
     const password = String(body?.password ?? "");
     const nome = body?.nome ? String(body.nome).trim() : undefined;
 
-    if (!email || !email.includes("@")) {
-      return NextResponse.json({ ok: false, errore: "Email non valida." }, { status: 400 });
+    if (!emailValida(email)) {
+      return NextResponse.json({ ok: false, errore: "Inserisci un indirizzo email valido." }, { status: 400 });
     }
     if (password.length < 8) {
       return NextResponse.json({ ok: false, errore: "La password deve avere almeno 8 caratteri." }, { status: 400 });
@@ -32,17 +35,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, errore: "Esiste già un account con questa email." }, { status: 409 });
     }
 
-    const utente = creaUtente(email, password, nome);
-    const token = creaSessione(utente.id);
-    const res = NextResponse.json({ ok: true, utente });
-    res.cookies.set(COOKIE_SESSIONE, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: MAX_AGE_SESSIONE,
+    creaUtente(email, password, nome); // nasce NON verificato (email_verificata = 0)
+    const codice = creaCodiceVerifica(email, "signup");
+    const esito = await inviaCodice(email, codice, "signup");
+
+    return NextResponse.json({
+      ok: true,
+      serve_verifica: true,
+      scopo: "signup",
+      email,
+      // Solo in sviluppo e senza mailer: mostra il codice per collaudare.
+      ...(esito.codiceDev ? { codice_dev: esito.codiceDev } : {}),
     });
-    return res;
   } catch (e) {
     console.error("[/api/auth/signup]", e);
     return NextResponse.json({ ok: false, errore: "Errore interno." }, { status: 500 });

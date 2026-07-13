@@ -8,6 +8,9 @@ import { runWithTenant } from "./tenant";
 
 export const COOKIE_SESSIONE = "orion_sess";
 export const MAX_AGE_SESSIONE = 30 * 24 * 60 * 60; // 30 giorni
+// Dispositivo fidato (2FA "ricordami 30 giorni"): valore = "<utenteId>:<token>".
+export const COOKIE_DISPOSITIVO = "orion_dev";
+export const MAX_AGE_DISPOSITIVO = 30 * 24 * 60 * 60;
 
 export async function utenteCorrente(): Promise<Utente | null> {
   const store = await cookies();

@@ -55,8 +55,9 @@ export function creaUtente(email: string, password: string, nome?: string): Uten
       .run(emailNorm, hash, nome ?? null, now);
     const id = Number(r.lastInsertRowid);
     // Di default l'utente opera sul proprio tenant e deve ancora fare l'onboarding.
+    // email_verificata = 0: dovrà confermare l'email col codice prima di entrare.
     db()
-      .prepare("UPDATE utenti SET tenant_id = ?, onboarding_completo = 0 WHERE id = ?")
+      .prepare("UPDATE utenti SET tenant_id = ?, onboarding_completo = 0, email_verificata = 0 WHERE id = ?")
       .run(id, id);
     // Profilo (memoria operativa) vuoto per questo tenant → fa partire la Chiamata 0.
     db()
@@ -153,6 +154,90 @@ export function getUtente(utenteId: number): Utente | null {
 
 export function eliminaSessione(token: string) {
   db().prepare("DELETE FROM sessioni WHERE token = ?").run(improntaToken(token));
+}
+
+// ── VERIFICA EMAIL + 2FA A CODICE ────────────────────────────────────────────
+// Codice a 6 cifre, nel DB solo l'impronta (email come sale). Scade in 10',
+// max 5 tentativi, usa-e-getta. scopo = 'signup' (conferma email) | 'login' (2FA).
+
+const SCADENZA_CODICE_MIN = 10;
+const MAX_TENTATIVI_CODICE = 5;
+
+function improntaCodice(email: string, codice: string): string {
+  return crypto.createHash("sha256").update(`${email.toLowerCase().trim()}:${codice}`).digest("hex");
+}
+
+export function creaCodiceVerifica(email: string, scopo: "signup" | "login"): string {
+  const e = email.toLowerCase().trim();
+  // Un solo codice valido per volta: invalida i precedenti non usati.
+  db().prepare("UPDATE codici_verifica SET usato = 1 WHERE email = ? AND scopo = ? AND usato = 0").run(e, scopo);
+  const codice = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+  const scadenza = new Date(Date.now() + SCADENZA_CODICE_MIN * 60_000).toISOString();
+  db()
+    .prepare("INSERT INTO codici_verifica (email, codice_hash, scopo, scadenza, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(e, improntaCodice(e, codice), scopo, scadenza, new Date().toISOString());
+  return codice;
+}
+
+// Ritorna ok=true solo se il codice è giusto, non scaduto, entro i tentativi.
+export function verificaCodice(email: string, codice: string, scopo: "signup" | "login"): { ok: boolean; errore?: string } {
+  const e = email.toLowerCase().trim();
+  const riga = db()
+    .prepare("SELECT * FROM codici_verifica WHERE email = ? AND scopo = ? AND usato = 0 ORDER BY id DESC LIMIT 1")
+    .get(e, scopo) as { id: number; codice_hash: string; tentativi: number; scadenza: string } | undefined;
+  if (!riga) return { ok: false, errore: "Nessun codice in attesa. Richiedine uno nuovo." };
+  if (new Date(riga.scadenza).getTime() < Date.now()) {
+    db().prepare("UPDATE codici_verifica SET usato = 1 WHERE id = ?").run(riga.id);
+    return { ok: false, errore: "Codice scaduto. Richiedine uno nuovo." };
+  }
+  if (riga.tentativi >= MAX_TENTATIVI_CODICE) {
+    db().prepare("UPDATE codici_verifica SET usato = 1 WHERE id = ?").run(riga.id);
+    return { ok: false, errore: "Troppi tentativi. Richiedi un nuovo codice." };
+  }
+  const atteso = Buffer.from(riga.codice_hash, "hex");
+  const dato = Buffer.from(improntaCodice(e, codice), "hex");
+  const giusto = atteso.length === dato.length && crypto.timingSafeEqual(atteso, dato);
+  if (!giusto) {
+    db().prepare("UPDATE codici_verifica SET tentativi = tentativi + 1 WHERE id = ?").run(riga.id);
+    const rimasti = MAX_TENTATIVI_CODICE - (riga.tentativi + 1);
+    return { ok: false, errore: rimasti > 0 ? `Codice non corretto. ${rimasti} tentativi rimasti.` : "Troppi tentativi. Richiedi un nuovo codice." };
+  }
+  db().prepare("UPDATE codici_verifica SET usato = 1 WHERE id = ?").run(riga.id);
+  return { ok: true };
+}
+
+export function setEmailVerificata(email: string) {
+  db().prepare("UPDATE utenti SET email_verificata = 1 WHERE email = ?").run(email.toLowerCase().trim());
+}
+
+export function emailVerificata(utenteId: number): boolean {
+  const r = db().prepare("SELECT email_verificata FROM utenti WHERE id = ?").get(utenteId) as { email_verificata: number } | undefined;
+  return r?.email_verificata === 1;
+}
+
+export function eliminaCodiciScaduti(): number {
+  return db().prepare("DELETE FROM codici_verifica WHERE scadenza < ? OR usato = 1").run(new Date().toISOString()).changes;
+}
+
+// ── DISPOSITIVI FIDATI ("ricorda questo dispositivo 30 giorni") ──────────────
+const GIORNI_DISPOSITIVO = 30 * 24 * 60 * 60 * 1000;
+
+export function creaDispositivoFidato(utenteId: number): string {
+  const token = crypto.randomBytes(32).toString("hex");
+  db()
+    .prepare("INSERT INTO dispositivi_fidati (utente_id, token_hash, scadenza, created_at) VALUES (?, ?, ?, ?)")
+    .run(utenteId, improntaToken(token), new Date(Date.now() + GIORNI_DISPOSITIVO).toISOString(), new Date().toISOString());
+  return token;
+}
+
+export function dispositivoFidato(utenteId: number, token: string | undefined | null): boolean {
+  if (!token) return false;
+  const r = db()
+    .prepare("SELECT scadenza FROM dispositivi_fidati WHERE utente_id = ? AND token_hash = ?")
+    .get(utenteId, improntaToken(token)) as { scadenza: string } | undefined;
+  if (!r) return false;
+  if (new Date(r.scadenza).getTime() < Date.now()) return false;
+  return true;
 }
 
 export function tuttiITenant(): number[] {
