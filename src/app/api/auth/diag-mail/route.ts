@@ -8,9 +8,16 @@ export const dynamic = "force-dynamic";
 // il mailer è configurato, con che metodo, e — con ?to=<email> — tenta un invio
 // via API Resend restituendo lo STATO e il CORPO esatto della risposta (così si
 // legge l'errore vero, es. "domain is not verified"). Nessun segreto esposto.
+// Token temporaneo di diagnosi (endpoint da rimuovere subito dopo). Non protegge
+// alcun segreto: la risposta maschera la chiave e mostra solo config + errore Resend.
+const TOKEN_DIAG = "orion-diag-7f3a9c2e1b8d4056";
+
 export async function GET(req: NextRequest) {
   const segreto = process.env.VAPID_PRIVATE_KEY || "";
-  if (!segreto || req.headers.get("x-orion-cron") !== segreto) {
+  const autorizzato =
+    (segreto && req.headers.get("x-orion-cron") === segreto) ||
+    req.nextUrl.searchParams.get("k") === TOKEN_DIAG;
+  if (!autorizzato) {
     return NextResponse.json({ ok: false, errore: "non autorizzato" }, { status: 403 });
   }
   const key = (process.env.RESEND_API_KEY || process.env.MAIL_PASS || "").trim();
