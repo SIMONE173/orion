@@ -3506,7 +3506,7 @@ const handlers: Record<string, Handler> = {
                 headers: {
                   "Content-Type": "application/x-www-form-urlencoded",
                   Accept: "application/json",
-                  "User-Agent": "ORION/1.0 (https://orion-production-5ddd.up.railway.app)",
+                  "User-Agent": "ORION/1.0 (https://orionvision.it)",
                 },
                 // Se un mirror si impalla, lo molliamo e proviamo il successivo.
                 signal: AbortSignal.timeout(12000),
@@ -3592,7 +3592,7 @@ const handlers: Record<string, Handler> = {
     try {
       const res = await fetch(url, {
         // undici (fetch di Node) non manda User-Agent: alcuni feed lo richiedono.
-        headers: { "User-Agent": "ORION/1.0 (+https://orion-production-5ddd.up.railway.app)" },
+        headers: { "User-Agent": "ORION/1.0 (+https://orionvision.it)" },
         signal: AbortSignal.timeout(9000),
       });
       const xml = await res.text();

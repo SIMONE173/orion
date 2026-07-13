@@ -7,7 +7,7 @@ const PUBLIC_KEY =
   process.env.VAPID_PUBLIC_KEY ||
   "BBM6DHXb9ZKfZ1O4y2CPQPVx5MAx66Ib_Km-LW-ZpPFZNUlipdhuWEal_joWyiIVfiZUi-Y_4UPBNKrj0q51nws";
 const PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
-const SUBJECT = process.env.VAPID_SUBJECT || "mailto:orion@orion.app";
+const SUBJECT = process.env.VAPID_SUBJECT || "mailto:simone07intake@gmail.com";
 
 let configurato = false;
 function preparaVapid(): boolean {

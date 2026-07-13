@@ -385,7 +385,7 @@ export default function Vetrina() {
         <nav style={{ display: "flex", gap: 18, fontSize: 13.5 }}>
           <a href="/privacy" style={{ color: "#8fb2c2" }}>Privacy</a>
           <a href="/termini" style={{ color: "#8fb2c2" }}>Termini di servizio</a>
-          <a href="mailto:orion@orion.app" style={{ color: "#8fb2c2" }}>Contatti</a>
+          <a href="mailto:simone07intake@gmail.com" style={{ color: "#8fb2c2" }}>Contatti</a>
         </nav>
       </footer>
 
