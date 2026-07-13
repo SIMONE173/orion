@@ -10,6 +10,18 @@ export const dynamic = "force-dynamic";
 const iso = (epochSec: number | null | undefined) =>
   epochSec ? new Date(epochSec * 1000).toISOString() : null;
 
+// Fine del periodo corrente, robusta tra versioni API: nelle versioni recenti
+// (2025+/dahlia) current_period_end è sugli ITEM, non più sull'abbonamento.
+// Durante la prova coincide con trial_end. Fallback a cascata.
+function finePeriodo(sub: Stripe.Subscription): string | null {
+  const s = sub as unknown as {
+    current_period_end?: number;
+    trial_end?: number;
+    items?: { data?: { current_period_end?: number }[] };
+  };
+  return iso(s.items?.data?.[0]?.current_period_end ?? s.current_period_end ?? s.trial_end ?? null);
+}
+
 // Webhook Stripe: aggiorna lo stato dell'abbonamento del tenant.
 export async function POST(req: NextRequest) {
   if (!WEBHOOK_SECRET) return NextResponse.json({ ok: true });
@@ -37,7 +49,7 @@ export async function POST(req: NextRequest) {
           let piano: string | null = null;
           if (subId) {
             const sub = await stripe().subscriptions.retrieve(subId);
-            periodo = iso((sub as unknown as { current_period_end: number }).current_period_end);
+            periodo = finePeriodo(sub);
             stato = sub.status === "trialing" ? "prova" : "attivo";
             piano = (sub.metadata?.piano as string) || null;
           }
@@ -68,7 +80,7 @@ export async function POST(req: NextRequest) {
             : sub.status === "active"
             ? "attivo"
             : "scaduto";
-          const periodo = iso((sub as unknown as { current_period_end: number }).current_period_end);
+          const periodo = finePeriodo(sub);
           const piano = (sub.metadata?.piano as string) || null;
           runWithTenant(tenant, () =>
             salvaAbbonamento({ stripe_subscription_id: sub.id, stato, piano, periodo_fine: periodo })
