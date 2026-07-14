@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { conTenant } from "@/lib/sessione";
 import { getAbbonamento } from "@/lib/data";
 import { stripeConfigurato, creaPortale } from "@/lib/stripe";
+import { originePubblica } from "@/lib/origine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function POST(req: NextRequest) {
   if (!stripeConfigurato()) {
     return NextResponse.json({ ok: false, errore: "Pagamenti non ancora attivi." }, { status: 400 });
   }
-  const origin = req.nextUrl.origin;
+  const origin = originePubblica(req);
   const r = await conTenant(async () => {
     const acc = getAbbonamento();
     if (!acc?.stripe_customer_id) return { url: null as string | null };

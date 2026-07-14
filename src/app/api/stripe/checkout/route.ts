@@ -3,6 +3,7 @@ import { conTenant } from "@/lib/sessione";
 import { getAbbonamento } from "@/lib/data";
 import { stripeConfigurato, creaCheckout } from "@/lib/stripe";
 import { pianoValido } from "@/lib/prezzi";
+import { originePubblica } from "@/lib/origine";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json().catch(() => ({}));
   const piano = pianoValido(body?.piano) ? body.piano : "pro";
-  const origin = req.nextUrl.origin;
+  const origin = originePubblica(req);
   const r = await conTenant(async (u) => {
     const acc = getAbbonamento();
     const url = await creaCheckout({
