@@ -41,7 +41,7 @@ trailer-render/
 *.mp4
 *.aiff
 *.tgz
-voce/
+/voce/
 data/backups/
 
 # Rapporti degli stress test (contengono trascrizioni)
