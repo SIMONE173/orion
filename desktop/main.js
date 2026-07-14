@@ -8,7 +8,7 @@ const whisper = require("./whisper");
 // ORION live: l'app desktop carica lo stesso ORION del web (stessi dati/account)
 // e aggiunge il "ponte" verso il sistema operativo. Si può sovrascrivere con
 // la variabile ORION_URL (utile per puntare al localhost in sviluppo).
-const ORION_URL = process.env.ORION_URL || "https://orion-production-5ddd.up.railway.app";
+const ORION_URL = process.env.ORION_URL || "https://orionvision.it";
 
 // Cartelle in cui cercare i file dell'utente (no scansione dell'intero disco).
 const CARTELLE = [
@@ -48,7 +48,8 @@ function creaFinestra() {
     if (finestraPrincipale === win) finestraPrincipale = null;
   });
 
-  win.loadURL(ORION_URL);
+  // Carica DIRETTAMENTE l'app (la radice del sito è la vetrina di marketing).
+  win.loadURL(`${ORION_URL}/app`);
   return win;
 }
 
