@@ -185,21 +185,35 @@ export function useSpeech(onFinal: (testo: string) => void) {
     };
   }, [maybeRestart]);
 
+  // Audio della voce premium (ElevenLabs) attualmente in riproduzione.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const fermaAudioPremium = useCallback(() => {
+    const a = audioRef.current;
+    if (a) {
+      try {
+        a.pause();
+        a.src = "";
+      } catch {
+        /* noop */
+      }
+      audioRef.current = null;
+    }
+  }, []);
+
   const cancelSpeak = useCallback(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    fermaAudioPremium();
     speakingRef.current = false;
     setSpeaking(false);
-  }, []);
+  }, [fermaAudioPremium]);
 
   const speak = useCallback(
     (testo: string) => {
       if (!voiceOn || !testo) return;
-      if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+      if (typeof window === "undefined") return;
       // Stiamo per parlare: BLOCCA SUBITO il microfono per evitare l'eco.
-      // Segna speaking=true prima di tutto, ferma il riconoscimento se era attivo,
-      // e annulla un eventuale riarmo programmato.
       speakingRef.current = true;
       setSpeaking(true);
       if (restartTimer.current) clearTimeout(restartTimer.current);
@@ -210,68 +224,125 @@ export function useSpeech(onFinal: (testo: string) => void) {
       }
       setListening(false);
       setInterim("");
-      const synth = window.speechSynthesis;
-      synth.cancel();
+      // Ferma qualsiasi voce precedente (browser o premium).
+      try {
+        window.speechSynthesis?.cancel();
+      } catch {
+        /* noop */
+      }
+      fermaAudioPremium();
 
-      // ~1 volta su 20 l'audio non parte (utterance "persa", tipico bug del motore
-      // vocale). Watchdog: se entro ~500ms non è partito né in coda, riprova (fino a 2).
-      let partito = false;
-      let tentativi = 0;
-      const avvia = () => {
-        const u = new SpeechSynthesisUtterance(testo);
-        u.lang = "it-IT";
-        if (voiceRef.current) u.voice = voiceRef.current;
-        u.rate = 1.0; // ritmo naturale
-        u.pitch = 1.0; // timbro naturale (il genere lo dà la voce scelta)
-        u.onstart = () => {
-          partito = true;
-          speakingRef.current = true;
-          setSpeaking(true);
-        };
-        u.onend = () => {
+      // Voce del BROWSER (fallback): sintesi locale con watchdog anti-utterance persa.
+      const parlaBrowser = () => {
+        if (!("speechSynthesis" in window)) {
           speakingRef.current = false;
           setSpeaking(false);
           maybeRestart();
-        };
-        u.onerror = () => {
-          speakingRef.current = false;
-          setSpeaking(false);
-          maybeRestart();
-        };
-        try {
-          synth.resume(); // alcuni motori vanno in "pausa": sblocca
-        } catch {
-          /* noop */
+          return;
         }
-        synth.speak(u);
-        setTimeout(() => {
-          if (partito || !speakingRef.current) return;
-          if (synth.speaking || synth.pending) {
-            try {
-              synth.resume();
-            } catch {
-              /* noop */
-            }
-            return; // sta partendo, solo in ritardo
-          }
-          if (tentativi < 2) {
-            tentativi += 1;
-            try {
-              synth.cancel();
-            } catch {
-              /* noop */
-            }
-            avvia();
-          } else {
+        const synth = window.speechSynthesis;
+        synth.cancel();
+        let partito = false;
+        let tentativi = 0;
+        const avvia = () => {
+          const u = new SpeechSynthesisUtterance(testo);
+          u.lang = "it-IT";
+          if (voiceRef.current) u.voice = voiceRef.current;
+          u.rate = 1.0;
+          u.pitch = 1.0;
+          u.onstart = () => {
+            partito = true;
+            speakingRef.current = true;
+            setSpeaking(true);
+          };
+          u.onend = () => {
             speakingRef.current = false;
             setSpeaking(false);
             maybeRestart();
+          };
+          u.onerror = () => {
+            speakingRef.current = false;
+            setSpeaking(false);
+            maybeRestart();
+          };
+          try {
+            synth.resume();
+          } catch {
+            /* noop */
           }
-        }, 500);
+          synth.speak(u);
+          setTimeout(() => {
+            if (partito || !speakingRef.current) return;
+            if (synth.speaking || synth.pending) {
+              try {
+                synth.resume();
+              } catch {
+                /* noop */
+              }
+              return;
+            }
+            if (tentativi < 2) {
+              tentativi += 1;
+              try {
+                synth.cancel();
+              } catch {
+                /* noop */
+              }
+              avvia();
+            } else {
+              speakingRef.current = false;
+              setSpeaking(false);
+              maybeRestart();
+            }
+          }, 500);
+        };
+        avvia();
       };
-      avvia();
+
+      // Voce PREMIUM (ElevenLabs, dal server): se disponibile, uguale per tutti.
+      // Al minimo intoppo (chiave assente, rete, autoplay) → voce del browser.
+      (async () => {
+        try {
+          const res = await fetch("/api/voce", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ testo }),
+          });
+          if (!res.ok || res.status === 204) return parlaBrowser();
+          const blob = await res.blob();
+          if (!blob || !blob.size) return parlaBrowser();
+          if (!speakingRef.current) return; // annullato nel frattempo
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          const chiudi = () => {
+            try {
+              URL.revokeObjectURL(url);
+            } catch {
+              /* noop */
+            }
+            if (audioRef.current === audio) audioRef.current = null;
+          };
+          audio.onended = () => {
+            chiudi();
+            speakingRef.current = false;
+            setSpeaking(false);
+            maybeRestart();
+          };
+          audio.onerror = () => {
+            chiudi();
+            parlaBrowser();
+          };
+          audio.play().catch(() => {
+            chiudi();
+            parlaBrowser();
+          });
+        } catch {
+          parlaBrowser();
+        }
+      })();
     },
-    [voiceOn, maybeRestart]
+    [voiceOn, maybeRestart, fermaAudioPremium]
   );
 
   // La pagina comunica quando ORION sta elaborando (loading).

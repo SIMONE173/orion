@@ -69,8 +69,15 @@ export function AbbonamentoPanel({ dati }: { dati: Dati }) {
         {s.configurato && s.inProva && (
           <p className="text-sm leading-relaxed text-slate-300">
             Sei nella <strong>prova gratuita</strong>: ti restano{" "}
-            <strong className="text-cyan-200">{s.giorniProvaRimasti} giorni</strong>. Continua pure a
-            usare ORION; quando vuoi, attiva l&apos;abbonamento per non interromperlo.
+            <strong className="text-cyan-200">{s.giorniProvaRimasti} giorni</strong>. Al termine parte
+            l&apos;abbonamento; puoi <strong>disdire quando vuoi</strong> prima della fine e non paghi nulla.
+          </p>
+        )}
+
+        {s.configurato && s.stato === "annullato" && (
+          <p className="text-sm leading-relaxed text-slate-300">
+            Disdetta registrata: ORION resta attivo fino alla fine del periodo. Puoi riattivarlo quando
+            vuoi dal pulsante qui sotto.
           </p>
         )}
 
@@ -107,7 +114,8 @@ export function AbbonamentoPanel({ dati }: { dati: Dati }) {
 
       {s.configurato && (
         <div className="mt-5 flex flex-wrap gap-3">
-          {!s.attivo && (
+          {/* Chi NON ha ancora un abbonamento (scaduto/da attivare) → attiva. */}
+          {(s.stato === "scaduto" || s.stato === "da_attivare") && (
             <button
               onClick={() => vai("checkout")}
               disabled={busy}
@@ -116,13 +124,15 @@ export function AbbonamentoPanel({ dati }: { dati: Dati }) {
               {busy ? "Un attimo…" : "Attiva l'abbonamento"}
             </button>
           )}
-          {s.attivo && (
+          {/* Chi HA un abbonamento (in prova, attivo o in disdetta) → portale:
+              cambia carta, cambia piano, DISDICE la prova o l'abbonamento. */}
+          {(s.stato === "prova" || s.stato === "attivo" || s.stato === "annullato") && (
             <button
               onClick={() => vai("portal")}
               disabled={busy}
               className="rounded-xl border border-white/10 bg-white/5 px-6 py-3 font-medium text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
             >
-              {busy ? "Un attimo…" : "Gestisci pagamento"}
+              {busy ? "Un attimo…" : s.stato === "prova" ? "Gestisci o disdici la prova" : "Gestisci o disdici l'abbonamento"}
             </button>
           )}
         </div>
