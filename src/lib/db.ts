@@ -611,6 +611,17 @@ function migrate(d: Database.Database) {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_dispositivi_utente ON dispositivi_fidati(utente_id, token_hash);
+
+    -- ── BETA TESTER: iscrizioni dalla vetrina (pre-lancio) ───────────────────
+    -- Chi si candida come primo utente; a posti limitati. Al lancio potranno
+    -- avere uno sconto "founding member" a vita.
+    CREATE TABLE IF NOT EXISTS beta_tester (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      nome TEXT,
+      professione TEXT,
+      created_at TEXT NOT NULL
+    );
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:

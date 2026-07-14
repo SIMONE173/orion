@@ -37,6 +37,11 @@ export default function Vetrina() {
   const [autenticato, setAutenticato] = useState(false);
   const [voceOn, setVoceOn] = useState(true);
   const [scaricabili, setScaricabili] = useState<{ mac: boolean; win: boolean }>({ mac: false, win: false });
+  const [beta, setBeta] = useState<{ rimasti: number; posti: number; sconto: number; aperto: boolean } | null>(null);
+  const [betaEmail, setBetaEmail] = useState("");
+  const [betaProf, setBetaProf] = useState("");
+  const [betaEsito, setBetaEsito] = useState<string | null>(null);
+  const [betaBusy, setBetaBusy] = useState(false);
   const salutato = useRef(false);
   const voceOnRef = useRef(true);
   voceOnRef.current = voceOn;
@@ -60,10 +65,38 @@ export default function Vetrina() {
       .then((r) => r.json())
       .then((s) => setScaricabili({ mac: Boolean(s.mac), win: Boolean(s.win) }))
       .catch(() => {});
+    fetch("/api/beta")
+      .then((r) => r.json())
+      .then((s) => setBeta({ rimasti: s.rimasti, posti: s.posti, sconto: s.sconto, aperto: s.aperto }))
+      .catch(() => {});
     try {
       setVoceOn(localStorage.getItem("orion-sito-voce") !== "no");
     } catch {}
   }, []);
+
+  const iscriviBeta = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (betaBusy) return;
+    setBetaBusy(true);
+    setBetaEsito(null);
+    try {
+      const r = await fetch("/api/beta", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: betaEmail.trim(), professione: betaProf.trim() || undefined }),
+      });
+      const d = await r.json();
+      setBeta({ rimasti: d.rimasti, posti: d.posti, sconto: d.sconto, aperto: d.aperto });
+      if (d.pieno) setBetaEsito("I posti beta sono esauriti — ma ti avviseremo al lancio. Grazie!");
+      else if (d.gia) setBetaEsito("Sei già in lista! Ti scriviamo appena apriamo. 🎉");
+      else if (d.ok) setBetaEsito("Ci sei! Sei tra i primi. Ti scriviamo appena la tua beta è pronta. 🚀");
+      else setBetaEsito(d.errore ?? "Qualcosa è andato storto. Riprova.");
+    } catch {
+      setBetaEsito("Connessione non riuscita. Riprova.");
+    } finally {
+      setBetaBusy(false);
+    }
+  };
 
   // ── La voce di ORION ────────────────────────────────────────────────────
   const parla = useCallback((testo: string) => {
@@ -342,6 +375,47 @@ export default function Vetrina() {
           ))}
         </div>
       </section>
+
+      {/* ── BETA TESTER ── */}
+      {beta && (
+        <section id="beta" data-sboccia style={{ position: "relative", zIndex: 5, padding: "70px 20px", maxWidth: 720, margin: "0 auto", opacity: 0 }}>
+          <div className="glass" style={{ borderRadius: 22, padding: "34px 28px", textAlign: "center", border: "1px solid rgba(56,232,255,0.25)" }}>
+            <div style={{ display: "inline-block", fontSize: 12, letterSpacing: "0.18em", color: "#38e8ff", border: "1px solid rgba(56,232,255,0.3)", borderRadius: 999, padding: "5px 14px", marginBottom: 16 }}>
+              FOUNDING MEMBER
+            </div>
+            <h2 className="titolo-sezione" style={{ fontSize: "clamp(24px,4vw,34px)" }}>Entra tra i primi</h2>
+            <p style={{ color: "#9fc2d1", fontSize: 15.5, lineHeight: 1.6, maxWidth: 560, margin: "14px auto 0" }}>
+              Stiamo aprendo ORION a un gruppo ristretto di professionisti. Chi entra ora prova per primo,
+              ci aiuta a plasmarlo — e {beta.sconto > 0 ? <>si tiene uno <b style={{ color: "#dff6fc" }}>sconto del {beta.sconto}% a vita</b> al lancio.</> : <>avrà un vantaggio riservato al lancio.</>}
+            </p>
+
+            {betaEsito ? (
+              <div className="glass" style={{ borderRadius: 14, padding: "18px 20px", marginTop: 22, color: "#dff6fc", fontSize: 15 }}>{betaEsito}</div>
+            ) : beta.aperto ? (
+              <form onSubmit={iscriviBeta} style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 420, margin: "24px auto 0" }}>
+                <input
+                  type="email" required value={betaEmail} onChange={(e) => setBetaEmail(e.target.value)}
+                  placeholder="La tua email"
+                  style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", padding: "13px 16px", color: "#e6edf6", outline: "none", fontSize: 15 }}
+                />
+                <input
+                  value={betaProf} onChange={(e) => setBetaProf(e.target.value)}
+                  placeholder="Che lavoro fai? (facoltativo)"
+                  style={{ borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)", padding: "13px 16px", color: "#e6edf6", outline: "none", fontSize: 15 }}
+                />
+                <button type="submit" disabled={betaBusy} className="cta-primaria" style={{ marginTop: 4 }}>
+                  {betaBusy ? "Un attimo…" : "Voglio il mio posto"}
+                </button>
+                <span style={{ color: "#6b8b9b", fontSize: 13 }}>
+                  {beta.rimasti > 0 ? `Restano ${beta.rimasti} posti su ${beta.posti}` : ""}
+                </span>
+              </form>
+            ) : (
+              <p style={{ color: "#8fb2c2", fontSize: 14.5, marginTop: 22 }}>I posti beta sono esauriti — apriamo presto a tutti. 🙌</p>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── USALO ORA: WEB + DOWNLOAD ── */}
       <section id="scarica" data-sboccia style={{ position: "relative", zIndex: 5, padding: "70px 20px 90px", maxWidth: 980, margin: "0 auto", opacity: 0 }}>

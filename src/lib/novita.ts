@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-14", testo: "Aperte le iscrizioni alla beta: i primi professionisti diventano founding member" },
   { data: "2026-07-14", testo: "Nuova voce di ORION: più naturale e umana, uguale su ogni dispositivo" },
   { data: "2026-07-13", testo: "ORION ora scrive nel tuo gestionale: appuntamenti e clienti arrivano anche nel tuo software, firmati" },
   { data: "2026-07-12", testo: "Stress test superato: 190+ conversazioni reali, dalla Chiamata 0 all'azienda multi-utente" },
