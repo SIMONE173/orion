@@ -704,18 +704,68 @@ ipcMain.handle("os:trascrivi", async (_e, pcm) => {
   }
 });
 
-// Lancia un'app installata per nome.
+// Windows: cerca la scorciatoia (.lnk/.url) di un'app nel menu Start (utente +
+// tutti gli utenti). Copre le app Win32 E quelle dello Store: praticamente ogni
+// app installata ha una voce qui. Ritorna il percorso della scorciatoia migliore.
+function cercaScorciatoiaWin(nome) {
+  const q = String(nome).toLowerCase().trim();
+  const radici = [
+    path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
+    path.join(process.env.ProgramData || "C:\\ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
+  ];
+  const trovate = [];
+  const scendi = (d, prof) => {
+    if (prof > 4) return;
+    let voci;
+    try {
+      voci = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const v of voci) {
+      const full = path.join(d, v.name);
+      if (v.isDirectory()) scendi(full, prof + 1);
+      else if (/\.(lnk|url)$/i.test(v.name)) {
+        const base = v.name.replace(/\.(lnk|url)$/i, "").toLowerCase();
+        if (base === q || base.includes(q) || q.includes(base)) {
+          trovate.push({ full, punteggio: base === q ? 3 : base.startsWith(q) ? 2 : 1 });
+        }
+      }
+    }
+  };
+  for (const r of radici) scendi(r, 0);
+  trovate.sort((a, b) => b.punteggio - a.punteggio);
+  return trovate[0]?.full || null;
+}
+
+const SEMBRA_URL = (s) => /^https?:\/\//i.test(s) || /^[\w-]+\.(com|it|net|org|io|app|dev|co|eu|info|tv)$/i.test(s);
+
+// Lancia un'app installata per nome (o apre un sito, se il nome è un indirizzo).
 ipcMain.handle("os:apriApp", async (_e, nome) => {
   const n = String(nome || "").trim();
   if (!n) return { ok: false, errore: "nome mancante" };
   try {
+    if (SEMBRA_URL(n)) {
+      await shell.openExternal(/^https?:/i.test(n) ? n : `https://${n}`);
+      return { ok: true, app: n };
+    }
     if (process.platform === "darwin") {
       spawn("open", ["-a", n], { detached: true, stdio: "ignore" }).unref();
-    } else if (process.platform === "win32") {
-      spawn("cmd", ["/c", "start", "", n], { detached: true, stdio: "ignore" }).unref();
-    } else {
-      spawn("xdg-open", [n], { detached: true, stdio: "ignore" }).unref();
+      return { ok: true, app: n };
     }
+    if (process.platform === "win32") {
+      // 1) La scorciatoia nel menu Start è la via più affidabile (Win32 + Store).
+      const lnk = cercaScorciatoiaWin(n);
+      if (lnk) {
+        const err = await shell.openPath(lnk);
+        if (!err) return { ok: true, app: n };
+      }
+      // 2) Start-Process gestisce gli eseguibili nel PATH / registro App Paths
+      //    (chrome, msedge, spotify, winword, notepad, calc…).
+      spawn("powershell", ["-NoProfile", "-Command", `Start-Process "${n.replace(/"/g, "")}"`], { detached: true, stdio: "ignore" }).unref();
+      return { ok: true, app: n };
+    }
+    spawn("xdg-open", [n], { detached: true, stdio: "ignore" }).unref();
     return { ok: true, app: n };
   } catch (err) {
     return { ok: false, errore: String(err) };
@@ -730,7 +780,11 @@ ipcMain.handle("os:chiudiApp", async (_e, nome) => {
     if (process.platform === "darwin") {
       spawn("osascript", ["-e", `quit app "${n.replace(/"/g, "")}"`], { detached: true, stdio: "ignore" }).unref();
     } else if (process.platform === "win32") {
-      spawn("taskkill", ["/IM", `${n}.exe`, "/F"], { detached: true, stdio: "ignore" }).unref();
+      // Robusto: chiude per nome-processo O per titolo della finestra (così
+      // "Google Chrome" chiude chrome.exe, "Word" chiude winword, ecc.).
+      const safe = n.replace(/[^\w .\-]/g, "");
+      const ps = `Get-Process | Where-Object { $_.ProcessName -like '*${safe}*' -or ($_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*') } | Stop-Process -Force -ErrorAction SilentlyContinue`;
+      spawn("powershell", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore" }).unref();
     } else {
       spawn("pkill", ["-i", n], { detached: true, stdio: "ignore" }).unref();
     }
@@ -793,7 +847,7 @@ function cartellaLavoro(cwd) {
   return WORKSPACE;
 }
 
-// Backstop di sicurezza: rifiuta i comandi palesemente distruttivi.
+// Backstop di sicurezza: rifiuta i comandi palesemente distruttivi (Unix + Windows).
 const COMANDI_VIETATI = [
   /rm\s+-rf?\s+(\/|~|\$HOME)(\s|$)/i,
   /\bmkfs\b/i,
@@ -802,6 +856,13 @@ const COMANDI_VIETATI = [
   /\b(shutdown|reboot|halt)\b/i,
   />\s*\/dev\/sd[a-z]/i,
   /\bdiskutil\s+(erase|reformat)/i,
+  // Windows
+  /\bformat\b\s+[a-z]:/i,
+  /\b(rmdir|rd)\b.*\/s/i,
+  /\bdel\b.*\/[sfq]/i,
+  /Remove-Item[^|]*-Recurse[^|]*-Force/i,
+  /\bRestart-Computer\b/i,
+  /\bcipher\b.*\/w/i,
 ];
 
 function comandoPericoloso(cmd) {
@@ -826,8 +887,10 @@ ipcMain.handle("os:esegui", async (_e, dati) => {
   } catch {
     /* ignora */
   }
+  // Shell per piattaforma: bash su Mac/Linux, cmd.exe su Windows (shell:true).
+  const shellDaUsare = process.platform === "win32" ? true : "/bin/bash";
   return new Promise((resolve) => {
-    exec(comando, { cwd, timeout: 120000, maxBuffer: 8 * 1024 * 1024, shell: "/bin/bash" }, (err, stdout, stderr) => {
+    exec(comando, { cwd, timeout: 120000, maxBuffer: 8 * 1024 * 1024, shell: shellDaUsare }, (err, stdout, stderr) => {
       resolve({
         ok: !err,
         code: err && typeof err.code === "number" ? err.code : err ? 1 : 0,
