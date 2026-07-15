@@ -242,6 +242,16 @@ export default function Vetrina() {
     return () => io.disconnect();
   }, []);
 
+  // La sezione beta viene aggiunta al DOM solo DOPO la fetch a /api/beta, quindi
+  // l'osservatore qui sopra (che gira una volta sola al mount) non la vede mai e
+  // resterebbe invisibile (opacity:0). La rendiamo visibile esplicitamente appena
+  // i dati arrivano — con la stessa dissolvenza .reveal delle altre sezioni.
+  useEffect(() => {
+    if (!beta) return;
+    const el = document.getElementById("beta");
+    if (el && !el.classList.contains("reveal")) el.classList.add("reveal");
+  }, [beta]);
+
   // Le card si inclinano sotto il mouse (l'effetto "lo tocchi con gli occhi").
   const inclina = (e: React.MouseEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
