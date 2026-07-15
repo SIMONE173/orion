@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe, WEBHOOK_SECRET } from "@/lib/stripe";
+import { stripe, WEBHOOK_SECRET, couponFoundingMember } from "@/lib/stripe";
 import { runWithTenant } from "@/lib/tenant";
 import { salvaAbbonamento, tenantDaStripeCustomer } from "@/lib/data";
+import { eBetaTester, SCONTO_BETA } from "@/lib/beta";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +21,28 @@ function finePeriodo(sub: Stripe.Subscription): string | null {
     items?: { data?: { current_period_end?: number }[] };
   };
   return iso(s.items?.data?.[0]?.current_period_end ?? s.current_period_end ?? s.trial_end ?? null);
+}
+
+// Rete di sicurezza founding member: se il titolare dell'abbonamento è nella
+// lista beta ma l'abbonamento NON ha ancora lo sconto a vita (es. si era
+// abbonato prima di iscriversi alla beta), lo agganciamo qui: da quel momento
+// vale su ogni fattura, per sempre. Se lo sconto c'è già, non tocca nulla.
+async function assicuraScontoFounder(sub: Stripe.Subscription, customerId: string): Promise<void> {
+  try {
+    if (!(SCONTO_BETA > 0)) return;
+    const s = sub as unknown as { discounts?: unknown[]; discount?: unknown };
+    if ((s.discounts?.length ?? 0) > 0 || s.discount) return; // ha già uno sconto
+    const cliente = await stripe().customers.retrieve(customerId);
+    const email = cliente.deleted ? "" : cliente.email || "";
+    if (!email || !eBetaTester(email)) return;
+    const coupon = await couponFoundingMember(SCONTO_BETA);
+    if (coupon) {
+      await stripe().subscriptions.update(sub.id, { discounts: [{ coupon }] });
+      console.log(`[stripe webhook] sconto founding member agganciato a ${sub.id}`);
+    }
+  } catch (e) {
+    console.error("[stripe webhook] sconto founding member:", e instanceof Error ? e.message : e);
+  }
 }
 
 // Webhook Stripe: aggiorna lo stato dell'abbonamento del tenant.
@@ -85,6 +108,8 @@ export async function POST(req: NextRequest) {
           runWithTenant(tenant, () =>
             salvaAbbonamento({ stripe_subscription_id: sub.id, stato, piano, periodo_fine: periodo })
           );
+          // Beta tester già abbonato senza sconto → aggancia lo sconto a vita.
+          if (stato === "prova" || stato === "attivo") await assicuraScontoFounder(sub, customer);
         }
         break;
       }

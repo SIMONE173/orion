@@ -93,3 +93,44 @@ test("proprietario (ORION_ADMIN_EMAIL) → accesso pieno senza pagare", () => {
   });
   delete process.env.ORION_ADMIN_EMAIL;
 });
+
+// ── FOUNDING MEMBER: chi è nella lista beta ha lo sconto a vita sull'account ──
+
+test("email nella lista beta → founder con sconto a vita (case-insensitive)", () => {
+  const EMAIL = "founder-test@orionvision.it";
+  db().prepare("DELETE FROM beta_tester WHERE email = ?").run(EMAIL);
+  db()
+    .prepare("INSERT INTO beta_tester (email, nome, professione, created_at) VALUES (?, NULL, NULL, ?)")
+    .run(EMAIL, new Date().toISOString());
+  runWithTenant(TN, () => {
+    const s = statoAbbonamento(EMAIL);
+    assert.equal(s.founder, true);
+    assert.ok(s.scontoFounder > 0); // la % viene da ORION_BETA_SCONTO (default 30)
+    // Maiuscole/minuscole non contano: è la stessa persona.
+    assert.equal(statoAbbonamento("Founder-Test@OrionVision.IT").founder, true);
+  });
+  db().prepare("DELETE FROM beta_tester WHERE email = ?").run(EMAIL);
+});
+
+test("email NON in lista beta → nessuno sconto founder", () => {
+  runWithTenant(TN, () => {
+    const s = statoAbbonamento("estraneo@x.it");
+    assert.equal(s.founder, false);
+    assert.equal(s.scontoFounder, 0);
+  });
+});
+
+test("il founder resta founder in ogni stato dell'abbonamento (prova e attivo)", () => {
+  const EMAIL = "founder-stati@orionvision.it";
+  db().prepare("DELETE FROM beta_tester WHERE email = ?").run(EMAIL);
+  db()
+    .prepare("INSERT INTO beta_tester (email, nome, professione, created_at) VALUES (?, NULL, NULL, ?)")
+    .run(EMAIL, new Date().toISOString());
+  runWithTenant(TN, () => {
+    salvaAbbonamento({ stripe_customer_id: "cus_f", stato: "prova", piano: "pro", periodo_fine: fra(7) });
+    assert.equal(statoAbbonamento(EMAIL).founder, true);
+    salvaAbbonamento({ stato: "attivo", piano: "pro", periodo_fine: fra(30) });
+    assert.equal(statoAbbonamento(EMAIL).founder, true);
+  });
+  db().prepare("DELETE FROM beta_tester WHERE email = ?").run(EMAIL);
+});

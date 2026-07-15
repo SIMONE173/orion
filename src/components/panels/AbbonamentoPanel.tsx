@@ -58,6 +58,17 @@ export function AbbonamentoPanel({ dati }: { dati: Dati }) {
         <span className={`rounded-full border px-3 py-1 text-xs font-medium ${badge.cls}`}>{badge.testo}</span>
       </div>
 
+      {/* Founding member: sconto a vita agganciato all'account (lista beta). */}
+      {s.configurato && s.founder && (
+        <div className="mb-4 flex items-center gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3">
+          <span className="text-lg">🏆</span>
+          <p className="text-sm leading-relaxed text-amber-100">
+            <strong>Founding member</strong>: hai lo sconto del <strong>{s.scontoFounder}% a vita</strong>,
+            agganciato al tuo account e applicato da solo — niente codici da inserire.
+          </p>
+        </div>
+      )}
+
       <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
         {!s.configurato && (
           <p className="text-sm leading-relaxed text-slate-300">

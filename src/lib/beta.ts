@@ -11,6 +11,14 @@ export function contaBeta(): number {
   return (db().prepare("SELECT COUNT(*) AS n FROM beta_tester").get() as { n: number }).n;
 }
 
+// L'email è nella lista beta? → founding member: sconto a vita, agganciato
+// in automatico all'account (checkout e abbonamento). Confronto per email.
+export function eBetaTester(email: string | null | undefined): boolean {
+  const e = (email || "").toLowerCase().trim();
+  if (!e) return false;
+  return Boolean(db().prepare("SELECT 1 FROM beta_tester WHERE email = ?").get(e));
+}
+
 export function statoBeta(): { posti: number; iscritti: number; rimasti: number; aperto: boolean; sconto: number } {
   const iscritti = contaBeta();
   const rimasti = Math.max(0, POSTI_BETA - iscritti);

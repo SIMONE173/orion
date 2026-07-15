@@ -34,6 +34,41 @@ export function priceIdDi(piano: Piano): string {
   return piano === "azienda" ? PRICE_AZIENDA : PRICE_PRO;
 }
 
+// Coupon "founding member": sconto % A VITA per gli iscritti alla beta.
+// Get-or-create con id deterministico (es. orion-founding-30): esiste una sola
+// volta su Stripe e resta riutilizzabile per sempre; se un giorno cambia la
+// percentuale, nasce un coupon nuovo senza toccare gli sconti già agganciati.
+let _couponPronto: string | null = null;
+export async function couponFoundingMember(percento: number): Promise<string | null> {
+  const p = Math.round(percento);
+  if (!KEY || !(p > 0 && p < 100)) return null;
+  const id = `orion-founding-${p}`;
+  if (_couponPronto === id) return id;
+  try {
+    await stripe().coupons.retrieve(id);
+  } catch {
+    try {
+      await stripe().coupons.create({
+        id,
+        percent_off: p,
+        duration: "forever",
+        name: `Founding member -${p}% a vita`,
+      });
+    } catch (e) {
+      // Corsa con un'altra istanza: se ora esiste va bene; altrimenti rinuncia
+      // (meglio un checkout senza sconto che un checkout che non parte).
+      try {
+        await stripe().coupons.retrieve(id);
+      } catch {
+        console.error("[stripe] coupon founding member:", e instanceof Error ? e.message : e);
+        return null;
+      }
+    }
+  }
+  _couponPronto = id;
+  return id;
+}
+
 // Crea una sessione di Checkout per il piano scelto e ne restituisce l'URL.
 // Prova di 7 giorni CON CARTA: la carta è richiesta subito, l'addebito parte
 // dopo la prova; l'utente può disdire prima e non paga nulla.
@@ -43,6 +78,7 @@ export async function creaCheckout(opts: {
   tenantId: number;
   piano: Piano;
   customerId?: string | null;
+  coupon?: string | null; // sconto founding member, applicato in automatico
 }): Promise<string | null> {
   const price = priceIdDi(opts.piano);
   if (!price) return null;
@@ -52,7 +88,9 @@ export async function creaCheckout(opts: {
     customer: opts.customerId || undefined,
     customer_email: opts.customerId ? undefined : opts.email,
     client_reference_id: String(opts.tenantId),
-    allow_promotion_codes: true,
+    // Stripe non permette discounts + allow_promotion_codes insieme: coi
+    // founding member lo sconto è già applicato (niente campo codici).
+    ...(opts.coupon ? { discounts: [{ coupon: opts.coupon }] } : { allow_promotion_codes: true }),
     payment_method_collection: "always", // carta richiesta anche durante la prova
     subscription_data: {
       trial_period_days: GIORNI_PROVA,

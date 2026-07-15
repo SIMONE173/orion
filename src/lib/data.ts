@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
 import { cifra } from "./crypto";
+import { eBetaTester, SCONTO_BETA } from "./beta";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Accesso ai dati, MULTI-TENANT: ogni query è filtrata per tenant_id, preso
@@ -212,6 +213,8 @@ export type StatoAbbonamento = {
   attivo: boolean;
   accessoConsentito: boolean;
   periodoFine: string | null;
+  founder: boolean; // iscritto alla beta → sconto a vita agganciato all'account
+  scontoFounder: number; // % dello sconto founding member (0 se non founder)
 };
 
 const nowISO = () => new Date().toISOString();
@@ -2364,7 +2367,28 @@ export function tenantDaStripeCustomer(customerId: string): number | null {
 // il bypass del proprietario (ORION_ADMIN_EMAIL).
 export function statoAbbonamento(email?: string | null): StatoAbbonamento {
   const configurato = stripeConfig();
-  const base = { configurato, piano: null as StatoAbbonamento["piano"], inProva: false, giorniProvaRimasti: 0, attivo: false, periodoFine: null as string | null };
+  // Founding member: l'email dell'account (o del titolare del tenant) è nella
+  // lista beta → sconto a vita, mostrato in UI e applicato da solo al checkout.
+  let emailAccount = (email || "").trim().toLowerCase();
+  if (!emailAccount) {
+    try {
+      const r = db().prepare("SELECT email FROM utenti WHERE id = ?").get(T()) as { email?: string } | undefined;
+      emailAccount = (r?.email || "").trim().toLowerCase();
+    } catch {
+      /* fuori dal contesto tenant: nessun founder */
+    }
+  }
+  const founder = configurato && SCONTO_BETA > 0 && eBetaTester(emailAccount);
+  const base = {
+    configurato,
+    piano: null as StatoAbbonamento["piano"],
+    inProva: false,
+    giorniProvaRimasti: 0,
+    attivo: false,
+    periodoFine: null as string | null,
+    founder,
+    scontoFounder: founder ? SCONTO_BETA : 0,
+  };
 
   // Modalità demo (Stripe non configurato): tutto aperto, nessun paywall.
   if (!configurato) return { ...base, stato: "demo", attivo: true, accessoConsentito: true };

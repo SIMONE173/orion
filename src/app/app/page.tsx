@@ -36,6 +36,8 @@ type StatoAbb = {
   attivo: boolean;
   accessoConsentito: boolean;
   periodoFine: string | null;
+  founder: boolean; // iscritto alla beta → sconto a vita
+  scontoFounder: number; // % dello sconto founding member (0 se non founder)
 };
 
 type EsitoOS = { ok: boolean; nome?: string; app?: string; da?: string; a?: string; tipo?: string; cartella?: string; errore?: string };
@@ -913,6 +915,9 @@ export default function Home() {
   // demo (Stripe spento) non blocca nulla.
   if (abbonamento?.configurato && !abbonamento.accessoConsentito) {
     const scaduto = abbonamento.stato === "scaduto";
+    // Founding member (lista beta): prezzi mostrati già scontati, per sempre.
+    const founder = Boolean(abbonamento.founder && abbonamento.scontoFounder > 0);
+    const scontato = (prezzo: number) => Math.round(prezzo * (100 - abbonamento.scontoFounder)) / 100;
     return (
       <main className="flex min-h-screen flex-col items-center justify-center px-5 py-10">
         <div className="fade-in w-full max-w-3xl text-center">
@@ -926,6 +931,12 @@ export default function Home() {
               : "7 giorni di prova gratuita. Nessun addebito ora: disdici quando vuoi durante la prova."}
           </p>
 
+          {founder && (
+            <div className="mx-auto mt-5 inline-flex items-center gap-2 rounded-full border border-amber-300/30 bg-amber-300/10 px-4 py-2 text-sm text-amber-100">
+              🏆 <strong>Founding member</strong> — sconto del {abbonamento.scontoFounder}% a vita, già applicato
+            </div>
+          )}
+
           <div className="mt-8 grid gap-4 sm:grid-cols-2">
             {(["pro", "azienda"] as const).map((p) => {
               const info = PIANI[p];
@@ -934,7 +945,10 @@ export default function Home() {
                   <div className="text-xs uppercase tracking-wider text-cyan-300">{info.sottotitolo}</div>
                   <div className="mt-1 text-xl font-semibold text-slate-50">{info.nome}</div>
                   <div className="mt-3 flex items-end gap-1">
-                    <span className="text-4xl font-bold text-slate-50">€{info.prezzo}</span>
+                    {founder && (
+                      <span className="mb-1 mr-1 text-lg font-medium text-slate-500 line-through">€{info.prezzo}</span>
+                    )}
+                    <span className="text-4xl font-bold text-slate-50">€{founder ? scontato(info.prezzo) : info.prezzo}</span>
                     <span className="mb-1 text-sm text-slate-400">/{info.periodo.replace("al ", "")}</span>
                   </div>
                   <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-300">
