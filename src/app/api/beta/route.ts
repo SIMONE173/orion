@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { statoBeta, iscriviBeta } from "@/lib/beta";
+import { statoBeta, iscriviBeta, SCONTO_BETA } from "@/lib/beta";
 import { emailValida } from "@/lib/validazione";
 import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
+import { inviaEmailBeta } from "@/lib/email-orion";
+import { quandoInParole } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,5 +31,10 @@ export async function POST(req: NextRequest) {
   const s = statoBeta();
   if (esito === "pieno") return NextResponse.json({ ok: false, pieno: true, ...s }, { status: 409 });
   if (esito === "gia") return NextResponse.json({ ok: true, gia: true, ...s });
+
+  // Founding member confermato → email di benvenuto tra i primi (fire-and-forget).
+  void inviaEmailBeta(email, SCONTO_BETA, quandoInParole()).catch((e) =>
+    console.error("[email] beta non inviata:", e instanceof Error ? e.message : e)
+  );
   return NextResponse.json({ ok: true, ...s });
 }

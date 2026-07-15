@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { trovaUtenteByEmail, verificaCodice, setEmailVerificata, creaSessione, creaDispositivoFidato } from "@/lib/auth";
 import { COOKIE_SESSIONE, MAX_AGE_SESSIONE, COOKIE_DISPOSITIVO, MAX_AGE_DISPOSITIVO } from "@/lib/sessione";
 import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
+import { inviaEmailBenvenuto } from "@/lib/email-orion";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,14 @@ export async function POST(req: NextRequest) {
     const esito = verificaCodice(email, codice, scopo);
     if (!esito.ok) return NextResponse.json({ ok: false, errore: esito.errore }, { status: 401 });
 
-    if (scopo === "signup") setEmailVerificata(email);
+    if (scopo === "signup") {
+      setEmailVerificata(email);
+      // Benvenuto: l'account è confermato. Fire-and-forget: la posta non
+      // deve mai rallentare né rompere la registrazione.
+      void inviaEmailBenvenuto(email, utente.nome).catch((e) =>
+        console.error("[email] benvenuto non inviata:", e instanceof Error ? e.message : e)
+      );
+    }
 
     const token = creaSessione(utente.id);
     const res = NextResponse.json({

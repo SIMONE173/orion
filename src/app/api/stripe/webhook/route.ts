@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { stripe, WEBHOOK_SECRET, couponFoundingMember } from "@/lib/stripe";
+import { stripe, WEBHOOK_SECRET, couponFoundingMember, GIORNI_PROVA } from "@/lib/stripe";
 import { runWithTenant } from "@/lib/tenant";
 import { salvaAbbonamento, tenantDaStripeCustomer } from "@/lib/data";
 import { eBetaTester, SCONTO_BETA } from "@/lib/beta";
+import { inviaEmailAbbonamento, inviaEmailRicevuta } from "@/lib/email-orion";
+import { pianoValido } from "@/lib/prezzi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -70,11 +72,14 @@ export async function POST(req: NextRequest) {
           let periodo: string | null = null;
           let stato = "attivo";
           let piano: string | null = null;
+          let fineProva: Date | null = null;
           if (subId) {
             const sub = await stripe().subscriptions.retrieve(subId);
             periodo = finePeriodo(sub);
             stato = sub.status === "trialing" ? "prova" : "attivo";
             piano = (sub.metadata?.piano as string) || null;
+            const trialEnd = (sub as unknown as { trial_end?: number }).trial_end;
+            if (sub.status === "trialing" && trialEnd) fineProva = new Date(trialEnd * 1000);
           }
           runWithTenant(tenant, () =>
             salvaAbbonamento({
@@ -85,7 +90,45 @@ export async function POST(req: NextRequest) {
               periodo_fine: periodo,
             })
           );
+          // Email di conferma: piano, prova, prezzo (scontato se founding member).
+          const email = s.customer_details?.email || null;
+          if (email && pianoValido(piano ?? "")) {
+            void inviaEmailAbbonamento(email, {
+              piano: piano as "pro" | "azienda",
+              giorniProva: stato === "prova" ? GIORNI_PROVA : 0,
+              fineProva,
+              founder: eBetaTester(email),
+              sconto: SCONTO_BETA,
+            }).catch((e) => console.error("[email] abbonamento non inviata:", e instanceof Error ? e.message : e));
+          }
         }
+        break;
+      }
+      case "invoice.paid": {
+        // Ogni addebito riuscito → ricevuta via email. Le fatture a zero
+        // (l'avvio della prova) non generano ricevuta.
+        const inv = event.data.object as Stripe.Invoice;
+        if ((inv.amount_paid ?? 0) <= 0) break;
+        let email = inv.customer_email || null;
+        if (!email && typeof inv.customer === "string") {
+          try {
+            const c = await stripe().customers.retrieve(inv.customer);
+            email = c.deleted ? null : c.email || null;
+          } catch {
+            /* senza email niente ricevuta, ma il webhook non fallisce */
+          }
+        }
+        if (!email) break;
+        const linea = inv.lines?.data?.[0];
+        const periodoLinea = (linea as unknown as { period?: { start?: number; end?: number } } | undefined)?.period;
+        void inviaEmailRicevuta(email, {
+          importoCent: inv.amount_paid,
+          descrizione: linea?.description || "Abbonamento ORION",
+          dal: periodoLinea?.start ? new Date(periodoLinea.start * 1000) : null,
+          al: periodoLinea?.end ? new Date(periodoLinea.end * 1000) : null,
+          numero: inv.number ?? null,
+          urlRicevuta: inv.hosted_invoice_url ?? null,
+        }).catch((e) => console.error("[email] ricevuta non inviata:", e instanceof Error ? e.message : e));
         break;
       }
       case "customer.subscription.created":

@@ -84,6 +84,28 @@ async function inviaViaResend(key: string, email: string, oggetto: string, testo
   }
 }
 
+// Invio generico di un'email di sistema (usato anche dalle transazionali di
+// email-orion.ts). Non lancia mai: torna false e logga, così un problema di
+// posta non rompe MAI il flusso che l'ha richiesta.
+export async function inviaEmail(email: string, oggetto: string, testo: string, html: string): Promise<boolean> {
+  const key = chiaveResend();
+  if (key) return inviaViaResend(key, email, oggetto, testo, html);
+
+  const tx = transport();
+  if (tx) {
+    try {
+      await tx.sendMail({ from: MITTENTE, to: email, subject: oggetto, text: testo, html });
+      return true;
+    } catch (e) {
+      console.error("[mailer] SMTP invio fallito:", e instanceof Error ? e.message : e);
+      return false;
+    }
+  }
+
+  console.warn(`[mailer] NON configurato: "${oggetto}" per ${email} non spedita`);
+  return false;
+}
+
 // Invia il codice. Ritorna { inviata, codiceDev? }: codiceDev è valorizzato solo
 // quando NON c'è mailer e non siamo in produzione (per i test).
 export async function inviaCodice(
@@ -92,23 +114,10 @@ export async function inviaCodice(
   scopo: "signup" | "login"
 ): Promise<{ inviata: boolean; codiceDev?: string }> {
   const { testo, html, oggetto } = corpoCodice(codice, scopo);
-
-  const key = chiaveResend();
-  if (key) {
-    return { inviata: await inviaViaResend(key, email, oggetto, testo, html) };
+  const inviata = await inviaEmail(email, oggetto, testo, html);
+  if (!inviata && !mailerConfigurato()) {
+    console.warn(`[mailer] codice ${scopo} per ${email} = ${codice} (non spedito)`);
+    return { inviata: false, ...(process.env.NODE_ENV !== "production" ? { codiceDev: codice } : {}) };
   }
-
-  const tx = transport();
-  if (tx) {
-    try {
-      await tx.sendMail({ from: MITTENTE, to: email, subject: oggetto, text: testo, html });
-      return { inviata: true };
-    } catch (e) {
-      console.error("[mailer] SMTP invio fallito:", e instanceof Error ? e.message : e);
-      return { inviata: false };
-    }
-  }
-
-  console.warn(`[mailer] NON configurato: codice ${scopo} per ${email} = ${codice} (non spedito)`);
-  return { inviata: false, ...(process.env.NODE_ENV !== "production" ? { codiceDev: codice } : {}) };
+  return { inviata };
 }
