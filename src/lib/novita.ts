@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-15", testo: "Tutto nero su bianco: email di conferma per account, beta e abbonamento — e ricevuta a ogni pagamento" },
   { data: "2026-07-15", testo: "Il tuo profilo sempre con te: il cerchietto in alto a destra con abbonamento, founding member e accesso rapido" },
   { data: "2026-07-15", testo: "Il conto alla rovescia è iniziato: ORION apre il 21 luglio alle 19:00 — i founding member entrano per primi" },
   { data: "2026-07-15", testo: "ORION ti accoglie a voce: benvenuto a chi arriva, bentornato per nome a chi rientra" },
