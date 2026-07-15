@@ -22,6 +22,114 @@ const TITOLI: Record<DemoId, string> = {
   misura: "Il tuo ORION, su misura",
 };
 
+// ── IL SUONO DELLE SCENE ─────────────────────────────────────────────────────
+// Effetti gioiosi sintetizzati al volo (niente file): pop delle bolle,
+// campanelline dei successi, whoosh dei movimenti, trillo dei timbri.
+// Il click che apre la modale è il "gesto" che sblocca l'audio nel browser.
+
+type NomeSuono = "avvio" | "pop" | "tick" | "ding" | "whoosh" | "tada" | "bonk";
+
+let ctxAudio: AudioContext | null = null;
+let mutoSuoni = false;
+export function suoniAttivi(): boolean {
+  return !mutoSuoni;
+}
+export function impostaSuoni(attivi: boolean) {
+  mutoSuoni = !attivi;
+  try {
+    localStorage.setItem("orion-demo-suoni", attivi ? "si" : "no");
+  } catch {
+    /* noop */
+  }
+}
+
+function suona(nome: NomeSuono) {
+  if (mutoSuoni || typeof window === "undefined") return;
+  try {
+    if (!ctxAudio) ctxAudio = new AudioContext();
+    const ctx = ctxAudio;
+    if (ctx.state === "suspended") void ctx.resume();
+    const ora = ctx.currentTime;
+
+    // Una nota morbida: seno + inviluppo dolce (attacco rapido, coda lunga).
+    const nota = (freq: number, t0: number, durata: number, vol: number, verso?: number) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, t0);
+      if (verso) o.frequency.exponentialRampToValueAtTime(verso, t0 + durata);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(vol, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + durata);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0);
+      o.stop(t0 + durata + 0.05);
+    };
+    // Il soffio: rumore filtrato che scivola (per i movimenti).
+    const soffio = (t0: number, durata: number, da: number, a: number, vol: number) => {
+      const n = Math.floor(ctx.sampleRate * durata);
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const f = ctx.createBiquadFilter();
+      f.type = "bandpass";
+      f.Q.value = 1.1;
+      f.frequency.setValueAtTime(da, t0);
+      f.frequency.exponentialRampToValueAtTime(a, t0 + durata);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(vol, t0);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + durata);
+      src.connect(f).connect(g).connect(ctx.destination);
+      src.start(t0);
+    };
+
+    switch (nome) {
+      case "avvio": // il sipario si apre: dolce salita
+        nota(220, ora, 0.5, 0.045, 440);
+        soffio(ora, 0.5, 300, 900, 0.02);
+        break;
+      case "pop": // una bolla che appare
+        nota(520, ora, 0.1, 0.06, 760);
+        break;
+      case "tick": // un dettaglio che scatta
+        nota(1320, ora, 0.05, 0.035);
+        break;
+      case "ding": // un successo: terza maggiore che brilla
+        nota(1047, ora, 0.3, 0.055);
+        nota(1319, ora + 0.09, 0.34, 0.05);
+        break;
+      case "whoosh": // qualcosa che vola
+        soffio(ora, 0.38, 350, 1400, 0.05);
+        break;
+      case "tada": // il timbro finale: arpeggio felice
+        nota(523, ora, 0.22, 0.05);
+        nota(659, ora + 0.09, 0.22, 0.05);
+        nota(784, ora + 0.18, 0.34, 0.055);
+        nota(1047, ora + 0.27, 0.42, 0.045);
+        break;
+      case "bonk": // l'intruso respinto: tonfo simpatico
+        nota(180, ora, 0.16, 0.07, 90);
+        break;
+    }
+  } catch {
+    /* l'audio non deve mai rompere la scena */
+  }
+}
+
+// Suona gli spunti quando l'orologio li attraversa (gestendo il giro del loop).
+function useSuoni(t: number, spunti: [number, NomeSuono][]) {
+  const prima = useRef(-1);
+  useEffect(() => {
+    const p = prima.current;
+    prima.current = t;
+    if (p < 0 || t < p) return; // primo giro di clock o loop ripartito
+    for (const [quando, nome] of spunti) if (quando > p && quando <= t) suona(nome);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t]);
+}
+
 // Orologio in loop: torna i millisecondi trascorsi (0..durata), ~30fps.
 function useOrologio(durataMs: number): number {
   const [t, setT] = useState(0);
@@ -184,6 +292,18 @@ function Timbro({ on, style, children }: { on: boolean; style?: CSSProperties; c
 function ScenaAgenda() {
   const T = 14500;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [1900, "pop"], // la notifica della disdetta
+    [3400, "pop"], // ORION prende la parola
+    [6500, "tick"],
+    [6700, "tick"],
+    [6900, "tick"], // la lista d'attesa avvisata
+    [8300, "ding"], // Sara Neri accetta
+    [9600, "ding"], // lo slot torna verde
+    [10400, "pop"],
+    [12300, "tada"], // TUTTO DA SOLA ✓
+  ]);
   const uscita = t > T - 900; // dissolvenza finale per riagganciare il loop
 
   const righe = [
@@ -315,6 +435,19 @@ function ScenaAgenda() {
 function ScenaTeam() {
   const T = 14000;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [500, "pop"], // la richiesta del titolare
+    [2600, "ding"], // il codice nasce
+    [3600, "whoosh"], // le linee raggiungono i pc
+    [4200, "tick"],
+    [4580, "tick"],
+    [4960, "tick"], // i tre computer si accendono
+    [6300, "pop"], // permessi per ruolo
+    [8600, "whoosh"], // la staffetta parte
+    [10800, "ding"], // consegnata a Marco
+    [12400, "tada"], // UN'AZIENDA, UN SOLO CERVELLO
+  ]);
   const uscita = t > T - 900;
 
   const pc = [
@@ -433,6 +566,19 @@ function ScenaTeam() {
 function ScenaStrumenti() {
   const T = 14000;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [500, "pop"], // l'utente racconta i suoi strumenti
+    [3100, "pop"], // "mi collego io"
+    [4700, "tick"],
+    [5020, "tick"],
+    [5340, "tick"], // le carte degli strumenti
+    [5700, "ding"], // collegato ✓
+    [7700, "whoosh"], // l'appuntamento vola nel gestionale
+    [9700, "tada"], // FIRMATO ORION ✓
+    [10900, "whoosh"], // il ritorno a due vie
+    [12500, "pop"],
+  ]);
   const uscita = t > T - 900;
 
   const strumenti = [
@@ -523,6 +669,17 @@ function ScenaStrumenti() {
 function ScenaFortezza() {
   const T = 14500;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [2200, "tick"],
+    [2450, "tick"],
+    [2700, "tick"], // i dati si cifrano riga per riga
+    [4200, "whoosh"], // lo scudo si disegna
+    [6400, "whoosh"], // il pacco vola fuori sede
+    [7900, "ding"], // copia al sicuro ✓
+    [9400, "bonk"], // intruso respinto
+    [11800, "tada"], // LA RISERVATEZZA È NEL CODICE ✓
+  ]);
   const uscita = t > T - 900;
   const cifrato = t >= 2200;
 
@@ -636,6 +793,20 @@ function ScenaFortezza() {
 function ScenaVoce() {
   const T = 15000;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [800, "pop"], // «stampami l'agenda di domani»
+    [2600, "pop"], // «subito, la mando in stampa»
+    [3400, "tick"], // la stampante appare
+    [4300, "whoosh"], // il foglio esce
+    [5200, "ding"], // STAMPA VERA ✓
+    [5600, "pop"], // «apri il gestionale»
+    [6800, "pop"],
+    [7300, "whoosh"], // la finestra si apre
+    [9000, "tick"], // la mano compare
+    [10600, "whoosh"], // il gesto trascina la finestra
+    [12800, "pop"],
+  ]);
   const uscita = t > T - 900;
   const manoAfferra = fra(t, 9800, 12400);
   const finestraSpostata = t >= 10600;
@@ -767,6 +938,17 @@ function ScenaVoce() {
 function ScenaMisura() {
   const T = 13000;
   const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [400, "pop"], // «mettimi rosso Ferrari»
+    [2600, "whoosh"],
+    [2700, "ding"], // l'onda rossa
+    [5200, "whoosh"], // verde bosco
+    [5500, "pop"],
+    [7400, "whoosh"], // viola notte
+    [9600, "whoosh"], // oro studio
+    [11600, "whoosh"], // ritorno al blu → loop perfetto
+  ]);
   const uscita = t > T - 900;
 
   // I temi si susseguono con un'onda di colore; si chiude tornando al blu → loop perfetto.
@@ -874,6 +1056,21 @@ const SCENE: Record<DemoId, () => ReactNode> = {
 export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [scala, setScala] = useState(1);
+  const [audioOn, setAudioOn] = useState(true);
+
+  // Ricorda la scelta audio dell'utente (di default: suoni accesi).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("orion-demo-suoni") === "no") {
+        impostaSuoni(false);
+        setAudioOn(false);
+      } else {
+        impostaSuoni(true);
+      }
+    } catch {
+      /* noop */
+    }
+  }, []);
 
   // La scena è disegnata su un palco fisso 880×550 e scalata al contenitore.
   useLayoutEffect(() => {
@@ -923,6 +1120,29 @@ export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void 
           <span className="demo-batte" style={{ width: 9, height: 9, borderRadius: 99, background: "#38e8ff", boxShadow: "0 0 12px rgba(56,232,255,.9)" }} />
           <span style={{ color: "#e8fbff", fontWeight: 700, fontSize: "clamp(14px,2.4vw,17px)" }}>{TITOLI[id]}</span>
           <span style={{ color: "#5e8798", fontSize: 12, marginLeft: 4 }}>· ORION al lavoro, in loop</span>
+          <button
+            onClick={() => {
+              const nuovo = !audioOn;
+              setAudioOn(nuovo);
+              impostaSuoni(nuovo);
+              if (nuovo) suona("pop"); // conferma immediata che l'audio è vivo
+            }}
+            aria-label={audioOn ? "Silenzia i suoni" : "Attiva i suoni"}
+            title={audioOn ? "Suoni attivi" : "Suoni spenti"}
+            style={{
+              marginLeft: "auto",
+              width: 34,
+              height: 34,
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,.16)",
+              background: audioOn ? "rgba(56,232,255,.12)" : "rgba(255,255,255,.06)",
+              color: "#dff6fc",
+              fontSize: 15,
+              cursor: "pointer",
+            }}
+          >
+            {audioOn ? "🔊" : "🔇"}
+          </button>
           <button
             onClick={onClose}
             aria-label="Chiudi"
