@@ -112,6 +112,28 @@ test("email nella lista beta → founder con sconto a vita (case-insensitive)", 
   db().prepare("DELETE FROM beta_tester WHERE email = ?").run(EMAIL);
 });
 
+// ── COLLAUDO PRE-LANCIO: le eccezioni del lancio usano ORION gratis ─────────
+
+test("prima del lancio: chi è nelle eccezioni entra senza abbonamento; dopo, paywall normale", () => {
+  process.env.ORION_LANCIO = "2099-01-01T00:00:00+01:00"; // lucchetto chiuso
+  process.env.ORION_LANCIO_ECCEZIONI = "tester@collaudo.it";
+  runWithTenant(TN, () => {
+    // il tester entra gratis, senza carta
+    const s = statoAbbonamento("tester@collaudo.it");
+    assert.equal(s.accessoConsentito, true);
+    assert.equal(s.stato, "attivo");
+    // un estraneo resta al paywall
+    assert.equal(statoAbbonamento("estraneo@x.it").accessoConsentito, false);
+  });
+  // Al lancio la regola sparisce da sola: il tester torna al paywall.
+  process.env.ORION_LANCIO = "2000-01-01T00:00:00+01:00"; // lucchetto aperto
+  runWithTenant(TN, () => {
+    assert.equal(statoAbbonamento("tester@collaudo.it").accessoConsentito, false);
+  });
+  delete process.env.ORION_LANCIO;
+  delete process.env.ORION_LANCIO_ECCEZIONI;
+});
+
 test("email NON in lista beta → nessuno sconto founder", () => {
   runWithTenant(TN, () => {
     const s = statoAbbonamento("estraneo@x.it");

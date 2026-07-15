@@ -11,12 +11,14 @@
 //   ORION_ADMIN_EMAIL       il proprietario: entra sempre
 // ──────────────────────────────────────────────────────────────────────────
 
-export const DATA_LANCIO = new Date(
-  (process.env.ORION_LANCIO || "2026-07-21T19:00:00+02:00").trim()
-);
+// Letta a ogni chiamata: cambiare ORION_LANCIO su Railway (o nei test) ha
+// effetto immediato, senza riavvii particolari.
+export function dataLancio(): Date {
+  return new Date((process.env.ORION_LANCIO || "2026-07-21T19:00:00+02:00").trim());
+}
 
 export function lanciato(): boolean {
-  return Date.now() >= DATA_LANCIO.getTime();
+  return Date.now() >= dataLancio().getTime();
 }
 
 // Chi può entrare anche a lucchetto chiuso: il proprietario + le eccezioni.
@@ -39,12 +41,12 @@ export function chiaveVipValida(chiave?: string | null): boolean {
 }
 
 export function statoLancio(): { lanciato: boolean; quando: string } {
-  return { lanciato: lanciato(), quando: DATA_LANCIO.toISOString() };
+  return { lanciato: lanciato(), quando: dataLancio().toISOString() };
 }
 
 // "21 luglio alle 19:00" — per i messaggi di cortesia, nell'ora italiana.
 export function quandoInParole(): string {
-  const g = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", timeZone: "Europe/Rome" }).format(DATA_LANCIO);
-  const o = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Rome" }).format(DATA_LANCIO);
+  const g = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "long", timeZone: "Europe/Rome" }).format(dataLancio());
+  const o = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Rome" }).format(dataLancio());
   return `${g} alle ${o}`;
 }

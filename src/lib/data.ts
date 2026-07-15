@@ -3,6 +3,7 @@ import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
 import { cifra } from "./crypto";
 import { eBetaTester, SCONTO_BETA } from "./beta";
+import { lanciato, eccezioneLancio } from "./lancio";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Accesso ai dati, MULTI-TENANT: ogni query è filtrata per tenant_id, preso
@@ -2396,6 +2397,13 @@ export function statoAbbonamento(email?: string | null): StatoAbbonamento {
   // Proprietario: accesso pieno senza pagare.
   const admin = adminEmail();
   if (email && admin && email.trim().toLowerCase() === admin) {
+    return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
+  }
+
+  // Collaudo pre-lancio: finché ORION è chiuso, chi è nelle ECCEZIONI DEL
+  // LANCIO (i tester) usa tutto gratis, senza carta. Al lancio questa regola
+  // sparisce da sola e per tutti vale il normale abbonamento.
+  if (!lanciato() && eccezioneLancio(emailAccount)) {
     return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
   }
 
