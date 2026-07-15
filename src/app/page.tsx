@@ -35,7 +35,8 @@ export default function Vetrina() {
   const tiltRef = useRef<HTMLDivElement>(null);
   const [core, setCore] = useState<CoreState>("idle");
   const [nome, setNome] = useState<string | null>(null);
-  const [autenticato, setAutenticato] = useState(false);
+  // null = non sappiamo ancora chi sei (il saluto vocale aspetta la risposta).
+  const [autenticato, setAutenticato] = useState<boolean | null>(null);
   const [voceOn, setVoceOn] = useState(true);
   const [scaricabili, setScaricabili] = useState<{ mac: boolean; win: boolean }>({ mac: false, win: false });
   const [beta, setBeta] = useState<{ rimasti: number; posti: number; sconto: number; aperto: boolean } | null>(null);
@@ -62,7 +63,7 @@ export default function Vetrina() {
         setAutenticato(Boolean(s.autenticato));
         if (s.autenticato && (s.nome || s.utente?.nome)) setNome(String(s.nome || s.utente?.nome));
       })
-      .catch(() => {});
+      .catch(() => setAutenticato(false)); // rete ko → saluto da sconosciuto, ma saluto
     fetch("/api/scarica/stato")
       .then((r) => r.json())
       .then((s) => setScaricabili({ mac: Boolean(s.mac), win: Boolean(s.win) }))
@@ -100,7 +101,7 @@ export default function Vetrina() {
     }
   };
 
-  // ── La voce di ORION ────────────────────────────────────────────────────
+  // ── La voce di ORION (il saluto d'ingresso vive in benvenuto()) ─────────
   const parla = useCallback((testo: string) => {
     if (!voceOnRef.current || !("speechSynthesis" in window)) return;
     const vs = window.speechSynthesis.getVoices().filter((v) => (v.lang ?? "").toLowerCase().startsWith("it"));
@@ -117,11 +118,19 @@ export default function Vetrina() {
 
   const benvenuto = useCallback(() => {
     if (salutato.current) return;
+    // Aspetta di sapere CHI sei (la risposta di /api/state): senza questa
+    // attesa, chi è loggato rischierebbe il saluto da sconosciuto.
+    if (autenticato === null) return;
     salutato.current = true;
-    parla(nome ? `Bentornato, ${nome}.` : "Benvenuto. Io sono ORION.");
-  }, [nome, parla]);
+    if (autenticato) {
+      parla(nome ? `Bentornato, ${nome}.` : "Bentornato.");
+    } else {
+      parla("Benvenuto! Io sono ORION, il tuo nuovo assistente operativo cognitivo.");
+    }
+  }, [autenticato, nome, parla]);
 
   // Prova subito (dove il browser lo consente); altrimenti al primo tocco/scroll.
+  // Si riarma da solo quando arriva la risposta "chi sei" (benvenuto cambia).
   useEffect(() => {
     const t = setTimeout(benvenuto, 1200);
     const su = () => benvenuto();
