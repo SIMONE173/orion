@@ -48,6 +48,13 @@ export default function Vetrina() {
   // Lucchetto del lancio: finché è chiuso la vetrina mostra il conto alla rovescia.
   const [lancio, setLancio] = useState<{ lanciato: boolean; quando: string } | null>(null);
   const [oraTick, setOraTick] = useState(() => Date.now());
+  // Il profilo nel cerchietto in alto a destra (solo per chi è loggato).
+  const [profilo, setProfilo] = useState<{
+    email: string;
+    abbo: { stato: string; piano: string | null; inProva: boolean; giorniProvaRimasti: number; founder: boolean; scontoFounder: number; configurato: boolean; periodoFine: string | null } | null;
+  } | null>(null);
+  const [menuProfilo, setMenuProfilo] = useState(false);
+  const [portaleBusy, setPortaleBusy] = useState(false);
   const salutato = useRef(false);
   const voceOnRef = useRef(true);
   voceOnRef.current = voceOn;
@@ -65,6 +72,25 @@ export default function Vetrina() {
       .then((s) => {
         setAutenticato(Boolean(s.autenticato));
         if (s.autenticato && (s.nome || s.utente?.nome)) setNome(String(s.nome || s.utente?.nome));
+        // Il cerchietto del profilo: identità + abbonamento (per il menù).
+        if (s.autenticato && s.utente?.email) {
+          const a = s.abbonamento ?? null;
+          setProfilo({
+            email: String(s.utente.email),
+            abbo: a
+              ? {
+                  stato: String(a.stato ?? "demo"),
+                  piano: a.piano ?? null,
+                  inProva: Boolean(a.inProva),
+                  giorniProvaRimasti: Number(a.giorniProvaRimasti ?? 0),
+                  founder: Boolean(a.founder),
+                  scontoFounder: Number(a.scontoFounder ?? 0),
+                  configurato: Boolean(a.configurato),
+                  periodoFine: a.periodoFine ?? null,
+                }
+              : null,
+          });
+        }
       })
       .catch(() => setAutenticato(false)); // rete ko → saluto da sconosciuto, ma saluto
     fetch("/api/scarica/stato")
@@ -293,6 +319,14 @@ export default function Vetrina() {
 
   // Lucchetto: chiuso finché il server dice che non è ancora l'ora. Il conto
   // alla rovescia batte ogni secondo; allo zero il sito si considera aperto.
+  // Il menù del profilo si chiude anche con Esc.
+  useEffect(() => {
+    if (!menuProfilo) return;
+    const suTasto = (e: KeyboardEvent) => e.key === "Escape" && setMenuProfilo(false);
+    window.addEventListener("keydown", suTasto);
+    return () => window.removeEventListener("keydown", suTasto);
+  }, [menuProfilo]);
+
   const chiuso = Boolean(lancio && !lancio.lanciato && new Date(lancio.quando).getTime() > oraTick);
   useEffect(() => {
     if (!chiuso) return;
@@ -336,7 +370,144 @@ export default function Vetrina() {
             {voceOn ? "🔊" : "🔇"}
           </button>
           <a href="/app" className="glass cta-mini">{autenticato ? "Entra" : "Accedi"}</a>
+
+          {/* Il cerchietto del profilo (solo da loggati): apre il menù del profilo. */}
+          {autenticato && profilo && (
+            <button
+              onClick={() => setMenuProfilo((v) => !v)}
+              title="Il tuo profilo"
+              aria-label="Il tuo profilo"
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 999,
+                border: menuProfilo ? "2px solid rgba(56,232,255,0.85)" : "2px solid rgba(56,232,255,0.4)",
+                background: "radial-gradient(circle at 32% 28%, rgba(56,232,255,0.35), rgba(14,45,60,0.95))",
+                color: "#e8fbff",
+                fontWeight: 800,
+                fontSize: 16,
+                cursor: "pointer",
+                boxShadow: menuProfilo ? "0 0 18px rgba(56,232,255,0.45)" : "0 0 10px rgba(56,232,255,0.18)",
+                transition: "all .25s",
+              }}
+            >
+              {(nome || profilo.email)[0].toUpperCase()}
+            </button>
+          )}
         </div>
+
+        {/* Il menù del profilo */}
+        {menuProfilo && profilo && (
+          <>
+            {/* velo: un click fuori chiude */}
+            <div onClick={() => setMenuProfilo(false)} style={{ position: "fixed", inset: 0, zIndex: 25 }} />
+            <div
+              className="glass"
+              style={{
+                position: "fixed",
+                top: 64,
+                right: 14,
+                zIndex: 30,
+                width: "min(330px, calc(100vw - 28px))",
+                borderRadius: 18,
+                border: "1px solid rgba(56,232,255,0.25)",
+                boxShadow: "0 30px 80px rgba(0,0,0,0.55), 0 0 40px rgba(56,232,255,0.07)",
+                padding: 16,
+                animation: "profiloEntra .22s cubic-bezier(.16,1,.3,1) both",
+              }}
+            >
+              {/* Chi sei */}
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  style={{
+                    width: 46,
+                    height: 46,
+                    borderRadius: 999,
+                    display: "grid",
+                    placeItems: "center",
+                    border: "2px solid rgba(56,232,255,0.5)",
+                    background: "radial-gradient(circle at 32% 28%, rgba(56,232,255,0.35), rgba(14,45,60,0.95))",
+                    color: "#e8fbff",
+                    fontWeight: 800,
+                    fontSize: 19,
+                  }}
+                >
+                  {(nome || profilo.email)[0].toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ color: "#e8fbff", fontWeight: 700, fontSize: 15.5 }}>{nome || "Il tuo ORION"}</div>
+                  <div style={{ color: "#7fa5b5", fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profilo.email}</div>
+                </div>
+              </div>
+
+              {/* Founding member */}
+              {profilo.abbo?.founder && (
+                <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 12, border: "1px solid rgba(245,198,107,0.35)", background: "rgba(245,198,107,0.08)", color: "#f5deae", fontSize: 12.5, fontWeight: 700 }}>
+                  🏆 Founding member · sconto {profilo.abbo.scontoFounder}% a vita
+                </div>
+              )}
+
+              {/* Abbonamento */}
+              <div style={{ marginTop: 10, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 12, background: "rgba(255,255,255,0.045)", border: "1px solid rgba(255,255,255,0.09)" }}>
+                <span style={{ color: "#8fb2c2", fontSize: 12.5 }}>Abbonamento</span>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: profilo.abbo?.stato === "attivo" ? "#6ee7b7" : profilo.abbo?.stato === "prova" ? "#7dd8f0" : profilo.abbo?.stato === "scaduto" ? "#fda4af" : "#bfe9f5" }}>
+                  {!profilo.abbo || !profilo.abbo.configurato
+                    ? "Anteprima libera"
+                    : profilo.abbo.stato === "prova"
+                      ? `Prova · ${profilo.abbo.giorniProvaRimasti}g rimasti`
+                      : profilo.abbo.stato === "attivo"
+                        ? `Attivo${profilo.abbo.piano ? ` · ${profilo.abbo.piano === "azienda" ? "Azienda" : "Professionista"}` : ""}`
+                        : profilo.abbo.stato === "annullato"
+                          ? "In disdetta"
+                          : profilo.abbo.stato === "scaduto"
+                            ? "Scaduto"
+                            : "Da attivare"}
+                </span>
+              </div>
+
+              {/* Le azioni */}
+              <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                <a href="/app" className="cta-primaria" style={{ textAlign: "center" }}>Entra in ORION</a>
+                {profilo.abbo?.configurato && ["prova", "attivo", "annullato"].includes(profilo.abbo.stato) && (
+                  <button
+                    onClick={async () => {
+                      if (portaleBusy) return;
+                      setPortaleBusy(true);
+                      try {
+                        const r = await fetch("/api/stripe/portal", { method: "POST" });
+                        const d = await r.json();
+                        if (d?.ok && d.url) {
+                          window.location.href = d.url;
+                          return;
+                        }
+                      } catch {
+                        /* ripiego sotto */
+                      }
+                      window.location.href = "/app"; // ripiego: pannello abbonamento in app
+                    }}
+                    className="glass cta-secondaria"
+                    style={{ cursor: "pointer" }}
+                  >
+                    {portaleBusy ? "Un attimo…" : "Gestisci abbonamento"}
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    try {
+                      await fetch("/api/auth/logout", { method: "POST" });
+                    } catch {
+                      /* comunque ricarica */
+                    }
+                    window.location.reload();
+                  }}
+                  style={{ background: "none", border: "none", color: "#fb9aa8", fontSize: 13.5, cursor: "pointer", padding: "6px 0" }}
+                >
+                  Esci dall&apos;account
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </header>
 
       {/* ── HERO ── */}
@@ -588,6 +759,7 @@ export default function Vetrina() {
         [data-sboccia] { transition: none; }
         @keyframes sitoNastro { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         @keyframes sitoGiu { 0%,100% { transform: translate(-50%, 0); opacity: 0.5; } 50% { transform: translate(-50%, 7px); opacity: 1; } }
+        @keyframes profiloEntra { from { opacity: 0; transform: translateY(-8px) scale(0.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @media (prefers-reduced-motion: reduce) { .sito .nastro { animation: none; } }
       `}</style>
     </div>
