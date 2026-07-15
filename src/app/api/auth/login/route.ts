@@ -10,6 +10,7 @@ import {
 import { COOKIE_SESSIONE, MAX_AGE_SESSIONE, COOKIE_DISPOSITIVO } from "@/lib/sessione";
 import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
 import { inviaCodice } from "@/lib/mailer";
+import { lanciato, eccezioneLancio, quandoInParole } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,14 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const email = String(body?.email ?? "").trim().toLowerCase();
     const password = String(body?.password ?? "");
+
+    // Lucchetto del lancio: prima dell'apertura entrano solo le eccezioni.
+    if (!lanciato() && !eccezioneLancio(email)) {
+      return NextResponse.json(
+        { ok: false, errore: `ORION apre il ${quandoInParole()}. Prenota il tuo posto founding member sulla home. 🚀` },
+        { status: 403 }
+      );
+    }
 
     const lim = rateLimit(`login:${ipRichiesta(req)}:${email}`, 10, 15 * 60 * 1000);
     if (!lim.ok) {

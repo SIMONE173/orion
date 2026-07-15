@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FILE_DOWNLOAD, clientR2, bucketR2 } from "@/lib/download";
+import { lanciato, chiaveVipValida, quandoInParole } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,14 @@ export const dynamic = "force-dynamic";
 // ──────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  // Lucchetto del lancio: prima dell'apertura si scarica solo con la parola
+  // d'ordine (link ?vip=..., per il collaudo pre-lancio).
+  if (!lanciato() && !chiaveVipValida(req.nextUrl.searchParams.get("vip"))) {
+    return NextResponse.json(
+      { ok: false, errore: `Il download apre il ${quandoInParole()}.` },
+      { status: 403 }
+    );
+  }
   const os = (req.nextUrl.searchParams.get("os") ?? "").toLowerCase();
   const chiave = FILE_DOWNLOAD[os];
   const s3 = clientR2();

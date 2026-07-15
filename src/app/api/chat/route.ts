@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runConversation, type MessaggioStorico } from "@/lib/orion/client";
 import { conTenant } from "@/lib/sessione";
+import { lanciato, eccezioneLancio, quandoInParole } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,13 @@ export async function POST(req: NextRequest) {
       typeof body?.allegato?.dataUrl === "string" ? { dataUrl: body.allegato.dataUrl } : undefined;
     const desktop = body?.desktop === true;
 
-    const r = await conTenant((utente) => runConversation(storico, avvio, allegato, desktop, utente));
+    // Lucchetto del lancio: vale anche per sessioni già aperte (tranne eccezioni).
+    const r = await conTenant(async (utente) => {
+      if (!lanciato() && !eccezioneLancio(utente.email)) {
+        return { testo: `ORION apre il ${quandoInParole()}. Ci vediamo lì! 🚀`, viste: [], errore: "lancio" };
+      }
+      return runConversation(storico, avvio, allegato, desktop, utente);
+    });
     if (!r.ok) {
       return NextResponse.json(
         { testo: "Sessione scaduta. Accedi di nuovo.", viste: [], errore: "auth_sessione" },

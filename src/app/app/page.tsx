@@ -114,6 +114,23 @@ export default function Home() {
   const [avviso, setAvviso] = useState<string | null>(null);
   const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
+  // Lucchetto del lancio: prima dell'apertura l'app mostra il conto alla
+  // rovescia (chi è in lista può comunque accedere dalla porticina).
+  const [lancio, setLancio] = useState<{ lanciato: boolean; quando: string } | null>(null);
+  const [oraTick, setOraTick] = useState(() => Date.now());
+  const [mostraAccesso, setMostraAccesso] = useState(false);
+  useEffect(() => {
+    fetch("/api/lancio")
+      .then((r) => r.json())
+      .then((s) => setLancio({ lanciato: Boolean(s.lanciato), quando: String(s.quando) }))
+      .catch(() => setLancio({ lanciato: true, quando: "" })); // rete ko → non bloccare la UI (i cancelli server proteggono)
+  }, []);
+  const lancioChiuso = Boolean(lancio && !lancio.lanciato && new Date(lancio.quando).getTime() > oraTick);
+  useEffect(() => {
+    if (!lancioChiuso) return;
+    const iv = setInterval(() => setOraTick(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, [lancioChiuso]);
   const [abbonamento, setAbbonamento] = useState<StatoAbb | null>(null);
   const [appunti, setAppunti] = useState<{ titolo: string; cliente_id: number | null; testo: string } | null>(null);
   const [appuntiStato, setAppuntiStato] = useState<"idle" | "salvando" | "salvato">("idle");
@@ -899,7 +916,7 @@ export default function Home() {
   const haPannelli = viste.length > 0;
 
   // Gate d'accesso: in attesa → splash; non loggato → schermata accesso.
-  if (autenticato === null) {
+  if (autenticato === null || (lancio === null && !autenticato)) {
     return (
       <main className="grid h-screen place-items-center">
         <OrionCore state="thinking" size={120} />
@@ -907,6 +924,35 @@ export default function Home() {
     );
   }
   if (!autenticato) {
+    // Lucchetto del lancio: conto alla rovescia al posto dell'accesso.
+    if (lancioChiuso && !mostraAccesso) {
+      const resto = Math.max(0, new Date(lancio!.quando).getTime() - oraTick);
+      const sTot = Math.floor(resto / 1000);
+      const g = Math.floor(sTot / 86400);
+      const h = String(Math.floor((sTot % 86400) / 3600)).padStart(2, "0");
+      const m = String(Math.floor((sTot % 3600) / 60)).padStart(2, "0");
+      const s = String(sTot % 60).padStart(2, "0");
+      return (
+        <main className="flex min-h-screen flex-col items-center justify-center px-5 text-center">
+          <OrionCore state="idle" size={130} />
+          <h1 className="mt-6 text-2xl font-semibold text-slate-50">ORION apre il 21 luglio, ore 19:00</h1>
+          <p className="mt-2 max-w-md text-slate-400">
+            Stiamo accendendo i motori. Al lancio, i founding member entrano per primi.
+          </p>
+          <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-400/5 px-8 py-4">
+            <div className="text-3xl font-extrabold tracking-wider text-slate-50" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {g}g : {h}h : {m}m : {s}s
+            </div>
+          </div>
+          <a href="/#beta" className="mt-6 rounded-xl bg-cyan-500/90 px-6 py-3 font-medium text-slate-900 transition hover:bg-cyan-400">
+            Prenota il tuo posto founding member
+          </a>
+          <button onClick={() => setMostraAccesso(true)} className="mt-4 text-sm text-slate-500 hover:text-slate-300">
+            Sono della lista → Accedi
+          </button>
+        </main>
+      );
+    }
     return <AuthScreen onAuth={() => setAutenticato(true)} />;
   }
 

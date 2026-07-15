@@ -3,6 +3,7 @@ import { creaUtente, trovaUtenteByEmail, creaCodiceVerifica } from "@/lib/auth";
 import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
 import { inviaCodice } from "@/lib/mailer";
 import { emailValida } from "@/lib/validazione";
+import { lanciato, eccezioneLancio, quandoInParole } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +25,14 @@ export async function POST(req: NextRequest) {
     const email = String(body?.email ?? "").trim().toLowerCase();
     const password = String(body?.password ?? "");
     const nome = body?.nome ? String(body.nome).trim() : undefined;
+
+    // Lucchetto del lancio: prima dell'apertura si registrano solo le eccezioni.
+    if (!lanciato() && !eccezioneLancio(email)) {
+      return NextResponse.json(
+        { ok: false, errore: `Le registrazioni aprono il ${quandoInParole()}. Intanto prenota il posto founding member sulla home. 🚀` },
+        { status: 403 }
+      );
+    }
 
     if (!emailValida(email)) {
       return NextResponse.json({ ok: false, errore: "Inserisci un indirizzo email valido." }, { status: 400 });
