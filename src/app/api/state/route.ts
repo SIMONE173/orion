@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProfilo, statoAbbonamento, messaggiRecenti } from "@/lib/data";
 import { conTenant } from "@/lib/sessione";
+import { lanciato, eccezioneLancio } from "@/lib/lancio";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +17,8 @@ export async function GET() {
       onboardingCompleto: u.onboarding_completo === 1,
       nome: u.nome ?? profilo.nome,
       abbonamento: statoAbbonamento(u.email),
+      // Collaudo pre-lancio: per i tester la vetrina sblocca anche i download.
+      tester: !lanciato() && eccezioneLancio(u.email),
       // ORION su misura: il tema estetico dell'utente (segue l'account ovunque).
       tema: (() => {
         try {

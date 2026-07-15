@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { FILE_DOWNLOAD, clientR2, bucketR2 } from "@/lib/download";
-import { lanciato, chiaveVipValida, quandoInParole } from "@/lib/lancio";
+import { lanciato, chiaveVipValida, eccezioneLancio, quandoInParole } from "@/lib/lancio";
+import { conTenant } from "@/lib/sessione";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,13 +16,16 @@ export const dynamic = "force-dynamic";
 // ──────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
-  // Lucchetto del lancio: prima dell'apertura si scarica solo con la parola
-  // d'ordine (link ?vip=..., per il collaudo pre-lancio).
+  // Lucchetto del lancio: prima dell'apertura scaricano solo la parola
+  // d'ordine (?vip=...) o i TESTER loggati (eccezioni del lancio).
   if (!lanciato() && !chiaveVipValida(req.nextUrl.searchParams.get("vip"))) {
-    return NextResponse.json(
-      { ok: false, errore: `Il download apre il ${quandoInParole()}.` },
-      { status: 403 }
-    );
+    const r = await conTenant(async (u) => eccezioneLancio(u.email));
+    if (!r.ok || !r.data) {
+      return NextResponse.json(
+        { ok: false, errore: `Il download apre il ${quandoInParole()}.` },
+        { status: 403 }
+      );
+    }
   }
   const os = (req.nextUrl.searchParams.get("os") ?? "").toLowerCase();
   const chiave = FILE_DOWNLOAD[os];

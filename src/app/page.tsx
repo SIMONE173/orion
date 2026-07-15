@@ -55,6 +55,8 @@ export default function Vetrina() {
   } | null>(null);
   const [menuProfilo, setMenuProfilo] = useState(false);
   const [portaleBusy, setPortaleBusy] = useState(false);
+  // Collaudo pre-lancio: per i tester loggati i download sono già sbloccati.
+  const [tester, setTester] = useState(false);
   const salutato = useRef(false);
   const voceOnRef = useRef(true);
   voceOnRef.current = voceOn;
@@ -71,6 +73,7 @@ export default function Vetrina() {
       .then((r) => r.json())
       .then((s) => {
         setAutenticato(Boolean(s.autenticato));
+        setTester(Boolean(s.tester));
         if (s.autenticato && (s.nome || s.utente?.nome)) setNome(String(s.nome || s.utente?.nome));
         // Il cerchietto del profilo: identità + abbonamento (per il menù).
         if (s.autenticato && s.utente?.email) {
@@ -328,6 +331,8 @@ export default function Vetrina() {
   }, [menuProfilo]);
 
   const chiuso = Boolean(lancio && !lancio.lanciato && new Date(lancio.quando).getTime() > oraTick);
+  // Per i tester del collaudo il sito è già aperto (bottoni e download attivi).
+  const bloccato = chiuso && !tester;
   useEffect(() => {
     if (!chiuso) return;
     const iv = setInterval(() => setOraTick(Date.now()), 1000);
@@ -525,7 +530,7 @@ export default function Vetrina() {
             operativa che lavora davvero, 24 ore su 24.
           </p>
           <div style={{ display: "flex", gap: 14, justifyContent: "center", marginTop: 28, flexWrap: "wrap" }}>
-            {chiuso ? (
+            {bloccato ? (
               <a href="#beta" className="cta-primaria">Prenota il tuo posto founding member</a>
             ) : (
               <a href="/app" className="cta-primaria">{autenticato ? "Entra in ORION" : "Inizia — è tuo in 2 minuti"}</a>
@@ -679,7 +684,7 @@ export default function Vetrina() {
             <div style={{ fontSize: 34 }}>🌐</div>
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>Nel browser, subito</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Niente installazioni: apri e parla.</p>
-            {chiuso ? (
+            {bloccato ? (
               <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
             ) : (
               <a href="/app" className="cta-primaria" style={{ display: "inline-block" }}>Apri ORION</a>
@@ -697,7 +702,7 @@ export default function Vetrina() {
             </div>
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>ORION per Mac</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Con i superpoteri: stampa, app, file, gesti, affiancamento.</p>
-            {chiuso ? (
+            {bloccato ? (
               <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
             ) : scaricabili.mac ? (
               <a href="/api/scarica?os=mac" className="cta-primaria" style={{ display: "inline-block" }}>Scarica per Mac</a>
@@ -717,7 +722,7 @@ export default function Vetrina() {
             </div>
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>ORION per Windows</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Con i superpoteri: stampa, app, file, gesti, affiancamento.</p>
-            {chiuso ? (
+            {bloccato ? (
               <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
             ) : scaricabili.win ? (
               <a href="/api/scarica?os=win" className="cta-primaria" style={{ display: "inline-block" }}>Scarica per Windows</a>
