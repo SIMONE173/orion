@@ -30,5 +30,22 @@ export async function GET() {
     out.voiceError = e instanceof Error ? e.message : String(e);
   }
 
+  // Test permesso Text-to-Speech con una voce "premade" (Rachel) che esiste in
+  // ogni account: se 200 la chiave PUÒ generare audio (manca solo la voce scelta);
+  // se 401 "missing permission" la chiave non ha lo scope TTS.
+  try {
+    const t = await fetch("https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM?output_format=mp3_44100_128", {
+      method: "POST",
+      headers: { "xi-api-key": KEY, "Content-Type": "application/json", Accept: "audio/mpeg" },
+      body: JSON.stringify({ text: "ok", model_id: MODEL }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    out.ttsStatus = t.status;
+    if (!t.ok) out.ttsBody = (await t.text().catch(() => "")).slice(0, 200);
+    else out.ttsBytes = (await t.arrayBuffer()).byteLength;
+  } catch (e) {
+    out.ttsError = e instanceof Error ? e.message : String(e);
+  }
+
   return NextResponse.json(out, { headers: { "Cache-Control": "no-store" } });
 }
