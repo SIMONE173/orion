@@ -43,7 +43,7 @@ export function impostaSuoni(attivi: boolean) {
   }
 }
 
-function suona(nome: NomeSuono) {
+export function suona(nome: NomeSuono) {
   if (mutoSuoni || typeof window === "undefined") return;
   try {
     if (!ctxAudio) ctxAudio = new AudioContext();
