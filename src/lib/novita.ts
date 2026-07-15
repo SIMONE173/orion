@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-15", testo: "La vetrina ora si guarda: clicca una funzione e vedi ORION al lavoro, dal vivo e in loop" },
   { data: "2026-07-15", testo: "Founding member: lo sconto a vita si aggancia da solo al tuo account — niente codici da inserire" },
   { data: "2026-07-14", testo: "Aperte le iscrizioni alla beta: i primi professionisti diventano founding member" },
   { data: "2026-07-14", testo: "Nuova voce di ORION: più naturale e umana, uguale su ogni dispositivo" },

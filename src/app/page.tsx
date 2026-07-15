@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
+import { DemoFunzioni, type DemoId } from "@/components/DemoFunzioni";
 import { NOVITA } from "@/lib/novita";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ export default function Vetrina() {
   const [betaProf, setBetaProf] = useState("");
   const [betaEsito, setBetaEsito] = useState<string | null>(null);
   const [betaBusy, setBetaBusy] = useState(false);
+  const [demoAperta, setDemoAperta] = useState<DemoId | null>(null);
   const salutato = useRef(false);
   const voceOnRef = useRef(true);
   voceOnRef.current = voceOn;
@@ -273,13 +275,13 @@ export default function Vetrina() {
     if (!nuovo) window.speechSynthesis?.cancel();
   };
 
-  const FUNZIONI = [
-    { icona: "🗓", titolo: "Un'agenda che si difende da sola", testo: "Prenota, conferma, ricorda ai clienti l'appuntamento e riempie i buchi offrendo gli slot liberati alla lista d'attesa. Tu parli, lei lavora." },
-    { icona: "🏢", titolo: "Il tuo team, dentro", testo: "Codice aziendale per i collaboratori, permessi veri per ruolo, messaggi fra colleghi consegnati a voce, approvazioni che viaggiano da sole e il giornale di bordo della giornata." },
-    { icona: "🔗", titolo: "Si aggancia ai tuoi strumenti", testo: "Il gestionale che usi resta: ORION lo capisce, ne riceve i dati e ci scrive dentro — appuntamenti e clienti arrivano anche nel tuo software, firmati. Google Calendar a due vie." },
-    { icona: "🛡", titolo: "Una fortezza per i tuoi dati", testo: "Credenziali cifrate, aree riservate per ruolo, backup cifrati fuori sede ogni notte con ripristino collaudato. La riservatezza non è una promessa: è applicata nel codice." },
-    { icona: "🖥", titolo: "Tutto il computer, a voce", testo: "Sul desktop apre le app, trova i file, stampa davvero ('stampami l'agenda di domani'), guarda lo schermo per affiancarti sul tuo software e obbedisce anche ai gesti delle mani." },
-    { icona: "🎨", titolo: "Il tuo ORION, su misura", testo: "Digli 'mettimi rosso Ferrari' e tutta l'interfaccia si trasforma con un'onda di colore. Ogni professionista ha il suo ORION: colori, briefing e modi su misura." },
+  const FUNZIONI: { icona: string; titolo: string; testo: string; demo: DemoId }[] = [
+    { icona: "🗓", titolo: "Un'agenda che si difende da sola", testo: "Prenota, conferma, ricorda ai clienti l'appuntamento e riempie i buchi offrendo gli slot liberati alla lista d'attesa. Tu parli, lei lavora.", demo: "agenda" },
+    { icona: "🏢", titolo: "Il tuo team, dentro", testo: "Codice aziendale per i collaboratori, permessi veri per ruolo, messaggi fra colleghi consegnati a voce, approvazioni che viaggiano da sole e il giornale di bordo della giornata.", demo: "team" },
+    { icona: "🔗", titolo: "Si aggancia ai tuoi strumenti", testo: "Il gestionale che usi resta: ORION lo capisce, ne riceve i dati e ci scrive dentro — appuntamenti e clienti arrivano anche nel tuo software, firmati. Google Calendar a due vie.", demo: "strumenti" },
+    { icona: "🛡", titolo: "Una fortezza per i tuoi dati", testo: "Credenziali cifrate, aree riservate per ruolo, backup cifrati fuori sede ogni notte con ripristino collaudato. La riservatezza non è una promessa: è applicata nel codice.", demo: "fortezza" },
+    { icona: "🖥", titolo: "Tutto il computer, a voce", testo: "Sul desktop apre le app, trova i file, stampa davvero ('stampami l'agenda di domani'), guarda lo schermo per affiancarti sul tuo software e obbedisce anche ai gesti delle mani.", demo: "voce" },
+    { icona: "🎨", titolo: "Il tuo ORION, su misura", testo: "Digli 'mettimi rosso Ferrari' e tutta l'interfaccia si trasforma con un'onda di colore. Ogni professionista ha il suo ORION: colori, briefing e modi su misura.", demo: "misura" },
   ];
 
   return (
@@ -359,13 +361,31 @@ export default function Vetrina() {
         <h2 className="titolo-sezione">Cosa fa, davvero</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginTop: 26 }}>
           {FUNZIONI.map((f) => (
-            <div key={f.titolo} className="glass carta" onMouseMove={inclina} onMouseLeave={raddrizza}>
+            <div
+              key={f.titolo}
+              className="glass carta"
+              onMouseMove={inclina}
+              onMouseLeave={raddrizza}
+              onClick={() => setDemoAperta(f.demo)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDemoAperta(f.demo)}
+              style={{ cursor: "pointer" }}
+              aria-label={`Guarda ORION al lavoro: ${f.titolo}`}
+            >
               <div style={{ fontSize: 30 }}>{f.icona}</div>
               <h3 style={{ margin: "10px 0 8px", fontSize: 18, color: "#dff6fc" }}>{f.titolo}</h3>
               <p style={{ margin: 0, color: "#8fb2c2", fontSize: 14.5, lineHeight: 1.55 }}>{f.testo}</p>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12, fontSize: 12.5, fontWeight: 700, letterSpacing: ".06em", color: "#38e8ff" }}>
+                <span style={{ display: "grid", placeItems: "center", width: 20, height: 20, borderRadius: 99, border: "1px solid rgba(56,232,255,.45)", background: "rgba(56,232,255,.1)", fontSize: 9, paddingLeft: 1.5 }}>▶</span>
+                GUARDALO DAL VIVO
+              </span>
             </div>
           ))}
         </div>
+
+        {/* Il cinema: la scena della funzione cliccata, in loop */}
+        {demoAperta && <DemoFunzioni id={demoAperta} onClose={() => setDemoAperta(null)} />}
       </section>
 
       {/* ── COME SI COMINCIA ── */}
