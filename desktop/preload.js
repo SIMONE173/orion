@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   apriFile: (query) => ipcRenderer.invoke("os:apriFile", query),
   cestina: (query) => ipcRenderer.invoke("os:cestina", query),
   apriApp: (nome) => ipcRenderer.invoke("os:apriApp", nome),
+  mostraOrion: () => ipcRenderer.invoke("os:mostraOrion"),
   chiudiApp: (nome) => ipcRenderer.invoke("os:chiudiApp", nome),
   crea: (dati) => ipcRenderer.invoke("os:crea", dati),
   rinomina: (dati) => ipcRenderer.invoke("os:rinomina", dati),

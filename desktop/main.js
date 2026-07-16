@@ -42,16 +42,85 @@ function creaFinestra() {
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(true));
 
   // Avvisa la pagina quando la finestra è ridotta a icona / ripristinata.
-  win.on("minimize", () => win.webContents.send("orion:finestra", "minimizzata"));
-  win.on("restore", () => win.webContents.send("orion:finestra", "ripristinata"));
+  // E: ridotta a icona → compare il MINI-NUCLEO sempre in primo piano;
+  // ripristinata → il mini-nucleo si ritira.
+  win.on("minimize", () => {
+    win.webContents.send("orion:finestra", "minimizzata");
+    apriMiniNucleo();
+  });
+  win.on("restore", () => {
+    win.webContents.send("orion:finestra", "ripristinata");
+    chiudiMiniNucleo();
+  });
+  win.on("focus", chiudiMiniNucleo);
   win.on("closed", () => {
     if (finestraPrincipale === win) finestraPrincipale = null;
+    chiudiMiniNucleo();
   });
 
   // Carica DIRETTAMENTE l'app (la radice del sito è la vetrina di marketing).
   win.loadURL(`${ORION_URL}/app`);
   return win;
 }
+
+// ── IL MINI-NUCLEO: solo il nucleo, sempre in primo piano ────────────────────
+// Quando ORION è ridotto a icona, resta una finestrella TRASPARENTE in alto a
+// sinistra, sopra qualsiasi app: il nucleo che respira + i disegnini delle
+// azioni (la pagina /nucleo si sincronizza via BroadcastChannel con l'app).
+let finestraNucleo = null;
+
+function apriMiniNucleo() {
+  if (finestraNucleo && !finestraNucleo.isDestroyed()) return;
+  const nucleo = new BrowserWindow({
+    width: 180,
+    height: 210,
+    x: 22,
+    y: 34,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    resizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    title: "ORION",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  // Sopra TUTTO, su ogni scrivania/spazio (anche app a tutto schermo).
+  nucleo.setAlwaysOnTop(true, "screen-saver");
+  if (nucleo.setVisibleOnAllWorkspaces) nucleo.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  nucleo.loadURL(`${ORION_URL}/nucleo`);
+  nucleo.on("closed", () => {
+    if (finestraNucleo === nucleo) finestraNucleo = null;
+  });
+  finestraNucleo = nucleo;
+}
+
+function chiudiMiniNucleo() {
+  try {
+    if (finestraNucleo && !finestraNucleo.isDestroyed()) finestraNucleo.close();
+  } catch {
+    /* noop */
+  }
+  finestraNucleo = null;
+}
+
+// Click sul mini-nucleo → ORION torna in primo piano.
+ipcMain.handle("os:mostraOrion", () => {
+  const win = finestraPrincipale;
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  chiudiMiniNucleo();
+  return { ok: true };
+});
 
 // Riporta in primo piano la finestra principale (richiamata dal doppio battito di mani).
 function mostraFinestraPrincipale() {

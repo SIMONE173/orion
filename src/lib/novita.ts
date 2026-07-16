@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-17", testo: "ORION cambia volto: la conversazione diventa una chat, il nucleo vola in alto — e sul desktop resta con te sopra ogni finestra" },
   { data: "2026-07-16", testo: "Il Ponte universale: ORION porta appuntamenti e clienti in QUALSIASI gestionale, anche senza API — su Desktop li scrive lui" },
   { data: "2026-07-16", testo: "ORION risponde ai clienti al posto tuo: WhatsApp gestito h24 anche a computer spento — e con l'autopilota sistema l'agenda da solo" },
   { data: "2026-07-16", testo: "Sotto il cofano: ORION sceglie da solo il motore giusto per ogni richiesta — sempre pronto, mai un pensiero" },

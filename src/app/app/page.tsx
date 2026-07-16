@@ -88,6 +88,9 @@ export default function Home() {
   const [testoInput, setTestoInput] = useState("");
   const [modoTesto, setModoTesto] = useState(false);
   const [mostraStorico, setMostraStorico] = useState(false);
+  // La CHAT a sinistra: si apre appena ORION ha detto la prima frase
+  // (benvenuto/briefing) e il nucleo vola in alto a destra.
+  const [chatAttiva, setChatAttiva] = useState(false);
   const [mostraCamera, setMostraCamera] = useState(false);
   const [cameraModo, setCameraModo] = useState<"documento" | "descrizione">("documento");
   // Modalità visione (telecamera dal vivo). Opt-in.
@@ -150,6 +153,29 @@ export default function Home() {
 
   const ultimoAssistente = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
 
+  // Appena c'è la prima parola in conversazione, il nucleo lascia il centro.
+  useEffect(() => {
+    if (!chatAttiva && messages.length > 0) setChatAttiva(true);
+  }, [messages, chatAttiva]);
+
+  // La chat si tiene sempre sull'ultimo messaggio.
+  const chatFineRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    chatFineRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, loading]);
+
+  // Il faro per il MINI-NUCLEO desktop (/nucleo, finestra sempre in primo
+  // piano): trasmette lo stato del nucleo e i "disegnini" delle azioni.
+  const canaleNucleo = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    try {
+      canaleNucleo.current = new BroadcastChannel("orion-nucleo");
+    } catch {
+      /* browser senza BroadcastChannel: il mini-nucleo resta idle */
+    }
+    return () => canaleNucleo.current?.close();
+  }, []);
+
   const inviaAOrion = useCallback(
     async (testo?: string, avvio = false, allegato?: string, quiet = false) => {
       setLoading(true);
@@ -196,8 +222,24 @@ export default function Home() {
           } else {
             setViste(data.viste);
           }
+          // Il mini-nucleo mostra il disegnino di cosa sta succedendo.
+          data.viste.forEach((v) => {
+            try {
+              canaleNucleo.current?.postMessage({ tipo: "azione", nome: v.tipo });
+            } catch {
+              /* noop */
+            }
+          });
         }
-        if (Array.isArray(data.azioni)) data.azioni.forEach((a) => eseguiAzioneRef.current?.(a));
+        if (Array.isArray(data.azioni))
+          data.azioni.forEach((a) => {
+            eseguiAzioneRef.current?.(a);
+            try {
+              canaleNucleo.current?.postMessage({ tipo: "azione", nome: (a as { tipo?: string }).tipo ?? "azione" });
+            } catch {
+              /* noop */
+            }
+          });
         setSuggerimenti(Array.isArray(data.suggerimenti) ? data.suggerimenti.slice(0, 3) : []);
       } catch {
         setMessages((m) => [
@@ -860,6 +902,15 @@ export default function Home() {
         ? "listening"
         : "idle";
 
+  // Il mini-nucleo desktop respira insieme a questo (stesso stato, in onda).
+  useEffect(() => {
+    try {
+      canaleNucleo.current?.postMessage({ tipo: "stato", core: coreState });
+    } catch {
+      /* noop */
+    }
+  }, [coreState]);
+
   // Comunica al motore vocale quando ORION sta elaborando (così non riarma il mic durante l'attesa).
   useEffect(() => {
     setBusy(loading);
@@ -1082,39 +1133,100 @@ export default function Home() {
         </div>
       )}
 
-      {/* Stage */}
-      <section className="relative min-h-0 flex-1 px-5">
-        {haPannelli && !gestiAttivi ? (
-          <div className="fade-in relative h-full pb-2">
-            <button
-              onClick={() => setViste([])}
-              className="absolute -top-1 right-0 z-10 grid size-8 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200"
-              title="Chiudi e torna a ORION"
-            >
-              <IconClose className="h-4 w-4" />
-            </button>
-            <PanelStage viste={viste} />
-          </div>
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-7">
-            <OrionCore
-              state={coreState}
-              size={260}
-              onClick={toggleMic}
-              title={micAttivo ? "Microfono attivo — tocca per mutare" : "Tocca per attivare il microfono"}
-            />
-            <div className="max-w-2xl px-6 text-center">
-              <p className="min-h-[2.5rem] text-lg leading-relaxed text-slate-200">{sottotitolo}</p>
-              {!sottotitolo && (
-                <p className="text-sm text-slate-500">
-                  {supported
-                    ? micAttivo
-                      ? "Ti ascolto… parla pure. Tocca ORION per mutare."
-                      : "Tocca ORION per attivare il microfono, oppure scrivi."
-                    : "Scrivi qui sotto per parlare con ORION."}
-                </p>
-              )}
+      {/* Stage: la CHAT a sinistra (dopo il benvenuto), i pannelli al centro,
+          il NUCLEO libero che dal centro vola in alto a destra. */}
+      <section className="relative flex min-h-0 flex-1 px-5">
+        {/* La conversazione, come una chat: ORION a sinistra, tu a destra. */}
+        {chatAttiva && (
+          <aside className="chat-entra chat-colonna mr-4 w-[360px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+              <span className="size-2 rounded-full bg-cyan-400 shadow-[0_0_8px] shadow-cyan-400/80" />
+              <span className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">CONVERSAZIONE</span>
             </div>
+            <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
+              {messages.map((m, i) => (
+                <div
+                  key={i}
+                  className={`fade-in max-w-[88%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
+                    m.role === "user"
+                      ? "ml-auto rounded-br-sm bg-cyan-500/20 text-cyan-50"
+                      : "rounded-bl-sm bg-white/8 text-slate-100"
+                  }`}
+                >
+                  {m.content}
+                </div>
+              ))}
+              {interim && (
+                <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-sm border border-cyan-400/20 bg-cyan-500/10 px-3.5 py-2 text-sm italic text-cyan-200/80">
+                  {interim}…
+                </div>
+              )}
+              {loading && (
+                <div className="flex w-fit items-center gap-1.5 rounded-2xl rounded-bl-sm bg-white/8 px-4 py-3.5">
+                  <span className="chat-puntino" />
+                  <span className="chat-puntino" style={{ animationDelay: ".15s" }} />
+                  <span className="chat-puntino" style={{ animationDelay: ".3s" }} />
+                </div>
+              )}
+              <div ref={chatFineRef} />
+            </div>
+          </aside>
+        )}
+
+        {/* Il palco dei pannelli */}
+        <div className="relative min-w-0 flex-1">
+          {haPannelli && !gestiAttivi ? (
+            <div className="fade-in relative h-full pb-2">
+              <button
+                onClick={() => setViste([])}
+                className="absolute -top-1 right-24 z-10 grid size-8 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:bg-white/10 hover:text-slate-200"
+                title="Chiudi e torna a ORION"
+              >
+                <IconClose className="h-4 w-4" />
+              </button>
+              <PanelStage viste={viste} />
+            </div>
+          ) : chatAttiva ? (
+            <div className="grid h-full place-items-center">
+              <p className="max-w-md px-6 text-center text-sm text-slate-600">
+                {supported
+                  ? "Parla o scrivi: agenda, clienti e pannelli compaiono qui."
+                  : "Scrivi qui sotto: agenda, clienti e pannelli compaiono qui."}
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        {/* IL NUCLEO, libero: grande al centro per il benvenuto, poi vola
+            in alto a destra (piccolo) con una sola, morbida transizione. */}
+        <div
+          onClick={toggleMic}
+          title={micAttivo ? "Microfono attivo — tocca per mutare" : "Tocca per attivare il microfono"}
+          className="absolute z-20 cursor-pointer"
+          style={{
+            left: chatAttiva ? "100%" : "50%",
+            top: chatAttiva ? 0 : "36%",
+            transform: chatAttiva ? "translate(-118px, 4px) scale(0.34)" : "translate(-50%, -50%) scale(1)",
+            transformOrigin: "top left",
+            transition: "left 1.15s cubic-bezier(.4,0,.2,1), top 1.15s cubic-bezier(.4,0,.2,1), transform 1.15s cubic-bezier(.4,0,.2,1)",
+          }}
+        >
+          <OrionCore state={coreState} size={260} />
+        </div>
+
+        {/* Il sottotitolo del benvenuto: vive solo finché il nucleo è al centro. */}
+        {!chatAttiva && (
+          <div className="pointer-events-none absolute left-1/2 top-[60%] w-full max-w-2xl -translate-x-1/2 px-6 text-center">
+            <p className="min-h-[2.5rem] text-lg leading-relaxed text-slate-200">{sottotitolo}</p>
+            {!sottotitolo && (
+              <p className="text-sm text-slate-500">
+                {supported
+                  ? micAttivo
+                    ? "Ti ascolto… parla pure. Tocca ORION per mutare."
+                    : "Tocca ORION per attivare il microfono, oppure scrivi."
+                  : "Scrivi qui sotto per parlare con ORION."}
+              </p>
+            )}
           </div>
         )}
       </section>
@@ -1124,25 +1236,7 @@ export default function Home() {
 
       {/* Dock */}
       <footer className="flex items-center gap-4 px-5 py-4">
-        {haPannelli && (
-          <button
-            onClick={toggleMic}
-            className="shrink-0"
-            aria-label="Microfono ORION"
-            title={micAttivo ? "Microfono attivo — tocca per mutare" : "Tocca per attivare il microfono"}
-          >
-            <OrionCore state={coreState} size={64} />
-          </button>
-        )}
-
         <div className="min-w-0 flex-1">
-          {haPannelli && sottotitolo && (
-            <p className="mb-2 truncate text-sm text-slate-300">
-              <span className="text-cyan-300/70">{listening ? "" : "ORION: "}</span>
-              {sottotitolo}
-            </p>
-          )}
-
           {modoTesto || !supported ? (
             <form onSubmit={inviaTesto} className="flex items-center gap-2">
               <input
@@ -1229,6 +1323,16 @@ export default function Home() {
       </footer>
 
       {/* Storico conversazione (overlay) */}
+      {/* Le coreografie della chat */}
+      <style>{`
+        .chat-puntino { width: 7px; height: 7px; border-radius: 99px; background: rgba(150,220,240,.85); display: inline-block; animation: chatPuntino 1s ease-in-out infinite; }
+        @keyframes chatPuntino { 0%,100% { opacity: .25; transform: translateY(0) } 50% { opacity: 1; transform: translateY(-3px) } }
+        .chat-entra { animation: chatEntra .9s cubic-bezier(.16,1,.3,1) both; }
+        @keyframes chatEntra { from { opacity: 0; transform: translateX(-26px) } to { opacity: 1; transform: none } }
+        .chat-colonna { display: none; }
+        @media (min-width: 768px) { .chat-colonna { display: flex; flex-direction: column; } }
+      `}</style>
+
       {mostraStorico && (
         <div
           className="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
