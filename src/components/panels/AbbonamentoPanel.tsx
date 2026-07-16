@@ -101,7 +101,7 @@ export function AbbonamentoPanel({ dati }: { dati: Dati }) {
 
         {s.configurato && s.stato === "scaduto" && (
           <p className="text-sm leading-relaxed text-slate-300">
-            La prova è terminata. Attiva l&apos;abbonamento per riprendere ad usare ORION senza limiti.
+            La prova è terminata. Attiva l&apos;abbonamento per riavere ORION al tuo fianco, senza pensieri.
           </p>
         )}
 

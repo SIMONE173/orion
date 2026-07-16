@@ -622,6 +622,31 @@ function migrate(d: Database.Database) {
       professione TEXT,
       created_at TEXT NOT NULL
     );
+
+    -- ── ECONOMIA: consumi AI per account/mese (margini sotto controllo) ─────
+    -- Una riga per (tenant, mese, motore): token e costo stimato in microdollari.
+    CREATE TABLE IF NOT EXISTS consumo_ai (
+      tenant_id INTEGER NOT NULL,
+      mese TEXT NOT NULL,
+      modello TEXT NOT NULL,
+      input INTEGER NOT NULL DEFAULT 0,
+      output INTEGER NOT NULL DEFAULT 0,
+      cache_lettura INTEGER NOT NULL DEFAULT 0,
+      cache_scrittura INTEGER NOT NULL DEFAULT 0,
+      chiamate INTEGER NOT NULL DEFAULT 0,
+      turni INTEGER NOT NULL DEFAULT 0,
+      costo_micro INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tenant_id, mese, modello)
+    );
+
+    -- Gli avvisi del tetto morbido: detti UNA volta sola per mese.
+    CREATE TABLE IF NOT EXISTS budget_avvisi (
+      tenant_id INTEGER NOT NULL,
+      mese TEXT NOT NULL,
+      avvisato80 INTEGER NOT NULL DEFAULT 0,
+      avvisato100 INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (tenant_id, mese)
+    );
   `);
 
   // Migrazione idempotente per DB creati con lo schema precedente:
