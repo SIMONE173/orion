@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
-import { DemoFunzioni, type DemoId } from "@/components/DemoFunzioni";
+import { CinemaFunzioni, type DemoId } from "@/components/DemoFunzioni";
 import { NOVITA } from "@/lib/novita";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -44,7 +44,6 @@ export default function Vetrina() {
   const [betaProf, setBetaProf] = useState("");
   const [betaEsito, setBetaEsito] = useState<string | null>(null);
   const [betaBusy, setBetaBusy] = useState(false);
-  const [demoAperta, setDemoAperta] = useState<DemoId | null>(null);
   // Lucchetto del lancio: finché è chiuso la vetrina mostra il conto alla rovescia.
   const [lancio, setLancio] = useState<{ lanciato: boolean; quando: string } | null>(null);
   const [oraTick, setOraTick] = useState(() => Date.now());
@@ -588,33 +587,8 @@ export default function Vetrina() {
       {/* ── FUNZIONI ── */}
       <section id="funzioni" data-sboccia style={{ position: "relative", zIndex: 5, padding: "70px 20px", maxWidth: 1120, margin: "0 auto", opacity: 0 }}>
         <h2 className="titolo-sezione">Cosa fa, davvero</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16, marginTop: 26 }}>
-          {FUNZIONI.map((f) => (
-            <div
-              key={f.titolo}
-              className="glass carta"
-              onMouseMove={inclina}
-              onMouseLeave={raddrizza}
-              onClick={() => setDemoAperta(f.demo)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setDemoAperta(f.demo)}
-              style={{ cursor: "pointer" }}
-              aria-label={`Guarda ORION al lavoro: ${f.titolo}`}
-            >
-              <div style={{ fontSize: 30 }}>{f.icona}</div>
-              <h3 style={{ margin: "10px 0 8px", fontSize: 18, color: "#dff6fc" }}>{f.titolo}</h3>
-              <p style={{ margin: 0, color: "#8fb2c2", fontSize: 14.5, lineHeight: 1.55 }}>{f.testo}</p>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 12, fontSize: 12.5, fontWeight: 700, letterSpacing: ".06em", color: "#38e8ff" }}>
-                <span style={{ display: "grid", placeItems: "center", width: 20, height: 20, borderRadius: 99, border: "1px solid rgba(56,232,255,.45)", background: "rgba(56,232,255,.1)", fontSize: 9, paddingLeft: 1.5 }}>▶</span>
-                GUARDALO DAL VIVO
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {/* Il cinema: la scena della funzione cliccata, in loop */}
-        {demoAperta && <DemoFunzioni id={demoAperta} onClose={() => setDemoAperta(null)} />}
+        {/* Il cinema in primo piano: le scene sfilano da sole, una alla volta */}
+        <CinemaFunzioni funzioni={FUNZIONI} />
       </section>
 
       {/* ── COME SI COMINCIA ── */}

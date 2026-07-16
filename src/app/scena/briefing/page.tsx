@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { suona } from "@/components/DemoFunzioni";
+import { suona, impostaSuoni } from "@/components/DemoFunzioni";
 
 // ──────────────────────────────────────────────────────────────────────────
 // SET CINEMATOGRAFICO · "Il briefing del mattino" — /scena/briefing
@@ -134,6 +134,11 @@ export default function ScenaBriefing() {
   const [t, setT] = useState(0);
   const [scala, setScala] = useState(1);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Sul set i suoni sono SEMPRE accesi (il carosello della home li ammutolisce).
+  useEffect(() => {
+    impostaSuoni(true, false);
+  }, []);
 
   // Il palco è 1440×900 e si adatta a qualsiasi schermo (lettera-box nero).
   useEffect(() => {

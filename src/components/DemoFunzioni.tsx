@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { OrionCore } from "./OrionCore";
 
@@ -34,8 +34,9 @@ let mutoSuoni = false;
 export function suoniAttivi(): boolean {
   return !mutoSuoni;
 }
-export function impostaSuoni(attivi: boolean) {
+export function impostaSuoni(attivi: boolean, ricorda = true) {
   mutoSuoni = !attivi;
+  if (!ricorda) return;
   try {
     localStorage.setItem("orion-demo-suoni", attivi ? "si" : "no");
   } catch {
@@ -1202,5 +1203,197 @@ export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void 
       `}</style>
     </div>,
     document.body
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// IL CINEMA IN PRIMO PIANO: la sfilata delle funzioni sulla vetrina.
+// Una scena alla volta, grande, che gira da sola; finito il giro passa alla
+// successiva con una dissolvenza scorrevole. Accanto (sotto, su mobile) la
+// carta con emoji, titolo e testo — gli stessi dei riquadri di prima.
+// Parte MUTO (niente suoni a sorpresa sulla home): 🔊 sul palco per accenderli.
+// ──────────────────────────────────────────────────────────────────────────
+
+const DURATE_SCENE: Record<DemoId, number> = {
+  agenda: 14500,
+  team: 14000,
+  strumenti: 14000,
+  fortezza: 14500,
+  voce: 15000,
+  misura: 13000,
+};
+
+export function CinemaFunzioni({
+  funzioni,
+}: {
+  funzioni: { icona: string; titolo: string; testo: string; demo: DemoId }[];
+}) {
+  const [indice, setIndice] = useState(0);
+  const [prima, setPrima] = useState<number | null>(null); // la scena uscente, per la dissolvenza
+  const [audioOn, setAudioOn] = useState(false);
+  const [scala, setScala] = useState(1);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const corrente = funzioni[indice];
+
+  // La home non deve suonare da sola: il carosello nasce muto.
+  useEffect(() => {
+    impostaSuoni(false, false);
+  }, []);
+
+  // Palco fisso 880×550 scalato alla larghezza disponibile.
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const misura = () => setScala(el.clientWidth / 880);
+    misura();
+    const ro = new ResizeObserver(misura);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const vai = useCallback(
+    (dove: number) => {
+      setIndice((cur) => {
+        const nuovo = ((dove % funzioni.length) + funzioni.length) % funzioni.length;
+        if (nuovo === cur) return cur;
+        setPrima(cur);
+        return nuovo;
+      });
+    },
+    [funzioni.length]
+  );
+
+  // Fine dissolvenza: la scena uscente esce di scena davvero.
+  useEffect(() => {
+    if (prima === null) return;
+    const timer = setTimeout(() => setPrima(null), 800);
+    return () => clearTimeout(timer);
+  }, [prima]);
+
+  // Auto-avanzamento: un giro completo della scena, poi la prossima.
+  useEffect(() => {
+    const timer = setTimeout(() => vai(indice + 1), DURATE_SCENE[corrente.demo] + 400);
+    return () => clearTimeout(timer);
+  }, [indice, corrente.demo, vai]);
+
+  const palcoScena = (demo: DemoId) => (
+    <div style={{ position: "absolute", left: 0, top: 0, width: 880, height: 550, transform: `scale(${scala})`, transformOrigin: "top left" }}>
+      {SCENE[demo]()}
+    </div>
+  );
+
+  const bottoneTondo: CSSProperties = {
+    width: 42,
+    height: 42,
+    borderRadius: 99,
+    border: "1px solid rgba(255,255,255,.18)",
+    background: "rgba(8,14,20,.78)",
+    color: "#dff6fc",
+    fontSize: 17,
+    cursor: "pointer",
+    backdropFilter: "blur(6px)",
+  };
+
+  return (
+    <div className="cin-griglia" style={{ display: "grid", gap: 20, marginTop: 26, alignItems: "center" }}>
+      {/* IL PALCO */}
+      <div style={{ position: "relative" }}>
+        <div
+          ref={boxRef}
+          style={{
+            position: "relative",
+            width: "100%",
+            aspectRatio: "880 / 550",
+            borderRadius: 20,
+            overflow: "hidden",
+            border: "1px solid rgba(56,232,255,.24)",
+            background: "radial-gradient(1200px 600px at 50% -10%, rgba(23,50,68,.55), rgba(5,10,15,.98))",
+            boxShadow: "0 34px 100px rgba(0,0,0,.55), 0 0 70px rgba(56,232,255,.06)",
+          }}
+        >
+          {prima !== null && (
+            <div key={`esce-${prima}`} style={{ position: "absolute", inset: 0, animation: "cin-esce .8s cubic-bezier(.4,0,.2,1) both" }}>
+              {palcoScena(funzioni[prima].demo)}
+            </div>
+          )}
+          <div key={`entra-${corrente.demo}`} style={{ position: "absolute", inset: 0, animation: prima !== null ? "cin-entra .8s cubic-bezier(.16,1,.3,1) both" : undefined }}>
+            {palcoScena(corrente.demo)}
+          </div>
+
+          {/* Frecce di regia */}
+          <button aria-label="Scena precedente" onClick={() => vai(indice - 1)} style={{ ...bottoneTondo, position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 8 }}>
+            ‹
+          </button>
+          <button aria-label="Scena successiva" onClick={() => vai(indice + 1)} style={{ ...bottoneTondo, position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", zIndex: 8 }}>
+            ›
+          </button>
+          {/* Audio del cinema (nasce muto) */}
+          <button
+            aria-label={audioOn ? "Silenzia le scene" : "Attiva i suoni delle scene"}
+            title={audioOn ? "Suoni attivi" : "Suoni spenti"}
+            onClick={() => {
+              const nuovo = !audioOn;
+              setAudioOn(nuovo);
+              impostaSuoni(nuovo, false);
+              if (nuovo) suona("pop");
+            }}
+            style={{ ...bottoneTondo, position: "absolute", right: 12, bottom: 12, zIndex: 8, fontSize: 15, background: audioOn ? "rgba(56,232,255,.16)" : "rgba(8,14,20,.78)" }}
+          >
+            {audioOn ? "🔊" : "🔇"}
+          </button>
+        </div>
+      </div>
+
+      {/* LA CARTA DELLA SCENA IN ONDA + LA SCALETTA */}
+      <div>
+        <div key={corrente.demo} className="glass" style={{ borderRadius: 18, padding: "24px 24px 20px", position: "relative", overflow: "hidden", animation: "cin-carta .6s cubic-bezier(.16,1,.3,1) both" }}>
+          {/* Il tempo della scena che scorre */}
+          <div key={`barra-${indice}`} style={{ position: "absolute", top: 0, left: 0, height: 3, background: "linear-gradient(90deg, rgba(56,232,255,.9), rgba(56,232,255,.35))", animation: `cin-progresso ${DURATE_SCENE[corrente.demo] + 400}ms linear both` }} />
+          <div style={{ fontSize: 34 }}>{corrente.icona}</div>
+          <h3 style={{ margin: "12px 0 8px", fontSize: 21, color: "#dff6fc" }}>{corrente.titolo}</h3>
+          <p style={{ margin: 0, color: "#8fb2c2", fontSize: 15, lineHeight: 1.6 }}>{corrente.testo}</p>
+          <div style={{ marginTop: 14, display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, letterSpacing: ".08em", color: "#38e8ff" }}>
+            <span className="demo-batte" style={{ width: 7, height: 7, borderRadius: 99, background: "#38e8ff", boxShadow: "0 0 10px rgba(56,232,255,.9)" }} />
+            IN ONDA · ORION AL LAVORO
+          </div>
+        </div>
+
+        {/* La scaletta delle sei scene */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+          {funzioni.map((f, i) => (
+            <button
+              key={f.demo}
+              onClick={() => vai(i)}
+              aria-label={f.titolo}
+              title={f.titolo}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "8px 13px",
+                borderRadius: 99,
+                fontSize: 15,
+                cursor: "pointer",
+                transition: "all .3s",
+                border: `1px solid ${i === indice ? "rgba(56,232,255,.65)" : "rgba(255,255,255,.12)"}`,
+                background: i === indice ? "rgba(56,232,255,.13)" : "rgba(255,255,255,.04)",
+                color: i === indice ? "#e8fbff" : "#7fa5b5",
+                boxShadow: i === indice ? "0 0 18px rgba(56,232,255,.18)" : "none",
+              }}
+            >
+              {f.icona}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes cin-entra { from { opacity: 0; transform: translateX(46px) scale(.985) } to { opacity: 1; transform: translateX(0) scale(1) } }
+        @keyframes cin-esce { from { opacity: 1; transform: translateX(0) scale(1) } to { opacity: 0; transform: translateX(-46px) scale(.985) } }
+        @keyframes cin-carta { from { opacity: 0; transform: translateY(14px) } to { opacity: 1; transform: translateY(0) } }
+        @keyframes cin-progresso { from { width: 0 } to { width: 100% } }
+        @media (min-width: 900px) { .cin-griglia { grid-template-columns: 1.6fr 1fr; } }
+      `}</style>
+    </div>
   );
 }
