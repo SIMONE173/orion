@@ -104,3 +104,26 @@ test("appuntamentiFuturiDiCliente: solo futuri e non disdetti", () => {
     db().prepare("DELETE FROM clienti WHERE id = ?").run(cid);
   });
 });
+
+test("disdetta: lapide per Google Calendar (evento remoto da cancellare, record conservato)", () => {
+  runWithTenant(TN, () => {
+    const ora = new Date().toISOString();
+    const fra1h = new Date(Date.now() + 3600_000).toISOString();
+    const fra2h = new Date(Date.now() + 7200_000).toISOString();
+    const r = db()
+      .prepare("INSERT INTO appuntamenti (tenant_id, titolo, inizio, fine, stato, gcal_id, created_at) VALUES (?, 'con gcal', ?, ?, 'confermato', 'evento-google-123', ?)")
+      .run(TN, fra1h, fra2h, ora);
+    const id = Number(r.lastInsertRowid);
+
+    const { aggiornaStatoAppuntamento } = require("../data");
+    const dopo = aggiornaStatoAppuntamento(id, "disdetto");
+
+    assert.equal(dopo?.stato, "disdetto"); // il record resta, in archivio
+    assert.equal(dopo?.gcal_id, null); // sganciato dall'evento remoto
+    const lapide = db().prepare("SELECT gcal_id FROM gcal_tombstones WHERE tenant_id = ? AND gcal_id = 'evento-google-123'").get(TN);
+    assert.ok(lapide, "la lapide deve esserci: al prossimo giro la sync cancella l'evento su Google");
+
+    db().prepare("DELETE FROM appuntamenti WHERE id = ?").run(id);
+    db().prepare("DELETE FROM gcal_tombstones WHERE tenant_id = ?").run(TN);
+  });
+});

@@ -1831,6 +1831,18 @@ export function spostaAppuntamento(id: number, inizio: string, fine: string): Ap
 }
 
 export function aggiornaStatoAppuntamento(id: number, stato: string): Appuntamento | undefined {
+  // DISDETTA: lapide per Google Calendar — l'evento sparisce anche dal
+  // calendario del professionista (il record ORION resta, in archivio).
+  // Se poi lo slot rinasce (es. lista d'attesa), la sync ricrea l'evento.
+  if (stato === "disdetto") {
+    const prima = getAppuntamento(id);
+    if (prima?.gcal_id) {
+      db()
+        .prepare("INSERT INTO gcal_tombstones (tenant_id, gcal_id, created_at) VALUES (?, ?, ?)")
+        .run(T(), prima.gcal_id, nowISO());
+      db().prepare("UPDATE appuntamenti SET gcal_id = NULL, gcal_dirty = 0 WHERE id = ? AND tenant_id = ?").run(id, T());
+    }
+  }
   db().prepare("UPDATE appuntamenti SET stato = ? WHERE id = ? AND tenant_id = ?").run(stato, id, T());
   const app = getAppuntamento(id);
   if (app) emettiEventoUscita("appuntamento_stato", ritrattoAppuntamento(app)); // conferme e disdette passano da qui

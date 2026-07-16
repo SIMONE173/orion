@@ -405,6 +405,14 @@ export async function gestisciMessaggioCliente(opts: { cliente: Cliente | undefi
   }
 
   const esito = await segreteriaAI(cliente, telefono, livello);
+
+  // Se l'agenda è cambiata, la modifica parte SUBITO verso Google Calendar e
+  // il gestionale (fire-and-forget; il cron resta la rete di sicurezza).
+  if (esito.azioni.some((a) => a === "disdetta" || a === "spostamento" || a === "prenotazione")) {
+    void import("../uscita").then((u) => u.consegnaEventiUscita(10)).catch(() => {});
+    void import("../gcal").then((g) => g.sincronizzaCalendario()).catch(() => {});
+  }
+
   if (!esito.risposta) return false;
   await rispondi(telefono, cliente?.id ?? null, esito.risposta);
   return true;
