@@ -110,6 +110,122 @@ function chiudiMiniNucleo() {
   finestraNucleo = null;
 }
 
+// ── LA MANO DI ORION: clic e tastiera VERI per usare i software dell'utente ──
+// Gli "occhi" sono os:catturaSchermo (vision); qui ci sono le mani. Le
+// coordinate arrivano nello spazio dell'IMMAGINE catturata e vengono scalate
+// allo schermo reale qui dentro (così il web non deve conoscere i bounds).
+
+function manoShell(cmd, args) {
+  return new Promise((resolve) => {
+    try {
+      const p = spawn(cmd, args, { stdio: "ignore" });
+      const timer = setTimeout(() => {
+        try {
+          p.kill();
+        } catch {}
+        resolve({ ok: false, errore: "timeout" });
+      }, 6000);
+      p.on("exit", (code) => {
+        clearTimeout(timer);
+        resolve(code === 0 ? { ok: true } : { ok: false, errore: `exit ${code}` });
+      });
+      p.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ ok: false, errore: String(e && e.message ? e.message : e) });
+      });
+    } catch (e) {
+      resolve({ ok: false, errore: String(e && e.message ? e.message : e) });
+    }
+  });
+}
+
+function manoScala(d) {
+  const b = screen.getPrimaryDisplay().bounds;
+  const imgW = Math.max(1, Number(d && d.imgW) || b.width);
+  const imgH = Math.max(1, Number(d && d.imgH) || b.height);
+  return {
+    x: Math.round(b.x + ((Number(d && d.x) || 0) * b.width) / imgW),
+    y: Math.round(b.y + ((Number(d && d.y) || 0) * b.height) / imgH),
+  };
+}
+
+ipcMain.handle("os:manoClic", async (_e, d) => {
+  const { x, y } = manoScala(d);
+  const doppio = !!(d && d.doppio);
+  if (process.platform === "darwin") {
+    if (!accessibilitaOk(true)) return { ok: false, errore: "accessibilita" };
+    let r = await axComando(`GIU|${x}|${y}`, 3000);
+    if (!r || !r.ok) return r || { ok: false, errore: "clic" };
+    r = await axComando(`SU|${x}|${y}`, 3000);
+    if (doppio) {
+      await axComando(`GIU|${x}|${y}`, 3000);
+      r = await axComando(`SU|${x}|${y}`, 3000);
+    }
+    return r || { ok: true };
+  }
+  if (process.platform === "win32") {
+    const unClic = "[W.U]::mouse_event(2,0,0,0,0); [W.U]::mouse_event(4,0,0,0,0);";
+    const ps =
+      `Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y); [DllImport("user32.dll")] public static extern void mouse_event(int f,int dx,int dy,int d,int e);' -Name U -Namespace W; ` +
+      `[W.U]::SetCursorPos(${x},${y}); Start-Sleep -Milliseconds 80; ${unClic}` +
+      (doppio ? ` Start-Sleep -Milliseconds 90; ${unClic}` : "");
+    return manoShell("powershell", ["-NoProfile", "-Command", ps]);
+  }
+  return { ok: false, errore: "piattaforma" };
+});
+
+// Scrive testo nell'app in primo piano (nel campo dove è stato appena cliccato).
+ipcMain.handle("os:manoScrivi", async (_e, d) => {
+  const testo = String((d && d.testo) || "").slice(0, 400);
+  if (!testo) return { ok: false, errore: "testo vuoto" };
+  if (process.platform === "darwin") {
+    if (!accessibilitaOk(true)) return { ok: false, errore: "accessibilita" };
+    const esc = testo.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return manoShell("osascript", ["-e", `tell application "System Events" to keystroke "${esc}"`]);
+  }
+  if (process.platform === "win32") {
+    // SendKeys: i caratteri speciali vanno imbustati in graffe.
+    const esc = testo.replace(/([+^%~(){}\[\]])/g, "{$1}").replace(/'/g, "''");
+    const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${esc}')`;
+    return manoShell("powershell", ["-NoProfile", "-Command", ps]);
+  }
+  return { ok: false, errore: "piattaforma" };
+});
+
+// Preme un tasto o una combinazione (invio, tab, esc, frecce, cmd/ctrl+lettera…).
+const MANO_TASTI_MAC = { invio: 36, tab: 48, esc: 53, backspace: 51, canc: 117, su: 126, giu: 125, sinistra: 123, destra: 124, pagina_su: 116, pagina_giu: 121 };
+const MANO_TASTI_WIN = { invio: "{ENTER}", tab: "{TAB}", esc: "{ESC}", backspace: "{BACKSPACE}", canc: "{DEL}", su: "{UP}", giu: "{DOWN}", sinistra: "{LEFT}", destra: "{RIGHT}", pagina_su: "{PGUP}", pagina_giu: "{PGDN}" };
+
+ipcMain.handle("os:manoTasto", async (_e, d) => {
+  const t = String((d && d.tasto) || "").toLowerCase().trim();
+  if (!t) return { ok: false, errore: "tasto vuoto" };
+  const combo = t.match(/^(cmd|ctrl)\+([a-z0-9])$/);
+  if (process.platform === "darwin") {
+    if (!accessibilitaOk(true)) return { ok: false, errore: "accessibilita" };
+    if (combo) return manoShell("osascript", ["-e", `tell application "System Events" to keystroke "${combo[2]}" using command down`]);
+    const codice = MANO_TASTI_MAC[t];
+    if (codice === undefined) return { ok: false, errore: `tasto sconosciuto: ${t}` };
+    return manoShell("osascript", ["-e", `tell application "System Events" to key code ${codice}`]);
+  }
+  if (process.platform === "win32") {
+    let seq = null;
+    if (combo) seq = `^${combo[2]}`;
+    else seq = MANO_TASTI_WIN[t] || null;
+    if (!seq) return { ok: false, errore: `tasto sconosciuto: ${t}` };
+    const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${seq}')`;
+    return manoShell("powershell", ["-NoProfile", "-Command", ps]);
+  }
+  return { ok: false, errore: "piattaforma" };
+});
+
+// Riduce ORION a icona (la Mano lavora col software dell'utente in vista;
+// il mini-nucleo resta a raccontare cosa succede).
+ipcMain.handle("os:riduciOrion", () => {
+  const win = finestraPrincipale;
+  if (win && !win.isDestroyed() && !win.isMinimized()) win.minimize();
+  return { ok: true };
+});
+
 // Click sul mini-nucleo → ORION torna in primo piano.
 ipcMain.handle("os:mostraOrion", () => {
   const win = finestraPrincipale;

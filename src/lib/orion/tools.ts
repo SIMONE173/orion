@@ -725,6 +725,19 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "usa_computer",
+    description:
+      "LA MANO DI ORION (SOLO Desktop) — usa DAVVERO il software del professionista al posto suo: apre il programma, guarda lo schermo, clicca e scrive nei campi giusti, verifica, passo dopo passo, con l'utente che guarda. Per QUALSIASI professione e QUALSIASI software registrato (gestionale, schede, CRM, archivio…): 'sostituisci la panca piana con le spinte su inclinata a Mario Rossi, 20 kg', 'aggiorna il telefono di Bianchi nel gestionale', 'segna la fattura come pagata nel programma'. USALO quando la FONTE dei dati è il gestionale (o l'utente chiede una modifica DENTRO un suo software): in quel caso NON salvare copie parallele in ORION — la modifica va fatta là. L'obiettivo deve essere AUTOSUFFICIENTE: includi cliente, campo, valore vecchio e nuovo, e se va salvato ('…e salva'). Prima di lanciarla, annuncia in UNA frase cosa farai ('Apro X e faccio io, guardami…'). Su WEB (non Desktop) spiega che serve ORION Desktop. Se il sistema è registrato, 'app' si ricava da solo.",
+    input_schema: {
+      type: "object",
+      properties: {
+        obiettivo: { type: "string", description: "Il compito completo e autosufficiente da eseguire nel software" },
+        app: { type: "string", description: "Nome/app/sito del software (se assente, si usa quello del sistema registrato)" },
+      },
+      required: ["obiettivo"],
+    },
+  },
+  {
     name: "mostra_consegne",
     description:
       "PONTE UNIVERSALE — apre il pannello CONSEGNE AL GESTIONALE: la coda delle modifiche (appuntamenti, clienti) da portare nel software del professionista quando il canale d'uscita è in modalità Ponte (senza API). Ogni voce ha il copia-incolla perfetto e la spunta 'fatto'. Usalo quando l'utente chiede 'cosa devo riportare nel gestionale?', 'le consegne', 'la coda', o dopo aver attivato il Ponte, o quando nel briefing noti consegne accumulate.",
@@ -2178,6 +2191,26 @@ const handlers: Record<string, Handler> = {
   },
 
   // CANALE D'USCITA: ORION scrive nel gestionale del cliente.
+  usa_computer: (input) => {
+    const i = input as { obiettivo?: string; app?: string };
+    const obiettivo = String(i?.obiettivo ?? "").trim();
+    if (!obiettivo) return { result: { ok: false, errore: "Serve l'obiettivo completo (cliente, campo, valore)." } };
+    // Se l'app non è indicata, usa il sistema registrato (l'apertura della Chiamata 0).
+    let app = i?.app ? String(i.app).trim() : "";
+    if (!app) {
+      const conn = listConnessioni().find((c) => c.attivo && (c.apertura || c.nome));
+      if (conn) app = conn.apertura || conn.nome;
+    }
+    return {
+      result: {
+        ok: true,
+        avviata: true,
+        nota: "La Mano parte ADESSO sul computer dell'utente (Desktop): ORION si riduce a icona, apre il software e lavora coi suoi occhi e le sue mani, un passo alla volta, mentre l'utente guarda. L'esito ti arriverà come messaggio [Sistema]: NON dire 'fatto' adesso — di' solo, in una frase, che stai andando a farlo e di guardare lo schermo.",
+      },
+      azione: { tipo: "mano", obiettivo, app: app || undefined },
+    };
+  },
+
   mostra_consegne: () => {
     const consegne = consegneManualiPendenti();
     return {

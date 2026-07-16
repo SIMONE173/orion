@@ -223,6 +223,7 @@ export type Azione =
   | { tipo: "chiudi_vista"; vista: string }
   | { tipo: "riposo" }
   // Solo ORION Desktop (controllo del computer):
+  | { tipo: "mano"; obiettivo: string; app?: string }
   | { tipo: "apri_file"; query: string }
   | { tipo: "cestina_file"; query: string }
   | { tipo: "apri_app"; nome: string }

@@ -69,6 +69,14 @@ type OrionDesktop = {
   // Riporta in primo piano la finestra (doppio battito di mani da ridotta a icona).
   mostraFinestra?: () => void;
   onFinestra?: (cb: (stato: string) => void) => void;
+  // Gli occhi della Mano (già usati dall'affiancamento).
+  catturaSchermo?: () => Promise<{ ok: boolean; dataUrl?: string; larghezza?: number; altezza?: number; errore?: string }>;
+  // LA MANO DI ORION: clic e tastiera veri (coordinate nello spazio immagine).
+  manoClic?: (d: { x: number; y: number; imgW: number; imgH: number; doppio?: boolean }) => Promise<{ ok: boolean; errore?: string }>;
+  manoScrivi?: (d: { testo: string }) => Promise<{ ok: boolean; errore?: string }>;
+  manoTasto?: (d: { tasto: string }) => Promise<{ ok: boolean; errore?: string }>;
+  riduciOrion?: () => Promise<{ ok: boolean }>;
+  mostraOrion?: () => Promise<{ ok: boolean }>;
 };
 declare global {
   interface Window {
@@ -91,6 +99,10 @@ export default function Home() {
   // La CHAT a sinistra: si apre appena ORION ha detto la prima frase
   // (benvenuto/briefing) e il nucleo vola in alto a destra.
   const [chatAttiva, setChatAttiva] = useState(false);
+  // LA MANO DI ORION: stato del lavoro in corso sul software dell'utente.
+  const [manoStato, setManoStato] = useState<{ spiegazione: string; passo: number } | null>(null);
+  const manoStopRef = useRef(false);
+  const manoAttivaRef = useRef(false);
   const [mostraCamera, setMostraCamera] = useState(false);
   const [cameraModo, setCameraModo] = useState<"documento" | "descrizione">("documento");
   // Modalità visione (telecamera dal vivo). Opt-in.
@@ -383,6 +395,11 @@ export default function Home() {
         });
         break;
       }
+      case "mano": {
+        // La Mano di ORION: usa il software dell'utente al posto suo.
+        void avviaManoRef.current?.(a);
+        return;
+      }
       case "apri_app": {
         const d = desktopBridge();
         if (!d) {
@@ -528,6 +545,123 @@ export default function Home() {
   eseguiAzioneRef.current = eseguiAzione;
   const inviaAOrionRef = useRef(inviaAOrion);
   inviaAOrionRef.current = inviaAOrion;
+
+  // ── LA MANO DI ORION: il ciclo guarda→decide→agisce→verifica ──────────────
+  // ORION si riduce a icona (il mini-nucleo racconta i passi), apre il software
+  // e lo usa DAVVERO: screenshot → /api/mano decide UNA azione → mani native →
+  // nuovo screenshot. Si ferma a obiettivo raggiunto, su STOP, o al primo dubbio.
+  const avviaMano = useCallback(async (a: { obiettivo: string; app?: string }) => {
+    const attesa = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const d = desktopBridge();
+    if (!d?.manoClic || !d?.catturaSchermo) {
+      inviaAOrionRef.current?.(
+        "[Sistema] La Mano richiede ORION Desktop AGGIORNATO (qui le mani native non ci sono). Spiega all'utente in una frase che serve la versione Desktop più recente.",
+        false,
+        undefined,
+        true
+      );
+      return;
+    }
+    if (manoAttivaRef.current) return;
+    manoAttivaRef.current = true;
+    manoStopRef.current = false;
+    const passi: { spiegazione: string; esito?: string }[] = [];
+    let esitoFinale = "interrotta prima di cominciare";
+    const alNucleo = (testo: string) => {
+      try {
+        canaleNucleo.current?.postMessage({ tipo: "azione", nome: "mano", testo });
+      } catch {
+        /* noop */
+      }
+    };
+    try {
+      setManoStato({ spiegazione: a.app ? `Apro ${a.app}…` : "Comincio…", passo: 0 });
+      alNucleo(a.app ? `Apro ${a.app}` : "Comincio");
+      if (a.app) {
+        await d.apriApp(a.app);
+        await attesa(2600);
+      }
+      await d.riduciOrion?.();
+      await attesa(900);
+
+      for (let passo = 1; passo <= 25; passo++) {
+        if (manoStopRef.current) {
+          esitoFinale = "fermata dall'utente";
+          break;
+        }
+        const shot = await d.catturaSchermo();
+        if (!shot?.ok || !shot.dataUrl) {
+          esitoFinale = `non riesco a vedere lo schermo (${shot?.errore ?? "?"})`;
+          break;
+        }
+        const res = await fetch("/api/mano", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ obiettivo: a.obiettivo, passi, screenshot: shot.dataUrl, piattaforma: d.piattaforma }),
+        });
+        const dati = await res.json().catch(() => null);
+        if (!res.ok || !dati?.ok || !dati.azione) {
+          esitoFinale = "il mio cervello non ha risposto (controlla i crediti API)";
+          break;
+        }
+        const az = dati.azione as { tipo: string; x?: number; y?: number; testo?: string; tasto?: string; spiegazione?: string; esito_finale?: string };
+        setManoStato({ spiegazione: az.spiegazione ?? "…", passo });
+        if (az.spiegazione) alNucleo(az.spiegazione);
+
+        if (az.tipo === "fatto") {
+          esitoFinale = `FATTO E VERIFICATO: ${az.esito_finale || "obiettivo completato"}`;
+          break;
+        }
+        if (az.tipo === "aiuto") {
+          esitoFinale = `mi sono fermata per chiedere: ${az.esito_finale || az.spiegazione || "serve una mano"}`;
+          break;
+        }
+
+        let ok = true;
+        let err = "";
+        if (az.tipo === "clic" || az.tipo === "doppio_clic") {
+          const r = await d.manoClic({ x: az.x ?? 0, y: az.y ?? 0, imgW: shot.larghezza ?? 0, imgH: shot.altezza ?? 0, doppio: az.tipo === "doppio_clic" });
+          ok = r.ok;
+          err = r.errore ?? "";
+        } else if (az.tipo === "scrivi") {
+          const r = await d.manoScrivi!({ testo: az.testo ?? "" });
+          ok = r.ok;
+          err = r.errore ?? "";
+        } else if (az.tipo === "tasto") {
+          const r = await d.manoTasto!({ tasto: az.tasto ?? "" });
+          ok = r.ok;
+          err = r.errore ?? "";
+        } else if (az.tipo === "attendi") {
+          await attesa(1400);
+        }
+        passi.push({ spiegazione: az.spiegazione ?? az.tipo, esito: ok ? undefined : `FALLITA: ${err}` });
+        if (!ok && err === "accessibilita") {
+          esitoFinale = "mi manca il permesso Accessibilità: Impostazioni di Sistema → Privacy e Sicurezza → Accessibilità → attiva ORION";
+          break;
+        }
+        await attesa(700);
+        if (passo === 25) esitoFinale = "troppi passi: meglio finire insieme, dimmi tu";
+      }
+    } catch (e) {
+      esitoFinale = `si è inceppata: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      manoAttivaRef.current = false;
+      setManoStato(null);
+      try {
+        await d.mostraOrion?.();
+      } catch {
+        /* noop */
+      }
+      inviaAOrionRef.current?.(
+        `[Sistema] Esito della Mano per l'obiettivo "${a.obiettivo}": ${esitoFinale}. Riferisci all'utente in UNA frase, con verità operativa (se è una domanda, faglela).`,
+        false,
+        undefined,
+        true
+      );
+    }
+  }, []);
+  const avviaManoRef = useRef(avviaMano);
+  avviaManoRef.current = avviaMano;
   const entraStandbyRef = useRef<() => void>(() => {});
 
   // Canale pannello→ORION: un pannello (es. import dati) può passare un esito
@@ -1323,6 +1457,25 @@ export default function Home() {
       </footer>
 
       {/* Storico conversazione (overlay) */}
+      {/* La Mano al lavoro: stato + STOP (visibile quando ORION è in finestra) */}
+      {manoStato && (
+        <div className="fade-in fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-cyan-400/40 bg-[#0a141c]/95 px-4 py-3 shadow-2xl backdrop-blur">
+          <span className="text-lg">🖐</span>
+          <div className="min-w-0">
+            <div className="text-[10.5px] font-bold tracking-[0.18em] text-cyan-300">LA MANO DI ORION · PASSO {manoStato.passo}</div>
+            <div className="max-w-xs truncate text-sm text-slate-200">{manoStato.spiegazione}</div>
+          </div>
+          <button
+            onClick={() => {
+              manoStopRef.current = true;
+            }}
+            className="ml-1 rounded-lg border border-rose-400/40 bg-rose-400/10 px-3 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-400/20"
+          >
+            STOP
+          </button>
+        </div>
+      )}
+
       {/* Le coreografie della chat */}
       <style>{`
         .chat-puntino { width: 7px; height: 7px; border-radius: 99px; background: rgba(150,220,240,.85); display: inline-block; animation: chatPuntino 1s ease-in-out infinite; }

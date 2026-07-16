@@ -38,6 +38,7 @@ const DOODLE: Record<string, { emoji: string; testo: string }> = {
   calendario: { emoji: "🗓", testo: "Calendario" },
   chiamata: { emoji: "📞", testo: "Chiamata" },
   affianca: { emoji: "👀", testo: "Guardo lo schermo" },
+  mano: { emoji: "🖱", testo: "Uso il tuo software" },
 };
 
 function doodleDi(nome: string): { emoji: string; testo: string } {
@@ -59,10 +60,12 @@ export default function MiniNucleo() {
     try {
       canale = new BroadcastChannel("orion-nucleo");
       canale.onmessage = (e) => {
-        const m = e.data as { tipo?: string; core?: CoreState; nome?: string };
+        const m = e.data as { tipo?: string; core?: CoreState; nome?: string; testo?: string };
         if (m?.tipo === "stato" && m.core) setCore(m.core);
         if (m?.tipo === "azione" && m.nome) {
-          setDoodle(doodleDi(String(m.nome)));
+          const base = doodleDi(String(m.nome));
+          // La Mano manda anche la spiegazione del passo: la mostriamo viva.
+          setDoodle({ emoji: base.emoji, testo: m.testo ? String(m.testo).slice(0, 30) : base.testo });
           if (timerDoodle.current) clearTimeout(timerDoodle.current);
           timerDoodle.current = setTimeout(() => setDoodle(null), 3400);
         }

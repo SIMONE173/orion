@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   cestina: (query) => ipcRenderer.invoke("os:cestina", query),
   apriApp: (nome) => ipcRenderer.invoke("os:apriApp", nome),
   mostraOrion: () => ipcRenderer.invoke("os:mostraOrion"),
+  // La Mano di ORION: clic e tastiera veri (coordinate nello spazio immagine).
+  manoClic: (dati) => ipcRenderer.invoke("os:manoClic", dati),
+  manoScrivi: (dati) => ipcRenderer.invoke("os:manoScrivi", dati),
+  manoTasto: (dati) => ipcRenderer.invoke("os:manoTasto", dati),
+  riduciOrion: () => ipcRenderer.invoke("os:riduciOrion"),
   chiudiApp: (nome) => ipcRenderer.invoke("os:chiudiApp", nome),
   crea: (dati) => ipcRenderer.invoke("os:crea", dati),
   rinomina: (dati) => ipcRenderer.invoke("os:rinomina", dati),
