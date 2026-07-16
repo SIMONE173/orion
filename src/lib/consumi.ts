@@ -1,13 +1,11 @@
 import { db } from "./db";
-import { lanciato, eccezioneLancio } from "./lancio";
 
 // ──────────────────────────────────────────────────────────────────────────
-// L'ECONOMIA DI ORION: consumi AI per account e tetto morbido.
-// Regole d'oro (decise col fondatore):
-//  1. ORION non si spegne MAI: superato il budget del mese passa alla
-//     "marcia economica" (modello rapido) — tutto continua a funzionare.
-//  2. Gli avvisi si dicono UNA volta sola, con garbo (80% e 100%).
-//  3. Proprietario, tester del collaudo e modalità demo: nessun tetto.
+// I CONSUMI AI DI ORION — SOLO OSSERVAZIONE, NESSUN LIMITE (scelta del
+// fondatore, 16/7/26: niente tetti per ora — se ne riparla coi dati in mano).
+// Ogni turno registra token e costo stimato per account/mese: alimenta il
+// pannello del proprietario (/admin) e nient'altro. L'esperienza dell'utente
+// non viene MAI toccata da questo modulo.
 // I costi sono stimati in MICRODOLLARI (interi) coi listini per token.
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -65,59 +63,6 @@ export function spesaMeseMicro(tenantId: number): number {
   return r.s;
 }
 
-// Il budget AI del mese per questo account, in microdollari. null = SENZA TETTO
-// (proprietario, tester del collaudo pre-lancio, modalità demo).
-// Tarato generoso: ~3 volte l'uso di un professionista intenso.
-// Stripe acceso? Letto a ogni chiamata (regge env cambiate a caldo e i test).
-function negozioAperto(): boolean {
-  return Boolean(
-    (process.env.STRIPE_SECRET_KEY || "").trim() &&
-      ((process.env.STRIPE_PRICE_PRO || "").trim() || (process.env.STRIPE_PRICE_AZIENDA || "").trim())
-  );
-}
-
-export function budgetMicro(tenantId: number): number | null {
-  if (!negozioAperto()) return null; // demo: tutto libero
-  const owner = db().prepare("SELECT email FROM utenti WHERE id = ?").get(tenantId) as { email?: string } | undefined;
-  const email = (owner?.email || "").toLowerCase();
-  const admin = (process.env.ORION_ADMIN_EMAIL || "").trim().toLowerCase();
-  if (admin && email === admin) return null;
-  if (!lanciato() && eccezioneLancio(email)) return null; // tester del collaudo
-  const ab = db().prepare("SELECT piano FROM abbonamenti WHERE tenant_id = ?").get(tenantId) as { piano?: string } | undefined;
-  const usd =
-    ab?.piano === "azienda"
-      ? Number(process.env.ORION_BUDGET_AZIENDA_USD || 45)
-      : Number(process.env.ORION_BUDGET_PRO_USD || 13);
-  return Math.round(usd * 1_000_000);
-}
-
-export type StatoBudget = {
-  spesoMicro: number;
-  budgetMicro: number | null; // null = senza tetto
-  frazione: number; // 0..∞ (0 se senza tetto)
-  quasi: boolean; // ≥ 80%
-  oltre: boolean; // ≥ 100% → marcia economica
-};
-
-export function statoBudget(tenantId: number): StatoBudget {
-  const speso = spesaMeseMicro(tenantId);
-  const budget = budgetMicro(tenantId);
-  if (budget === null) return { spesoMicro: speso, budgetMicro: null, frazione: 0, quasi: false, oltre: false };
-  const frazione = budget > 0 ? speso / budget : 0;
-  return { spesoMicro: speso, budgetMicro: budget, frazione, quasi: frazione >= 0.8, oltre: frazione >= 1 };
-}
-
-// L'avviso va detto una volta sola per mese: true = tocca a te dirlo adesso.
-export function marcaAvviso(tenantId: number, soglia: "80" | "100"): boolean {
-  const mese = meseCorrente();
-  db().prepare("INSERT OR IGNORE INTO budget_avvisi (tenant_id, mese) VALUES (?, ?)").run(tenantId, mese);
-  const col = soglia === "80" ? "avvisato80" : "avvisato100";
-  const r = db()
-    .prepare(`UPDATE budget_avvisi SET ${col} = 1 WHERE tenant_id = ? AND mese = ? AND ${col} = 0`)
-    .run(tenantId, mese);
-  return r.changes > 0;
-}
-
 // ── Il riepilogo per il pannello del proprietario ───────────────────────────
 export type RigaConsumi = {
   tenantId: number;
@@ -129,8 +74,6 @@ export type RigaConsumi = {
   chiamate: number;
   token: number;
   costoMicro: number;
-  budgetMicro: number | null;
-  frazione: number;
   sessioniAttive: number;
 };
 
@@ -167,7 +110,6 @@ export function riepilogoAdmin(): { mese: string; righe: RigaConsumi[]; totaleMi
          WHERE (u.id = ? OR u.tenant_id = ?) AND s.expires_at > ?`
       )
       .get(t, t, adesso) as { n: number };
-    const budget = budgetMicro(t);
     righe.push({
       tenantId: t,
       email: owner?.email || `account #${t}`,
@@ -178,8 +120,6 @@ export function riepilogoAdmin(): { mese: string; righe: RigaConsumi[]; totaleMi
       chiamate: c.chiamate,
       token: c.token,
       costoMicro: c.micro,
-      budgetMicro: budget,
-      frazione: budget ? c.micro / budget : 0,
       sessioniAttive: sess.n,
     });
     totaleMicro += c.micro;

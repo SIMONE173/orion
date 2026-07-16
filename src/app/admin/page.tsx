@@ -17,8 +17,6 @@ type Riga = {
   chiamate: number;
   token: number;
   costoMicro: number;
-  budgetMicro: number | null;
-  frazione: number;
   sessioniAttive: number;
 };
 
@@ -80,15 +78,13 @@ export default function PannelloConsumi() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5, minWidth: 780 }}>
             <thead>
               <tr style={{ background: "rgba(255,255,255,.04)", color: "#7fa5b5", textAlign: "left" }}>
-                {["Account", "Piano", "Comandi", "Token", "Costo", "Budget", "Sessioni"].map((h) => (
+                {["Account", "Piano", "Comandi", "Token", "Costo", "Sessioni"].map((h) => (
                   <th key={h} style={{ padding: "11px 14px", fontWeight: 700, letterSpacing: ".06em", fontSize: 11.5 }}>{h.toUpperCase()}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {dati.righe.map((r) => {
-                const perc = r.budgetMicro ? Math.round(r.frazione * 100) : null;
-                const colore = perc === null ? "#8fb2c2" : perc >= 100 ? "#fb7185" : perc >= 80 ? "#f5c66b" : "#6ee7b7";
                 const troppoCondiviso = r.piano !== "azienda" && r.sessioniAttive > 3;
                 return (
                   <tr key={r.tenantId} style={{ borderTop: "1px solid rgba(255,255,255,.06)" }}>
@@ -103,9 +99,6 @@ export default function PannelloConsumi() {
                     <td style={{ padding: "11px 14px" }}>{r.turni}</td>
                     <td style={{ padding: "11px 14px", color: "#8fb2c2" }}>{r.token.toLocaleString("it-IT")}</td>
                     <td style={{ padding: "11px 14px", fontWeight: 700 }}>{usd(r.costoMicro)}</td>
-                    <td style={{ padding: "11px 14px", fontWeight: 700, color: colore }}>
-                      {perc === null ? "senza tetto" : `${perc}% di ${usd(r.budgetMicro!)}`}
-                    </td>
                     <td style={{ padding: "11px 14px", color: troppoCondiviso ? "#fb7185" : "#8fb2c2", fontWeight: troppoCondiviso ? 800 : 400 }}>
                       {r.sessioniAttive}
                       {troppoCondiviso ? " ⚠️" : ""}
@@ -115,7 +108,7 @@ export default function PannelloConsumi() {
               })}
               {dati.righe.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ padding: 22, textAlign: "center", color: "#5e8798" }}>Nessun consumo questo mese.</td>
+                  <td colSpan={6} style={{ padding: 22, textAlign: "center", color: "#5e8798" }}>Nessun consumo questo mese.</td>
                 </tr>
               )}
             </tbody>
@@ -123,9 +116,9 @@ export default function PannelloConsumi() {
         </div>
 
         <p style={{ color: "#4d6373", fontSize: 12, marginTop: 14, lineHeight: 1.6 }}>
-          Budget oltre il 100% = l&apos;account viaggia in marcia economica fino a fine mese (ORION resta pienamente operativo).
-          ⚠️ sulle sessioni = più di 3 dispositivi vivi su un piano individuale: possibile account condiviso — nel caso, una
-          email cortese che propone il piano Azienda fa miracoli. I costi sono stime in dollari (i listini API sono in USD).
+          Solo osservazione: nessun limite è applicato agli account. ⚠️ sulle sessioni = più di 3 dispositivi vivi su un
+          piano individuale: possibile account condiviso — nel caso, una email cortese che propone il piano Azienda fa
+          miracoli. I costi sono stime in dollari (i listini API sono in USD).
         </p>
       </div>
     </main>

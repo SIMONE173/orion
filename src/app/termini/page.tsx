@@ -36,14 +36,13 @@ export default function TerminiPage() {
         <section>
           <h2 className="text-xl font-semibold text-slate-100">Uso corretto del servizio (fair use)</h2>
           <p className="mt-2">
-            Ogni abbonamento include un uso professionale personale pieno e ragionevole del servizio,
-            senza conteggi da tenere a mente. Per garantire a tutti la stessa qualità, gli usi
-            anomali — condivisione dell&apos;account tra più persone su un piano individuale, accessi
+            Ogni abbonamento include un uso professionale personale pieno del servizio, senza
+            conteggi da tenere a mente. Per garantire a tutti la stessa qualità, gli usi anomali —
+            condivisione dell&apos;account tra più persone su un piano individuale, accessi
             automatizzati, o utilizzo del servizio come assistente generico per compiti estranei
-            all&apos;attività professionale — possono comportare il passaggio automatico a una modalità
-            a consumo ridotto per il resto del mese (il servizio resta pienamente operativo), oppure
-            la proposta di passaggio al piano Azienda. Non sospendiamo mai l&apos;accesso per il solo
-            volume di utilizzo professionale.
+            all&apos;attività professionale — possono comportare la proposta di passaggio al piano
+            Azienda o l&apos;applicazione di misure correttive concordate. Non sospendiamo mai
+            l&apos;accesso per il solo volume di utilizzo professionale.
           </p>
         </section>
 

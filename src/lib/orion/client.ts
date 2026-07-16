@@ -5,7 +5,7 @@ import { consolidaSeNecessario } from "./memoria";
 import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
 import { salvaMessaggio } from "../data";
 import { tenantIdCorrente } from "../tenant";
-import { registraConsumo, statoBudget, marcaAvviso } from "../consumi";
+import { registraConsumo } from "../consumi";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
 
@@ -128,16 +128,7 @@ export async function runConversation(
   let testo = "";
 
   const onboardingCompleto = utente ? utente.onboarding_completo === 1 : true;
-  let modello = scegliModello(storico, avvio, allegato, onboardingCompleto);
-
-  // TETTO MORBIDO: budget del mese superato → marcia economica (modello rapido)
-  // per il resto del mese. ORION non si spegne MAI: cambia solo motore.
-  try {
-    if (statoBudget(tenantIdCorrente()).oltre) modello = MODEL_RAPIDO;
-  } catch {
-    /* fuori dal contesto tenant (test/strumenti interni): nessun tetto */
-  }
-
+  const modello = scegliModello(storico, avvio, allegato, onboardingCompleto);
   const usaThinking = modello === MODEL; // il rapido risponde diretto (velocità)
 
   // PROMPT CACHING, parte due. Il blocco FISSO (106 strumenti + sistema
@@ -243,26 +234,13 @@ export async function runConversation(
     return { testo, viste, errore, consumo };
   }
 
-  // CONTABILITÀ: registra il consumo del turno e, se il mese ha appena
-  // varcato una soglia, prepara l'avviso garbato (detto UNA volta sola).
-  let notaBudget: string | null = null;
+  // CONTABILITÀ (solo osservazione, nessun limite): registra il consumo del
+  // turno — alimenta il pannello del proprietario, non tocca l'esperienza.
   try {
-    const tid = tenantIdCorrente();
-    registraConsumo(tid, modello, consumo);
-    const sb = statoBudget(tid);
-    if (sb.budgetMicro !== null) {
-      if (sb.oltre && marcaAvviso(tid, "100")) {
-        notaBudget =
-          "🔋 Una nota tra noi: questo mese mi hai fatto correre tantissimo — mi piace! Da ora a fine mese passo alla mia marcia economica: agenda, clienti, promemoria e briefing funzionano tutti come sempre, sarò solo un filo più asciutto nelle risposte. Il primo del mese torno al massimo.";
-      } else if (sb.quasi && !sb.oltre && marcaAvviso(tid, "80")) {
-        notaBudget =
-          "🔋 Nota veloce: questo mese stiamo lavorando davvero tanto insieme. Se continuiamo a questo ritmo, verso fine mese passerò alla mia marcia più economica — tutto continuerà a funzionare, te lo dico solo per trasparenza.";
-      }
-    }
+    registraConsumo(tenantIdCorrente(), modello, consumo);
   } catch {
     /* fuori dal contesto tenant: niente contabilità */
   }
-  if (notaBudget) testo = testo ? `${testo}\n\n${notaBudget}` : notaBudget;
 
   // CANALE D'USCITA: le modifiche fatte in questo turno (appuntamenti, clienti)
   // partono SUBITO verso il gestionale del cliente, senza far aspettare la
