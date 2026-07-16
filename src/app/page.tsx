@@ -351,6 +351,7 @@ export default function Vetrina() {
 
   const FUNZIONI: { icona: string; titolo: string; testo: string; demo: DemoId }[] = [
     { icona: "🗓", titolo: "Un'agenda che si difende da sola", testo: "Prenota, conferma, ricorda ai clienti l'appuntamento e riempie i buchi offrendo gli slot liberati alla lista d'attesa. Tu parli, lei lavora.", demo: "agenda" },
+    { icona: "💬", titolo: "Risponde ai clienti al posto tuo", testo: "Le nove di sera, computer spento: un cliente disdice su WhatsApp. ORION gli risponde, libera l'ora, la offre alla lista d'attesa e ti avvisa a cose fatte. Tu, al massimo, leggi la notifica.", demo: "segreteria" },
     { icona: "🏢", titolo: "Il tuo team, dentro", testo: "Codice aziendale per i collaboratori, permessi veri per ruolo, messaggi fra colleghi consegnati a voce, approvazioni che viaggiano da sole e il giornale di bordo della giornata.", demo: "team" },
     { icona: "🔗", titolo: "Si aggancia ai tuoi strumenti", testo: "Il gestionale che usi resta: ORION lo capisce, ne riceve i dati e ci scrive dentro — appuntamenti e clienti arrivano anche nel tuo software, firmati. Google Calendar a due vie.", demo: "strumenti" },
     { icona: "🛡", titolo: "Una fortezza per i tuoi dati", testo: "Credenziali cifrate, aree riservate per ruolo, backup cifrati fuori sede ogni notte con ripristino collaudato. La riservatezza non è una promessa: è applicata nel codice.", demo: "fortezza" },

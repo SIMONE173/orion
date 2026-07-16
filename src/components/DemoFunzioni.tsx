@@ -11,10 +11,11 @@ import { OrionCore } from "./OrionCore";
 // Ogni scena è coreografata su un orologio (ms) che riparte da capo da solo.
 // ──────────────────────────────────────────────────────────────────────────
 
-export type DemoId = "agenda" | "team" | "strumenti" | "fortezza" | "voce" | "misura";
+export type DemoId = "agenda" | "segreteria" | "team" | "strumenti" | "fortezza" | "voce" | "misura";
 
 const TITOLI: Record<DemoId, string> = {
   agenda: "Un'agenda che si difende da sola",
+  segreteria: "Risponde ai clienti al posto tuo",
   team: "Il tuo team, dentro",
   strumenti: "Si aggancia ai tuoi strumenti",
   fortezza: "Una fortezza per i tuoi dati",
@@ -1044,8 +1045,118 @@ function ScenaMisura() {
   );
 }
 
+// ── SCENA 1-bis · Risponde ai clienti al posto tuo ───────────────────────────
+function ScenaSegreteria() {
+  const T = 14500;
+  const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [1000, "pop"], // il cliente scrive
+    [4200, "pop"], // ORION risponde
+    [5600, "tick"], // lo slot si libera (rosso)
+    [6600, "whoosh"], // offerta alla lista d'attesa
+    [8600, "pop"], // Sara accetta
+    [10100, "ding"], // slot riempito
+    [11000, "ding"], // push al professionista
+    [12300, "tada"], // timbro finale
+  ]);
+  const uscita = t > T - 900;
+  const disdetto = t >= 5600;
+  const riempito = t >= 10000;
+
+  return (
+    <div style={{ position: "absolute", inset: 0, opacity: uscita ? 0 : 1, transition: "opacity .8s" }}>
+      {/* È notte: luna e didascalia */}
+      <El on={t >= 250} da="translateY(-8px)" style={{ position: "absolute", left: 0, right: 0, top: 14, textAlign: "center" }}>
+        <span style={{ fontSize: 15, color: "#8fb2c4", letterSpacing: ".08em" }}>
+          🌙 ore 21:34 — <strong style={{ color: "#dff6fc" }}>il computer dello studio è spento</strong>
+        </span>
+      </El>
+
+      {/* Il telefono del cliente (WhatsApp) */}
+      <El on={t >= 500} da="translateX(-40px)" style={{ position: "absolute", left: 60, top: 62, width: 330 }}>
+        <Finestra label="WHATSAPP · STUDIO DOTT. LANDI" style={{ width: "100%", minHeight: 300 }}>
+          <div style={{ padding: 14, display: "grid", gap: 10 }}>
+            <Bolla mia on={t >= 1000} style={{ maxWidth: 250, fontSize: 13.5 }}>
+              {digita("Buonasera, purtroppo devo disdire l'appuntamento di domani 😔", t, 1100)}
+            </Bolla>
+            <Bolla on={t >= 4200} style={{ maxWidth: 260, fontSize: 13.5 }}>
+              {digita("Nessun problema, ci penso io: libero l'orario e la ricontatto per riprogrammare. Buona serata!", t, 4300)}
+            </Bolla>
+            <Bolla on={t >= 8600} style={{ maxWidth: 250, fontSize: 13.5, borderColor: "rgba(52,211,153,.5)" }}>
+              <span style={{ fontSize: 11, color: "#6ee7b7", display: "block", marginBottom: 2 }}>Sara Neri (lista d&apos;attesa)</span>
+              {digita("Sì! Lo prendo io, grazie! 🙌", t, 8700)}
+            </Bolla>
+          </div>
+        </Finestra>
+      </El>
+
+      {/* Il nucleo che lavora, al centro */}
+      <div style={{ position: "absolute", left: 430, top: 120, opacity: t >= 800 ? 1 : 0, transition: "opacity .6s" }}>
+        <OrionCore state={fra(t, 3400, 5200) || fra(t, 6400, 8200) ? "thinking" : "idle"} size={74} />
+      </div>
+      <El on={fra(t, 6600, 10000)} da="translateY(8px)" style={{ position: "absolute", left: 396, top: 210 }}>
+        <span style={{ fontSize: 12, color: "#7fd7ea", letterSpacing: ".08em", fontWeight: 700 }}>OFFRO L&apos;ORA ALLA LISTA D&apos;ATTESA…</span>
+      </El>
+
+      {/* L'agenda che si sistema da sola */}
+      <El on={t >= 500} da="translateX(40px)" style={{ position: "absolute", right: 52, top: 62, width: 300 }}>
+        <Finestra label="AGENDA · DOMANI" style={{ width: "100%" }}>
+          <div style={{ padding: 12, display: "grid", gap: 8 }}>
+            {[
+              { ora: "09:00", chi: "Sig.ra Riva" },
+              { ora: "11:30", chi: "Sig. Ferri" },
+            ].map((r) => (
+              <div key={r.ora} style={{ display: "flex", gap: 10, padding: "9px 11px", borderRadius: 10, background: "rgba(255,255,255,.045)", border: "1px solid rgba(255,255,255,.08)", fontSize: 13.5 }}>
+                <span style={{ color: "#38e8ff", fontWeight: 700 }}>{r.ora}</span>
+                <span style={{ color: "#d5edf6" }}>{r.chi}</span>
+                <span style={{ marginLeft: "auto", color: "#6ee7b7", fontSize: 11.5 }}>✓</span>
+              </div>
+            ))}
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                padding: "9px 11px",
+                borderRadius: 10,
+                fontSize: 13.5,
+                transition: "all .6s",
+                background: riempito ? "rgba(52,211,153,.13)" : disdetto ? "rgba(244,63,94,.11)" : "rgba(255,255,255,.045)",
+                border: `1.5px solid ${riempito ? "rgba(52,211,153,.55)" : disdetto ? "rgba(244,63,94,.5)" : "rgba(255,255,255,.08)"}`,
+              }}
+            >
+              <span style={{ color: "#38e8ff", fontWeight: 700 }}>10:00</span>
+              <span style={{ color: riempito ? "#d1fae5" : disdetto ? "#fda4af" : "#d5edf6", textDecoration: disdetto && !riempito ? "line-through" : "none", transition: "all .4s" }}>
+                {riempito ? "Sara Neri" : "Sig. Conti"}
+              </span>
+              <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, color: riempito ? "#6ee7b7" : disdetto ? "#fb7185" : "#6ee7b7" }}>
+                {riempito ? "CONFERMATO ✓" : disdetto ? "DISDETTO" : "✓"}
+              </span>
+            </div>
+          </div>
+        </Finestra>
+      </El>
+
+      {/* La push sul telefono del professionista, a cose fatte */}
+      <El on={t >= 11000} da="translateY(16px)" style={{ position: "absolute", right: 52, top: 300, width: 330 }}>
+        <div style={{ borderRadius: 14, border: "1px solid rgba(56,232,255,.4)", background: "rgba(10,20,28,.97)", padding: "12px 14px", boxShadow: "0 16px 50px rgba(0,0,0,.5)" }}>
+          <div style={{ fontSize: 11, color: "#7fd7ea", letterSpacing: ".1em", fontWeight: 800 }}>📲 SUL TUO TELEFONO</div>
+          <div style={{ fontSize: 13.5, color: "#dff6fc", marginTop: 5, lineHeight: 1.5 }}>
+            <strong>ORION</strong> · Disdetta gestita: Conti ha disdetto le 10:00, Sara Neri ha preso il posto. Buona cena! 🍝
+          </div>
+        </div>
+      </El>
+
+      <Timbro on={t >= 12300} style={{ position: "absolute", left: 400, bottom: 40 }}>
+        TU NON HAI MOSSO UN DITO ✓
+      </Timbro>
+    </div>
+  );
+}
+
 const SCENE: Record<DemoId, () => ReactNode> = {
   agenda: () => <ScenaAgenda />,
+  segreteria: () => <ScenaSegreteria />,
   team: () => <ScenaTeam />,
   strumenti: () => <ScenaStrumenti />,
   fortezza: () => <ScenaFortezza />,
@@ -1216,6 +1327,7 @@ export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void 
 
 const DURATE_SCENE: Record<DemoId, number> = {
   agenda: 14500,
+  segreteria: 14500,
   team: 14000,
   strumenti: 14000,
   fortezza: 14500,
