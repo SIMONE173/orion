@@ -11,13 +11,14 @@ import { OrionCore } from "./OrionCore";
 // Ogni scena è coreografata su un orologio (ms) che riparte da capo da solo.
 // ──────────────────────────────────────────────────────────────────────────
 
-export type DemoId = "agenda" | "segreteria" | "team" | "strumenti" | "fortezza" | "voce" | "misura";
+export type DemoId = "agenda" | "segreteria" | "team" | "strumenti" | "mano" | "fortezza" | "voce" | "misura";
 
 const TITOLI: Record<DemoId, string> = {
   agenda: "Un'agenda che si difende da sola",
   segreteria: "Risponde ai clienti al posto tuo",
   team: "Il tuo team, dentro",
   strumenti: "Si aggancia ai tuoi strumenti",
+  mano: "La Mano: usa i tuoi programmi lui",
   fortezza: "Una fortezza per i tuoi dati",
   voce: "Tutto il computer, a voce",
   misura: "Il tuo ORION, su misura",
@@ -1154,9 +1155,114 @@ function ScenaSegreteria() {
   );
 }
 
+// ── SCENA · La Mano: ORION usa i programmi del professionista ────────────────
+function ScenaMano() {
+  const T = 14500;
+  const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [400, "pop"], // il comando a voce
+    [2700, "pop"], // "faccio io: guardami"
+    [4300, "whoosh"], // si apre il gestionale
+    [4700, "tick"], // il mini-nucleo si presenta
+    [6100, "tick"], // clic sul campo esercizio
+    [9200, "ding"], // esercizio sostituito
+    [9600, "tick"], // clic sui chili
+    [10600, "ding"], // 20 kg
+    [11500, "tick"], // salva
+    [11900, "ding"],
+    [12400, "tada"], // fatto e verificato
+  ]);
+  const uscita = t > T - 900;
+
+  // Il passo che il mini-nucleo sta raccontando.
+  const passo =
+    t < 6000 ? "apro la scheda di Mario" : t < 9500 ? "sostituisco l'esercizio" : t < 11400 ? "metto 20 kg" : "verifico e salvo";
+  // Il cursore della Mano: si muove da solo sui campi.
+  const cursore = t < 6000 ? { x: 640, y: 205 } : t < 9500 ? { x: 620, y: 258 } : t < 11400 ? { x: 585, y: 318 } : { x: 700, y: 388 };
+  const esercizioNuovo = t >= 8800;
+  const chiliNuovi = t >= 10400;
+  const salvato = t >= 11900;
+
+  return (
+    <div style={{ position: "absolute", inset: 0, opacity: uscita ? 0 : 1, transition: "opacity .8s" }}>
+      <Bolla mia on={fra(t, 400, 4200)} style={{ position: "absolute", right: 50, top: 22 }}>
+        🎙 «{digita("Cambia l'esercizio a Mario Rossi: spinte su panca inclinata, 20 kg", t, 500, 30)}»
+      </Bolla>
+      <Bolla on={fra(t, 2700, 4600)} style={{ position: "absolute", left: 60, top: 22 }}>
+        {digita("Apro il tuo programma e faccio io: guardami.", t, 2800)}
+      </Bolla>
+
+      {/* Il MINI-NUCLEO in alto a sinistra che racconta i passi */}
+      <El on={t >= 4700} da="scale(.6)" style={{ position: "absolute", left: 46, top: 120 }}>
+        <div style={{ display: "grid", placeItems: "center", gap: 8 }}>
+          <OrionCore state="thinking" size={72} />
+          <div key={passo} style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 11px", borderRadius: 99, border: "1px solid rgba(56,232,255,.45)", background: "rgba(8,16,22,.92)", fontSize: 12, color: "#c9ecf7", fontWeight: 700, animation: "demo-battito 1.4s ease-in-out infinite" }}>
+            🖱 {passo}
+          </div>
+        </div>
+      </El>
+
+      {/* Il gestionale del professionista (qualsiasi: qui, le schede del PT) */}
+      <El on={t >= 4300} da="translateX(50px)" style={{ position: "absolute", left: 330, top: 120, width: 480 }}>
+        <Finestra label="IL TUO GESTIONALE · SCHEDA DI MARIO ROSSI" style={{ width: "100%" }}>
+          <div style={{ padding: 16, display: "grid", gap: 10 }}>
+            {[
+              ["Cliente", "Mario Rossi", false, false],
+              ["Esercizio", esercizioNuovo ? "Spinte panca inclinata" : "Panca piana", t >= 6000 && t < 9500, esercizioNuovo],
+              ["Carico", chiliNuovi ? "20 kg" : "15 kg", t >= 9500 && t < 11400, chiliNuovi],
+              ["Serie", "3 × 10", false, false],
+            ].map(([campo, valore, attivo, cambiato]) => (
+              <div key={campo as string} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 13px", borderRadius: 10, fontSize: 16, transition: "all .5s", background: attivo ? "rgba(56,232,255,.1)" : "rgba(255,255,255,.045)", border: `1.5px solid ${attivo ? "rgba(56,232,255,.65)" : cambiato ? "rgba(52,211,153,.5)" : "rgba(255,255,255,.09)"}` }}>
+                <span style={{ color: "#7fa5b5", width: 90, fontSize: 13 }}>{campo as string}</span>
+                <span style={{ color: cambiato ? "#a7f3d0" : "#e6f4fa", fontWeight: 600, transition: "color .4s" }}>{valore as string}</span>
+                {cambiato ? <span style={{ marginLeft: "auto", color: "#6ee7b7", fontSize: 13, fontWeight: 800 }}>✓</span> : null}
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+              <span style={{ padding: "8px 20px", borderRadius: 10, fontSize: 14, fontWeight: 800, transition: "all .4s", background: salvato ? "rgba(52,211,153,.2)" : t >= 11400 ? "rgba(56,232,255,.2)" : "rgba(255,255,255,.07)", border: `1.5px solid ${salvato ? "rgba(52,211,153,.6)" : "rgba(255,255,255,.14)"}`, color: salvato ? "#a7f3d0" : "#dff6fc" }}>
+                {salvato ? "SALVATO ✓" : "Salva"}
+              </span>
+            </div>
+          </div>
+        </Finestra>
+      </El>
+
+      {/* Il cursore della Mano: si muove e clicca da solo */}
+      <div
+        style={{
+          position: "absolute",
+          left: cursore.x,
+          top: cursore.y,
+          width: 22,
+          height: 22,
+          borderRadius: "50%",
+          border: "2.5px solid rgba(56,232,255,.95)",
+          background: "rgba(56,232,255,.2)",
+          boxShadow: "0 0 18px rgba(56,232,255,.8)",
+          transition: "left .9s cubic-bezier(.4,0,.2,1), top .9s cubic-bezier(.4,0,.2,1)",
+          opacity: fra(t, 5200, 12600) ? 1 : 0,
+          zIndex: 9,
+          pointerEvents: "none",
+        }}
+      />
+
+      <Timbro on={t >= 12400} style={{ position: "absolute", left: 330, bottom: 40 }}>
+        FATTO — E VERIFICATO ✓
+      </Timbro>
+      <El on={t >= 12800} da="translateY(8px)" style={{ position: "absolute", left: 0, right: 0, bottom: 14, textAlign: "center" }}>
+        <span style={{ color: "#bfe9f5", fontSize: 14 }}>
+          Qualsiasi professione, qualsiasi programma. <strong style={{ color: "#e8fbff" }}>Tu lo dici, lui lo fa.</strong>
+        </span>
+      </El>
+    </div>
+  );
+}
+
 const SCENE: Record<DemoId, () => ReactNode> = {
   agenda: () => <ScenaAgenda />,
   segreteria: () => <ScenaSegreteria />,
+  mano: () => <ScenaMano />,
   team: () => <ScenaTeam />,
   strumenti: () => <ScenaStrumenti />,
   fortezza: () => <ScenaFortezza />,
@@ -1328,6 +1434,7 @@ export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void 
 const DURATE_SCENE: Record<DemoId, number> = {
   agenda: 14500,
   segreteria: 14500,
+  mano: 14500,
   team: 14000,
   strumenti: 14000,
   fortezza: 14500,
