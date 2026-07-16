@@ -93,7 +93,7 @@ import {
   type Compito,
   type EntitaEsterna,
 } from "../data";
-import { getRisponditore, setRisponditore } from "../data";
+import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti } from "../data";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
 import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
 import { trasmettiFattura, sdiConfigurato } from "../sdi";
@@ -713,7 +713,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "attiva_scrittura_gestionale",
     description:
-      "ECOSISTEMA — CANALE D'USCITA. Fa sì che ORION SCRIVA nel sistema che il professionista già usa: da quel momento ogni appuntamento creato/spostato/confermato/disdetto e ogni cliente creato/aggiornato viene SPEDITO (firmato) al webhook del suo gestionale — direttamente o tramite un ponte come Zapier/Make che lo scrive in migliaia di app. Usalo quando l'utente dice 'voglio che gli appuntamenti finiscano anche nel mio gestionale', 'scrivi anche su <sistema>', 'sincronizza verso il mio software'. Serve: 'sistema' (il nome di un sistema GIÀ collegato con collega_sistema) e 'url' (l'indirizzo https del webhook ricevente — es. un Catch Hook di Zapier; se l'utente non ce l'ha, spiegagli con semplicità come crearlo su Zapier e digli che può incollare l'URL qui con la tastiera). Con disattiva=true spegne la scrittura. Il risultato include il SEGRETO DI FIRMA (mostrato solo una volta): invita a salvarlo. NB per Google Calendar non serve: c'è già la sincronia nativa a due vie (collega_calendario).",
+      "ECOSISTEMA — CANALE D'USCITA. Fa sì che ORION SCRIVA nel sistema che il professionista già usa. DUE MODI: (1) CON 'url' = webhook https del suo gestionale o di un ponte Zapier/Make → ogni appuntamento creato/spostato/confermato/disdetto e ogni cliente creato/aggiornato parte FIRMATO in automatico (il risultato include il SEGRETO DI FIRMA, mostrato solo una volta: invita a salvarlo). (2) SENZA 'url' = PONTE UNIVERSALE, per QUALSIASI software anche vecchio e senza API: le modifiche si accodano nel pannello Consegne — copia-incolla perfetto con un click, e su Desktop le può scrivere ORION direttamente nel gestionale. Usalo quando l'utente dice 'voglio che gli appuntamenti finiscano anche nel mio gestionale', 'scrivi anche su <sistema>': se non ha webhook/Zapier NON insistere sull'url — proponi il Ponte. Serve 'sistema' (nome GIÀ collegato con collega_sistema). Con disattiva=true spegne tutto. NB per Google Calendar non serve: sincronia nativa a due vie (collega_calendario).",
     input_schema: {
       type: "object",
       properties: {
@@ -723,6 +723,12 @@ export const TOOLS: Anthropic.Tool[] = [
       },
       required: ["sistema"],
     },
+  },
+  {
+    name: "mostra_consegne",
+    description:
+      "PONTE UNIVERSALE — apre il pannello CONSEGNE AL GESTIONALE: la coda delle modifiche (appuntamenti, clienti) da portare nel software del professionista quando il canale d'uscita è in modalità Ponte (senza API). Ogni voce ha il copia-incolla perfetto e la spunta 'fatto'. Usalo quando l'utente chiede 'cosa devo riportare nel gestionale?', 'le consegne', 'la coda', o dopo aver attivato il Ponte, o quando nel briefing noti consegne accumulate.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "configura_risponditore",
@@ -2172,6 +2178,14 @@ const handlers: Record<string, Handler> = {
   },
 
   // CANALE D'USCITA: ORION scrive nel gestionale del cliente.
+  mostra_consegne: () => {
+    const consegne = consegneManualiPendenti();
+    return {
+      result: { ok: true, in_coda: consegne.length },
+      vista: { tipo: "consegne", dati: { consegne } },
+    };
+  },
+
   configura_risponditore: (input) => {
     const i = input as { livello?: string };
     const attuale = getRisponditore();
@@ -2200,12 +2214,28 @@ const handlers: Record<string, Handler> = {
       logEvento({ tipo: "uscita_disattivata", descrizione: `Scrittura verso "${conn.nome}" disattivata`, soggetto: conn.nome });
       return { result: { ok: true, sistema: conn.nome, scrittura: "disattivata" } };
     }
-    if (!url || !/^https?:\/\//i.test(url))
+    if (!url) {
+      // IL PONTE UNIVERSALE: niente webhook, niente API — le modifiche si
+      // accodano nel pannello Consegne (copia-incolla perfetto; su Desktop
+      // le può scrivere ORION nel gestionale). Funziona con QUALSIASI software.
+      attivaPonteManuale(conn.id);
+      logEvento({ tipo: "uscita_ponte", descrizione: `Ponte universale attivo verso "${conn.nome}" (consegna assistita, senza API)`, soggetto: conn.nome });
+      return {
+        result: {
+          ok: true,
+          sistema: conn.nome,
+          scrittura: "ponte_universale",
+          eventi: ["appuntamento_creato", "appuntamento_spostato", "appuntamento_stato", "appuntamento_cancellato", "cliente_creato", "cliente_aggiornato"],
+          nota: "PONTE UNIVERSALE attivo: da ora ogni modifica (appuntamenti, clienti) si mette in coda nel pannello Consegne — l'utente la copia e la incolla nel suo software con un click, e su Desktop puoi scrivergliela TU. Spiegalo in una frase semplice e apri subito il pannello con mostra_consegne quando ci sono consegne. Se un domani il suo sistema avrà un webhook, si passa alla consegna automatica rifacendo questo comando con l'url.",
+        },
+      };
+    }
+    if (!/^https?:\/\//i.test(url))
       return {
         result: {
           ok: false,
-          errore: "serve_url",
-          nota: "Serve l'indirizzo (URL https) del webhook che riceve gli eventi: quello del suo gestionale o di un ponte come Zapier/Make ('Catch Hook'). Spiegaglielo con semplicità e digli che può incollarlo qui con la tastiera.",
+          errore: "url_non_valido",
+          nota: "L'indirizzo del webhook deve iniziare con https:// (quello del suo gestionale o un Catch Hook di Zapier/Make). In alternativa, SENZA url, si attiva il Ponte universale (consegna assistita, funziona con qualsiasi software).",
         },
       };
     const { segreto } = attivaCanaleUscita(conn.id, url);

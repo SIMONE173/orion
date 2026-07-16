@@ -18,6 +18,7 @@ import type {
   Connessione,
   EntitaEsterna,
   StatoAbbonamento,
+  ConsegnaManuale,
 } from "../data";
 
 export type Vista =
@@ -116,6 +117,7 @@ export type Vista =
   | { tipo: "chiamata"; dati: { nome: string; numero: string | null } }
   | { tipo: "whatsapp_connect"; dati: Record<string, never> }
   | { tipo: "abbonamento"; dati: { stato: StatoAbbonamento } }
+  | { tipo: "consegne"; dati: { consegne: ConsegnaManuale[] } }
   | {
       tipo: "lavagna";
       dati: {

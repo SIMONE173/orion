@@ -142,3 +142,43 @@ test("senza canale attivo l'emissione è un no-op (zero righe, zero costi)", () 
     assert.equal(n, 0);
   });
 });
+
+// ── IL PONTE UNIVERSALE: consegna assistita, senza API ──────────────────────
+import { attivaPonteManuale, consegneManualiPendenti, segnaConsegnaManuale, PONTE_MANUALE } from "../data";
+
+test("ponte universale: emette in coda, la rete lo ignora, si spunta a mano", async () => {
+  const { db } = require("../db");
+  const { runWithTenant } = require("../tenant");
+  const { consegnaEventiUscita } = require("../uscita");
+  const TNP = 990909;
+  const ora = new Date().toISOString();
+  db().prepare("DELETE FROM eventi_uscita WHERE tenant_id = ?").run(TNP);
+  db().prepare("DELETE FROM connessioni WHERE tenant_id = ?").run(TNP);
+  await runWithTenant(TNP, async () => {
+    const r = db()
+      .prepare("INSERT INTO connessioni (tenant_id, tipo, nome, modalita, created_at, updated_at) VALUES (?, 'gestionale', 'VecchioGest', 'descritto', ?, ?)")
+      .run(TNP, ora, ora);
+    attivaPonteManuale(Number(r.lastInsertRowid));
+    const conn = db().prepare("SELECT webhook_uscita FROM connessioni WHERE id = ?").get(Number(r.lastInsertRowid)) as { webhook_uscita: string };
+    assert.equal(conn.webhook_uscita, PONTE_MANUALE);
+
+    // una modifica → si accoda per il ponte
+    emettiEventoUscita("appuntamento_creato", { titolo: "Visita", cliente: "Rossi", inizio: "2026-07-20T10:00:00" });
+    const coda = consegneManualiPendenti();
+    assert.equal(coda.length, 1);
+    assert.equal(coda[0].sistema, "VecchioGest");
+    assert.equal(coda[0].payload.cliente, "Rossi");
+
+    // la consegna via rete NON la tocca (niente URL http)
+    const esito = await consegnaEventiUscita();
+    assert.equal(esito.consegnati, 0);
+    assert.equal(consegneManualiPendenti().length, 1);
+
+    // spunta manuale → coda vuota; doppia spunta = false
+    assert.equal(segnaConsegnaManuale(coda[0].id), true);
+    assert.equal(consegneManualiPendenti().length, 0);
+    assert.equal(segnaConsegnaManuale(coda[0].id), false);
+  });
+  db().prepare("DELETE FROM eventi_uscita WHERE tenant_id = ?").run(TNP);
+  db().prepare("DELETE FROM connessioni WHERE tenant_id = ?").run(TNP);
+});

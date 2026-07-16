@@ -76,7 +76,7 @@ export async function consegnaEventiUscita(limite = 25): Promise<{ consegnati: n
               c.webhook_uscita, c.segreto_uscita
        FROM eventi_uscita e JOIN connessioni c ON c.id = e.connessione_id
        WHERE e.tenant_id = ? AND e.consegnato = 0 AND e.tentativi < ? AND e.prossimo_tentativo <= ?
-         AND c.attivo = 1 AND c.webhook_uscita IS NOT NULL
+         AND c.attivo = 1 AND c.webhook_uscita LIKE 'http%'
        ORDER BY e.connessione_id, e.id LIMIT ?`
     )
     .all(t, MAX_TENTATIVI, ora, limite) as EventoInAttesa[];

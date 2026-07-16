@@ -10,6 +10,7 @@ import { PagamentiPanel } from "./panels/PagamentiPanel";
 import { WhatsAppPanel } from "./panels/WhatsAppPanel";
 import { WhatsAppConnectPanel } from "./panels/WhatsAppConnectPanel";
 import { AbbonamentoPanel } from "./panels/AbbonamentoPanel";
+import { ConsegnePanel } from "./panels/ConsegnePanel";
 import { SchemaPanel } from "./panels/SchemaPanel";
 import { NotiziePanel } from "./panels/NotiziePanel";
 import { FinanzaPanel } from "./panels/FinanzaPanel";
@@ -63,6 +64,8 @@ export function renderPanel(v: Vista) {
       return <WhatsAppConnectPanel />;
     case "abbonamento":
       return <AbbonamentoPanel dati={v.dati} />;
+    case "consegne":
+      return <ConsegnePanel dati={v.dati} />;
     case "lavagna":
       return <LavagnaPanel dati={v.dati} />;
     case "schema":

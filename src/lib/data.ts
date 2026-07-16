@@ -1757,6 +1757,58 @@ export function connessioneUscita(): { id: number } | undefined {
     .get(T()) as { id: number } | undefined;
 }
 
+// ── IL PONTE UNIVERSALE: scrittura verso software SENZA API né webhook ───────
+// Il canale d'uscita con questo valore-sentinella non spedisce nulla via rete:
+// gli eventi si accodano e si consegnano in modo ASSISTITO (pannello Consegne
+// con copia-incolla perfetto; su Desktop li può scrivere ORION nel gestionale).
+export const PONTE_MANUALE = "ponte:manuale";
+
+export function attivaPonteManuale(connessioneId: number): void {
+  db()
+    .prepare("UPDATE connessioni SET webhook_uscita = ?, segreto_uscita = NULL, updated_at = ? WHERE id = ? AND tenant_id = ?")
+    .run(PONTE_MANUALE, nowISO(), connessioneId, T());
+}
+
+export type ConsegnaManuale = {
+  id: number;
+  evento: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+  sistema: string;
+};
+
+export function consegneManualiPendenti(limite = 30): ConsegnaManuale[] {
+  const righe = db()
+    .prepare(
+      `SELECT e.id, e.evento, e.payload, e.created_at, c.nome AS sistema
+       FROM eventi_uscita e JOIN connessioni c ON c.id = e.connessione_id
+       WHERE e.tenant_id = ? AND e.consegnato = 0 AND c.webhook_uscita = ?
+       ORDER BY e.id DESC LIMIT ?`
+    )
+    .all(T(), PONTE_MANUALE, limite) as { id: number; evento: string; payload: string; created_at: string; sistema: string }[];
+  return righe.map((r) => {
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = JSON.parse(r.payload || "{}");
+    } catch {
+      /* payload illeggibile: si mostra vuoto */
+    }
+    return { ...r, payload };
+  });
+}
+
+export function segnaConsegnaManuale(id: number): boolean {
+  return (
+    db()
+      .prepare(
+        `UPDATE eventi_uscita SET consegnato = 1, consegnato_at = ?
+         WHERE id = ? AND tenant_id = ? AND consegnato = 0
+           AND connessione_id IN (SELECT id FROM connessioni WHERE tenant_id = ? AND webhook_uscita = ?)`
+      )
+      .run(nowISO(), id, T(), T(), PONTE_MANUALE).changes > 0
+  );
+}
+
 export function emettiEventoUscita(evento: string, payload: Record<string, unknown>) {
   const conn = connessioneUscita();
   if (!conn) return; // canale non attivo: zero costi, zero righe
