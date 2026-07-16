@@ -2313,6 +2313,36 @@ function adminEmail(): string {
   return (process.env.ORION_ADMIN_EMAIL || "").trim().toLowerCase();
 }
 
+// ── SEGRETERIA CLIENTI (il risponditore automatico su WhatsApp) ──────────────
+// Tre livelli: 'spenta' (solo copioni), 'assistita' (risponde ma non tocca
+// l'agenda), 'autopilota' (disdice/sposta/prenota davvero). Vive nel profilo.
+export type LivelloRisponditore = "spenta" | "assistita" | "autopilota";
+
+export function getRisponditore(): LivelloRisponditore {
+  const r = db().prepare("SELECT risponditore FROM profili WHERE tenant_id = ?").get(T()) as
+    | { risponditore?: string | null }
+    | undefined;
+  const v = r?.risponditore;
+  return v === "assistita" || v === "autopilota" ? v : "spenta";
+}
+
+export function setRisponditore(livello: LivelloRisponditore): void {
+  db()
+    .prepare(
+      "INSERT INTO profili (tenant_id, risponditore, updated_at) VALUES (?, ?, ?) ON CONFLICT(tenant_id) DO UPDATE SET risponditore = excluded.risponditore, updated_at = excluded.updated_at"
+    )
+    .run(T(), livello, nowISO());
+}
+
+// I prossimi appuntamenti (non disdetti) di un cliente: servono alla segreteria.
+export function appuntamentiFuturiDiCliente(clienteId: number, limite = 5): Appuntamento[] {
+  return db()
+    .prepare(
+      "SELECT * FROM appuntamenti WHERE tenant_id = ? AND cliente_id = ? AND inizio >= ? AND stato != 'disdetto' ORDER BY inizio LIMIT ?"
+    )
+    .all(T(), clienteId, new Date().toISOString(), limite) as Appuntamento[];
+}
+
 export function getAbbonamento(): Abbonamento | undefined {
   return db().prepare("SELECT * FROM abbonamenti WHERE tenant_id = ?").get(T()) as
     | Abbonamento

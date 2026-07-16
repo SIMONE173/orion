@@ -93,6 +93,7 @@ import {
   type Compito,
   type EntitaEsterna,
 } from "../data";
+import { getRisponditore, setRisponditore } from "../data";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
 import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
 import { trasmettiFattura, sdiConfigurato } from "../sdi";
@@ -721,6 +722,17 @@ export const TOOLS: Anthropic.Tool[] = [
         disattiva: { type: "boolean", description: "true = spegne la scrittura verso questo sistema" },
       },
       required: ["sistema"],
+    },
+  },
+  {
+    name: "configura_risponditore",
+    description:
+      "SEGRETERIA CLIENTI H24 — il risponditore automatico su WhatsApp (vive sul server: lavora anche a PC spento e di notte). Livelli: 'spenta' = solo i copioni storici (conferme ai promemoria, offerte di slot); 'assistita' = ORION risponde ai clienti (informazioni, prende messaggi con push al professionista) ma NON tocca mai l'agenda; 'autopilota' = in più disdice, sposta e prenota DAVVERO negli orari liberi, e ogni buco liberato viene offerto da solo alla lista d'attesa. Usalo quando l'utente dice 'rispondi tu ai clienti', 'attiva la segreteria notturna', 'metti l'autopilota', 'smetti di rispondere ai clienti'. Senza 'livello' restituisce l'impostazione attuale. PRIMA di attivare l'autopilota ricorda in una frase che ORION potrà modificare l'agenda da solo e chiedi conferma esplicita. Serve WhatsApp collegato perché i messaggi arrivino.",
+    input_schema: {
+      type: "object",
+      properties: {
+        livello: { type: "string", enum: ["spenta", "assistita", "autopilota"], description: "Ometti per leggere l'impostazione attuale" },
+      },
     },
   },
   {
@@ -2160,6 +2172,19 @@ const handlers: Record<string, Handler> = {
   },
 
   // CANALE D'USCITA: ORION scrive nel gestionale del cliente.
+  configura_risponditore: (input) => {
+    const i = input as { livello?: string };
+    const attuale = getRisponditore();
+    if (!i?.livello) {
+      return { result: { ok: true, livello: attuale, nota: "spenta = solo copioni; assistita = risponde ma non tocca l'agenda; autopilota = disdice/sposta/prenota davvero" } };
+    }
+    if (i.livello !== "spenta" && i.livello !== "assistita" && i.livello !== "autopilota") {
+      return { result: { ok: false, errore: "livello non valido: spenta | assistita | autopilota" } };
+    }
+    setRisponditore(i.livello);
+    return { result: { ok: true, livello: i.livello, prima: attuale } };
+  },
+
   attiva_scrittura_gestionale: (input) => {
     const nome = String(input.sistema ?? "").trim().toLowerCase();
     const url = input.url ? String(input.url).trim() : null;

@@ -654,6 +654,7 @@ function migrate(d: Database.Database) {
   // IMPORTANTE: questi ALTER devono girare PRIMA di creare gli indici su
   // tenant_id — su un DB vecchio (single-tenant) la colonna non esiste ancora.
   const alters = [
+    "ALTER TABLE profili ADD COLUMN risponditore TEXT", // segreteria clienti: spenta | assistita | autopilota
     "ALTER TABLE comunicazioni ADD COLUMN allegato_url TEXT",
     "ALTER TABLE promemoria ADD COLUMN notificato INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE clienti ADD COLUMN tenant_id INTEGER",

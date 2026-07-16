@@ -67,3 +67,40 @@ test("riepilogoAdmin: la classifica vede l'account e i suoi numeri", () => {
   assert.ok(mia!.costoMicro > 0);
   assert.ok(r.totaleMicro >= mia!.costoMicro);
 });
+
+// ── SEGRETERIA CLIENTI: la configurazione del risponditore ──────────────────
+import { runWithTenant } from "../tenant";
+import { getRisponditore, setRisponditore, appuntamentiFuturiDiCliente } from "../data";
+
+test("risponditore: nasce spento, si imposta e si rilegge", () => {
+  runWithTenant(TN, () => {
+    db().prepare("DELETE FROM profili WHERE tenant_id = ?").run(TN);
+    assert.equal(getRisponditore(), "spenta");
+    setRisponditore("assistita");
+    assert.equal(getRisponditore(), "assistita");
+    setRisponditore("autopilota");
+    assert.equal(getRisponditore(), "autopilota");
+    setRisponditore("spenta");
+    assert.equal(getRisponditore(), "spenta");
+    db().prepare("DELETE FROM profili WHERE tenant_id = ?").run(TN);
+  });
+});
+
+test("appuntamentiFuturiDiCliente: solo futuri e non disdetti", () => {
+  runWithTenant(TN, () => {
+    const ora = new Date().toISOString();
+    const r = db().prepare("INSERT INTO clienti (tenant_id, nome, created_at) VALUES (?, 'Cliente Futuro', ?)").run(TN, ora);
+    const cid = Number(r.lastInsertRowid);
+    const fra1h = new Date(Date.now() + 3600_000).toISOString();
+    const fra2h = new Date(Date.now() + 7200_000).toISOString();
+    const ieri = new Date(Date.now() - 86400_000).toISOString();
+    db().prepare("INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, created_at) VALUES (?, ?, 'ok', ?, ?, 'confermato', ?)").run(TN, cid, fra1h, fra2h, ora);
+    db().prepare("INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, created_at) VALUES (?, ?, 'disdetto', ?, ?, 'disdetto', ?)").run(TN, cid, fra1h, fra2h, ora);
+    db().prepare("INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, created_at) VALUES (?, ?, 'passato', ?, ?, 'confermato', ?)").run(TN, cid, ieri, ieri, ora);
+    const futuri = appuntamentiFuturiDiCliente(cid);
+    assert.equal(futuri.length, 1);
+    assert.equal(futuri[0].titolo, "ok");
+    db().prepare("DELETE FROM appuntamenti WHERE cliente_id = ?").run(cid);
+    db().prepare("DELETE FROM clienti WHERE id = ?").run(cid);
+  });
+});

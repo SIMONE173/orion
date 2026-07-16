@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-16", testo: "La Segreteria Notturna: ORION risponde ai tuoi clienti su WhatsApp anche quando dormi — e con l'autopilota gestisce l'agenda da solo" },
   { data: "2026-07-16", testo: "Sotto il cofano: ORION sceglie da solo il motore giusto per ogni richiesta — sempre pronto, mai un pensiero" },
   { data: "2026-07-16", testo: "Le funzioni ora sfilano da sole: un mini-film alla volta in primo piano, con ORION al lavoro" },
   { data: "2026-07-15", testo: "Tutto nero su bianco: email di conferma per account, beta e abbonamento — e ricevuta a ogni pagamento" },

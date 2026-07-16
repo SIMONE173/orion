@@ -1,18 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getClienteByTelefono,
-  logCommunication,
-  tenantDaPhoneNumberId,
-  prossimoAppuntamentoDiCliente,
-  aggiornaStatoAppuntamento,
-  creaPromemoria,
-  logEvento,
-  logAudit,
-  type Cliente,
-} from "@/lib/data";
-import { scaricaMediaWhatsApp, inviaMessaggioWhatsApp } from "@/lib/whatsapp";
-import { processaRispostaOfferta } from "@/lib/slots";
-import { inviaPushATutti } from "@/lib/push";
+import { getClienteByTelefono, logCommunication, tenantDaPhoneNumberId } from "@/lib/data";
+import { scaricaMediaWhatsApp } from "@/lib/whatsapp";
+import { gestisciMessaggioCliente } from "@/lib/orion/segreteria";
 import { primoTenant } from "@/lib/auth";
 import { runWithTenant } from "@/lib/tenant";
 import { verificaFirmaMeta, fallbackTenantConsentito } from "@/lib/webhookSec";
@@ -44,76 +33,9 @@ const TIPO_MEDIA: Record<string, string> = {
   sticker: "foto",
 };
 
-// ── ANTI NO-SHOW: interpretazione delle risposte ai promemoria ──────────────
-// Se il cliente ha un appuntamento imminente con promemoria inviato e risponde
-// SÌ → confermiamo noi. NO/disdetta → NON cancelliamo (decide il professionista):
-// creiamo un promemoria di richiamo e avvisiamo con una push.
-
-const RE_SI = /^\s*(s[iì]\b|s[iì][!. ]|ok\b|okay\b|va bene|confermo|confermat|perfetto|certo|ci sar[oò])/i;
-const RE_NO = /^\s*(no\b|non posso|non riesco|disdic|disdett|annull|rinvi|spost|cambio|impossibilitat)/i;
-
-function quandoLeggibile(iso: string): string {
-  const GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
-  const MESI = ["gennaio","febbraio","marzo","aprile","maggio","giugno","luglio","agosto","settembre","ottobre","novembre","dicembre"];
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${GIORNI[d.getDay()]} ${d.getDate()} ${MESI[d.getMonth()]} alle ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-async function gestisciRispostaPromemoria(cliente: Cliente, testo: string) {
-  const si = RE_SI.test(testo);
-  const no = !si && RE_NO.test(testo);
-  if (!si && !no) return;
-
-  const app = prossimoAppuntamentoDiCliente(cliente.id);
-  // Reagiamo SOLO se c'è un appuntamento imminente il cui promemoria è partito:
-  // così un "ok" dentro una normale conversazione non tocca l'agenda.
-  if (!app || !app.promemoria_inviato) return;
-  const oreAllInizio = (new Date(app.inizio).getTime() - Date.now()) / 3600_000;
-  if (oreAllInizio < 0 || oreAllInizio > 72) return;
-
-  if (si) {
-    if (app.stato !== "confermato") aggiornaStatoAppuntamento(app.id, "confermato");
-    logEvento({
-      tipo: "appuntamento_confermato",
-      soggetto: cliente.nome,
-      cliente_id: cliente.id,
-      descrizione: `${cliente.nome} ha confermato via WhatsApp l'appuntamento di ${quandoLeggibile(app.inizio)}`,
-    });
-    logAudit({ canale: "whatsapp", azione: "conferma_automatica", dettaglio: `${cliente.nome} — ${app.inizio}` });
-    const risposta = `Grazie ${cliente.nome.split(" ")[0]}, l'appuntamento di ${quandoLeggibile(app.inizio)} è confermato. A presto!\n\n(Messaggio automatico dell'assistente dello studio)`;
-    const esito = await inviaMessaggioWhatsApp(cliente.telefono ?? "", risposta);
-    if (esito.ok) {
-      logCommunication({ cliente_id: cliente.id, direzione: "out", contenuto: risposta, stato: esito.simulato ? "simulato" : "inviato" });
-    }
-    return;
-  }
-
-  // NO: il professionista decide. Promemoria di richiamo + push immediata.
-  creaPromemoria({
-    cliente_id: cliente.id,
-    testo: `Richiamare ${cliente.nome}: chiede di spostare/disdire l'appuntamento di ${quandoLeggibile(app.inizio)}`,
-    categoria: "richiamo",
-    scadenza: new Date().toISOString().slice(0, 10),
-  });
-  logEvento({
-    tipo: "richiesta_disdetta",
-    soggetto: cliente.nome,
-    cliente_id: cliente.id,
-    descrizione: `${cliente.nome} ha chiesto via WhatsApp di spostare/disdire l'appuntamento di ${quandoLeggibile(app.inizio)}`,
-  });
-  logAudit({ canale: "whatsapp", azione: "richiesta_disdetta", dettaglio: `${cliente.nome} — ${app.inizio}` });
-  await inviaPushATutti({
-    titolo: "Richiesta di spostamento",
-    corpo: `${cliente.nome} vuole spostare l'appuntamento di ${quandoLeggibile(app.inizio)}. C'è un promemoria di richiamo.`,
-    url: "/",
-  });
-  const risposta = `Capito ${cliente.nome.split(" ")[0]}, avviso subito lo studio: la ricontatteremo per trovare un nuovo orario.\n\n(Messaggio automatico dell'assistente dello studio)`;
-  const esito = await inviaMessaggioWhatsApp(cliente.telefono ?? "", risposta);
-  if (esito.ok) {
-    logCommunication({ cliente_id: cliente.id, direzione: "out", contenuto: risposta, stato: esito.simulato ? "simulato" : "inviato" });
-  }
-}
+// L'interpretazione dei messaggi (copioni anti no-show, offerte di slot e
+// SEGRETERIA AI) vive in un posto solo: lib/orion/segreteria.ts — così il
+// webhook vero e il simulatore si comportano in modo identico.
 
 // Ricezione dei messaggi in arrivo.
 export async function POST(req: NextRequest) {
@@ -180,12 +102,11 @@ export async function POST(req: NextRequest) {
           stato: "ricevuto",
         });
 
-        // Risposte automatiche, in ordine di priorità: prima le offerte di slot
-        // (riempi-buchi), poi i promemoria anti no-show.
-        if (tipo === "testo" && cliente && contenuto) {
+        // Risposte automatiche: offerte di slot → conferme scriptate →
+        // SEGRETERIA AI (se accesa: assistita o autopilota). Un solo ingresso.
+        if (tipo === "testo" && contenuto) {
           try {
-            const eraOfferta = await processaRispostaOfferta(cliente, contenuto);
-            if (!eraOfferta) await gestisciRispostaPromemoria(cliente, contenuto);
+            await gestisciMessaggioCliente({ cliente, telefono, testo: contenuto });
           } catch (e) {
             console.error("[whatsapp webhook] risposta automatica:", e);
           }
