@@ -20,6 +20,7 @@ import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
 import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
 import { useClapWake } from "@/components/useClapWake";
+import { useSchiocco } from "@/components/useSchiocco";
 import { applicaTema, type Tema } from "@/lib/tema";
 import { PIANI } from "@/lib/prezzi";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
@@ -285,6 +286,10 @@ export default function Home() {
   speakRef.current = speak;
   const cancelSpeakRef = useRef(cancelSpeak);
   cancelSpeakRef.current = cancelSpeak;
+
+  // UNO SCHIOCCO DI DITA mentre ORION parla → zittisce SOLO la frase in corso
+  // (il testo resta in chat: la voce torna al prossimo messaggio).
+  useSchiocco(speaking, () => cancelSpeakRef.current?.());
   const micAttivoRef = useRef(micAttivo);
   micAttivoRef.current = micAttivo;
   const standbyRef = useRef(standby);
@@ -1231,9 +1236,13 @@ export default function Home() {
             ✋
           </button>
           <button
-            onClick={() => setVoiceOn(!voiceOn)}
+            onClick={() => {
+              // Mentre parla: un click zittisce SOLO questa frase (leggi in chat).
+              if (speaking) cancelSpeak();
+              else setVoiceOn(!voiceOn);
+            }}
             className="grid size-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"
-            title={voiceOn ? "Disattiva voce" : "Attiva voce"}
+            title={speaking ? "Zittisci questa frase (la leggi in chat)" : voiceOn ? "Disattiva voce" : "Attiva voce"}
           >
             {voiceOn ? <IconSound className="h-4 w-4" /> : <IconMute className="h-4 w-4" />}
           </button>
@@ -1334,8 +1343,12 @@ export default function Home() {
         {/* IL NUCLEO, libero: grande al centro per il benvenuto, poi vola
             in alto a destra (piccolo) con una sola, morbida transizione. */}
         <div
-          onClick={toggleMic}
-          title={micAttivo ? "Microfono attivo — tocca per mutare" : "Tocca per attivare il microfono"}
+          onClick={() => {
+            // Mentre parla: un tocco lo zittisce (solo questa frase); da zitto: microfono.
+            if (speaking) cancelSpeak();
+            else toggleMic();
+          }}
+          title={speaking ? "Zittisci questa frase (la leggi in chat)" : micAttivo ? "Microfono attivo — tocca per mutare" : "Tocca per attivare il microfono"}
           className="absolute z-20 cursor-pointer"
           style={{
             left: chatAttiva ? "100%" : "50%",
