@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
         contenuto: body.testo ?? (tipo !== "testo" ? `[${tipo}]` : null),
         allegato_nome: body.allegato_nome ?? (body.allegato ? tipo : null),
         allegato_url: body.allegato ?? null,
+        telefono: cliente?.telefono ?? (body.telefono ? String(body.telefono) : null),
         stato: "ricevuto",
       });
       // processa:true → il messaggio attraversa la STESSA pipeline del webhook

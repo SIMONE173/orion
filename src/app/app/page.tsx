@@ -26,7 +26,57 @@ import { PIANI } from "@/lib/prezzi";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista, Azione } from "@/lib/orion/views";
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; arrivo?: ArrivoWA };
+
+// Un messaggio WhatsApp in arrivo dal cliente (la POSTA del titolare).
+type ArrivoWA = {
+  id: number;
+  cliente: string | null;
+  cliente_id?: number | null;
+  telefono: string | null;
+  tipo: string; // testo | audio | foto | video | documento
+  contenuto: string | null;
+  allegato_url: string | null;
+  allegato_nome: string | null;
+  quando: string;
+};
+const chiDi = (a: ArrivoWA) => a.cliente ?? a.telefono ?? "numero sconosciuto";
+
+// La bolla di un messaggio del cliente: testo, vocale, foto o video — vivi in chat.
+function BollaArrivo({ a, onRispondi }: { a: ArrivoWA; onRispondi: () => void }) {
+  return (
+    <div className="fade-in max-w-[92%] rounded-2xl rounded-bl-sm border border-emerald-400/25 bg-emerald-500/10 px-3.5 py-2.5 text-sm">
+      <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold tracking-wider text-emerald-300/90">
+        <span>📩 {chiDi(a)}</span>
+        <span className="font-normal text-emerald-200/50">· WhatsApp</span>
+      </div>
+      {a.tipo === "testo" && a.contenuto && <p className="whitespace-pre-wrap text-slate-100">{a.contenuto}</p>}
+      {a.tipo === "audio" && a.allegato_url && <audio controls autoPlay src={a.allegato_url} className="mt-1 w-full" />}
+      {a.tipo === "foto" && a.allegato_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={a.allegato_url} alt={a.allegato_nome ?? "foto"} className="mt-1 max-h-64 w-full rounded-lg object-contain" />
+      )}
+      {a.tipo === "video" && a.allegato_url && <video controls autoPlay src={a.allegato_url} className="mt-1 max-h-64 w-full rounded-lg" />}
+      {a.tipo === "documento" && a.allegato_url && (
+        <a href={a.allegato_url} download={a.allegato_nome ?? "documento"} className="mt-1 inline-block text-cyan-300 underline">
+          📎 {a.allegato_nome ?? "Apri il documento"}
+        </a>
+      )}
+      {a.tipo !== "testo" && a.contenuto && !a.contenuto.startsWith("[") && (
+        <p className="mt-1 whitespace-pre-wrap text-slate-200/90">{a.contenuto}</p>
+      )}
+      {a.tipo !== "testo" && !a.allegato_url && <p className="italic text-slate-400">[{a.tipo} non disponibile]</p>}
+      <div className="mt-2">
+        <button
+          onClick={onRispondi}
+          className="rounded-lg border border-emerald-400/40 bg-emerald-400/15 px-2.5 py-1 text-xs font-medium text-emerald-100 hover:bg-emerald-400/25"
+        >
+          ↩︎ Rispondi
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type StatoAbb = {
   configurato: boolean;
@@ -128,7 +178,13 @@ export default function Home() {
   // Incrementato quando l'utente dice "scatta" a voce: fa scattare la fotocamera.
   const [scattaTick, setScattaTick] = useState(0);
   const [avviso, setAvviso] = useState<string | null>(null);
-  const [notifica, setNotifica] = useState<{ testo: string; cliente: string } | null>(null);
+  // POSTA IN ARRIVO: annuncio («È arrivato un messaggio da X, vuoi aprirlo?»)
+  // → apertura in chat (testo/vocale/foto/video) → risposta dettata o scritta.
+  // Tutto il giro vive QUI, senza passare dal modello: zero crediti.
+  const [annuncio, setAnnuncio] = useState<ArrivoWA[]>([]);
+  const [rispostaA, setRispostaA] = useState<ArrivoWA | null>(null);
+  const [bozzaRisposta, setBozzaRisposta] = useState<string | null>(null);
+  const annunciati = useRef<Set<number>>(new Set());
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
   // Lucchetto del lancio: prima dell'apertura l'app mostra il conto alla
   // rovescia (chi è in lista può comunque accedere dalla porticina).
@@ -161,8 +217,6 @@ export default function Home() {
   const avviato = useRef(false);
   const salutato = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const ultimoCheck = useRef<string>(new Date().toISOString());
-  const messaggiVisti = useRef<Set<number>>(new Set());
 
   const ultimoAssistente = [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
 
@@ -542,6 +596,17 @@ export default function Home() {
         // ORION su misura: nuovo look in diretta, con l'onda di colore dal nucleo.
         applicaTema(a.tema as Tema | null, { morph: true });
         break;
+      case "apri_messaggio": {
+        // Dal tool apri_messaggio: la bolla compare in chat (la voce è del
+        // modello, che sta già raccontando cosa c'è dentro).
+        const arr = (a as { arrivo?: ArrivoWA }).arrivo;
+        if (arr) {
+          annunciati.current.add(arr.id);
+          setAnnuncio((prev) => prev.filter((x) => x.id !== arr.id));
+          setMessages((m) => [...m, { role: "assistant", content: "", arrivo: arr }]);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -922,8 +987,116 @@ export default function Home() {
     };
   }, [autenticato, entraStandby]);
 
+  // ── POSTA IN ARRIVO: apertura, risposta e conferma (tutto locale) ──────────
+  const annuncioRef = useRef(annuncio);
+  annuncioRef.current = annuncio;
+  const rispostaARef = useRef(rispostaA);
+  rispostaARef.current = rispostaA;
+  const bozzaRef = useRef(bozzaRisposta);
+  bozzaRef.current = bozzaRisposta;
+
+  // Apre un arrivo in chat: bolla con il contenuto (media inclusi) + voce.
+  const apriArrivo = useCallback((a: ArrivoWA, conVoce = true) => {
+    annunciati.current.add(a.id);
+    void fetch("/api/whatsapp/arrivi", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [a.id] }),
+    }).catch(() => {});
+    setMessages((m) => [...m, { role: "assistant", content: "", arrivo: a }]);
+    if (!conVoce) return;
+    const chi = chiDi(a);
+    if (a.tipo === "testo" && a.contenuto) speakRef.current?.(`${chi} scrive: ${a.contenuto}`);
+    else if (a.tipo === "audio") speakRef.current?.(`Messaggio vocale da ${chi}: lo riproduco.`);
+    else if (a.tipo === "foto") speakRef.current?.(`${chi} ha mandato una foto: eccola.`);
+    else if (a.tipo === "video") speakRef.current?.(`${chi} ha mandato un video: eccolo.`);
+    else speakRef.current?.(`${chi} ha mandato un documento: te l'ho messo in chat.`);
+  }, []);
+
+  const apriAnnunciati = useCallback(() => {
+    const lista = annuncioRef.current;
+    setAnnuncio([]);
+    lista.forEach((a, i) => apriArrivo(a, i === 0));
+  }, [apriArrivo]);
+
+  const avviaRisposta = useCallback((a: ArrivoWA) => {
+    setRispostaA(a);
+    setBozzaRisposta(null);
+    speakRef.current?.(`Dimmi la risposta per ${chiDi(a)}: parla, o scrivila qui sotto.`);
+  }, []);
+
+  const annullaRisposta = useCallback(() => {
+    setRispostaA(null);
+    setBozzaRisposta(null);
+  }, []);
+
+  // Invio vero: la risposta parte con le parole ESATTE del titolare.
+  const confermaBozza = useCallback(async () => {
+    const a = rispostaARef.current;
+    const testo = bozzaRef.current?.trim();
+    if (!a || !testo) return;
+    setRispostaA(null);
+    setBozzaRisposta(null);
+    try {
+      const r = await fetch("/api/whatsapp/rispondi", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ comunicazione_id: a.id, telefono: a.telefono, testo }),
+      });
+      const d: { ok?: boolean; simulato?: boolean; errore?: string } = await r.json();
+      if (d.ok) {
+        const nota = d.simulato ? " · invio simulato: WhatsApp non è ancora collegato" : "";
+        setMessages((m) => [...m, { role: "assistant", content: `✓ Risposta a ${chiDi(a)}: «${testo}»${nota}` }]);
+        speakRef.current?.(d.simulato ? "Registrata: partirà appena WhatsApp sarà collegato." : "Inviata.");
+      } else {
+        setMessages((m) => [...m, { role: "assistant", content: `Non sono riuscito a inviare la risposta a ${chiDi(a)}: ${d.errore ?? "errore"}.` }]);
+        speakRef.current?.("Non sono riuscito a inviarla.");
+      }
+    } catch {
+      setMessages((m) => [...m, { role: "assistant", content: "Connessione interrotta: la risposta non è partita." }]);
+    }
+  }, []);
+
   // Quando il mic è attivo in modalità appunti, la voce o detta o comanda.
   gestisciVoceRef.current = (t: string) => {
+    // ── Prima di tutto: il giro della POSTA (sì/apri, dettatura, conferma) ──
+    const bassa = t.trim().toLowerCase().replace(/[.!?]+$/, "");
+    if (bozzaRef.current !== null && rispostaARef.current) {
+      if (/^(s[iì]\b|invia|manda|vai|ok\b|conferm)/.test(bassa)) {
+        void confermaBozza();
+        return;
+      }
+      if (/^(no\b|annulla|lascia stare|niente)/.test(bassa)) {
+        annullaRisposta();
+        speakRef.current?.("Va bene, non la invio.");
+        return;
+      }
+      // Qualsiasi altra frase: è la nuova versione della risposta.
+      setBozzaRisposta(t.trim());
+      speakRef.current?.(`Nuova risposta: ${t.trim()}. La invio?`);
+      return;
+    }
+    if (rispostaARef.current) {
+      if (/^(annulla|lascia stare|niente|no basta|non rispondere)/.test(bassa)) {
+        annullaRisposta();
+        speakRef.current?.("Annullato.");
+        return;
+      }
+      setBozzaRisposta(t.trim());
+      speakRef.current?.(`Invio: ${t.trim()}. Confermi?`);
+      return;
+    }
+    if (annuncioRef.current.length) {
+      if (bassa.length < 30 && /^(s[iì]\b|apri|aprilo|aprili|leggi|leggilo|fammi vedere|fammelo vedere|sentiamo|vai\b|ok\b)/.test(bassa)) {
+        apriAnnunciati();
+        return;
+      }
+      if (/^(no\b|dopo\b|più tardi|non ora|adesso no)/.test(bassa)) {
+        setAnnuncio([]);
+        speakRef.current?.("Va bene, restano in attesa.");
+        return;
+      }
+    }
     // In modalità visione la voce è una DOMANDA sull'inquadratura (o la chiude).
     if (visioneAttiva) {
       const low = t.trim().toLowerCase();
@@ -1055,36 +1228,64 @@ export default function Home() {
     setBusy(loading);
   }, [loading, setBusy]);
 
-  // Osservazione continua: ogni 90s controlla se sono arrivati messaggi (sola lettura DB).
+  // LA POSTA IN ARRIVO: ogni 25s (e subito all'avvio) l'app guarda se ci sono
+  // messaggi dei clienti non ancora aperti (sola lettura DB, zero crediti) e
+  // ORION li ANNUNCIA a voce: «È arrivato un messaggio da X, vuoi aprirlo?».
   useEffect(() => {
-    const tick = async () => {
-      if (document.hidden) return;
+    if (!autenticato) return;
+    let fermo = false;
+    const annunciaVoce = (nuovi: ArrivoWA[], tentativi = 0) => {
+      if (fermo) return;
+      // Non interrompe ORION mentre parla o lavora, e non parla a schermo
+      // nascosto (la scheda resta comunque lì ad aspettare): riprova tra poco.
+      if ((occupatoRef.current || document.hidden) && tentativi < 8) {
+        setTimeout(() => annunciaVoce(nuovi, tentativi + 1), 2500);
+        return;
+      }
+      speakRef.current?.(
+        nuovi.length === 1
+          ? `È arrivato un messaggio da ${chiDi(nuovi[0])}. Vuoi aprirlo?`
+          : `Sono arrivati ${nuovi.length} messaggi: ${nuovi.map(chiDi).slice(0, 3).join(", ")}. Vuoi aprirli?`
+      );
+    };
+    const controlla = async () => {
+      if (fermo) return;
       try {
-        const r = await fetch(`/api/proattiva?dopo=${encodeURIComponent(ultimoCheck.current)}`);
-        const d: { nuoviMessaggi?: { id: number; cliente: string }[] } = await r.json();
-        ultimoCheck.current = new Date().toISOString();
-        const nuovi = (d.nuoviMessaggi ?? []).filter((m) => !messaggiVisti.current.has(m.id));
-        if (nuovi.length) {
-          nuovi.forEach((m) => messaggiVisti.current.add(m.id));
-          const primo = nuovi[0];
-          setNotifica({
-            testo: nuovi.length === 1 ? `${primo.cliente} ha risposto` : `${nuovi.length} nuovi messaggi`,
-            cliente: primo.cliente,
-          });
+        const r = await fetch("/api/whatsapp/arrivi");
+        if (!r.ok) return;
+        const d: { arrivi?: ArrivoWA[] } = await r.json();
+        const nuovi = (d.arrivi ?? []).filter((a) => !annunciati.current.has(a.id));
+        if (!nuovi.length) return;
+        nuovi.forEach((a) => annunciati.current.add(a.id));
+        setAnnuncio((prev) => [...prev, ...nuovi]);
+        try {
+          canaleNucleo.current?.postMessage({ tipo: "azione", nome: "messaggio", testo: `✉️ ${chiDi(nuovi[0])}` });
+        } catch {
+          /* noop */
         }
+        annunciaVoce(nuovi);
       } catch {
         /* offline o errore: si riprova al prossimo giro */
       }
     };
-    const id = setInterval(tick, 90000);
-    return () => clearInterval(id);
-  }, []);
+    void controlla();
+    const id = setInterval(controlla, 25000);
+    return () => {
+      fermo = true;
+      clearInterval(id);
+    };
+  }, [autenticato]);
 
   const inviaTesto = (e: React.FormEvent) => {
     e.preventDefault();
     const t = testoInput.trim();
     if (!t || loading) return;
     setTestoInput("");
+    // Se sta rispondendo a un messaggio, il testo scritto È la risposta.
+    if (rispostaA) {
+      setBozzaRisposta(t);
+      return;
+    }
     inviaAOrion(t);
   };
 
@@ -1287,18 +1488,22 @@ export default function Home() {
               <span className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">CONVERSAZIONE</span>
             </div>
             <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={`fade-in max-w-[88%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                    m.role === "user"
-                      ? "ml-auto rounded-br-sm bg-cyan-500/20 text-cyan-50"
-                      : "rounded-bl-sm bg-white/8 text-slate-100"
-                  }`}
-                >
-                  {m.content}
-                </div>
-              ))}
+              {messages.map((m, i) =>
+                m.arrivo ? (
+                  <BollaArrivo key={i} a={m.arrivo} onRispondi={() => avviaRisposta(m.arrivo!)} />
+                ) : (
+                  <div
+                    key={i}
+                    className={`fade-in max-w-[88%] whitespace-pre-wrap rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
+                      m.role === "user"
+                        ? "ml-auto rounded-br-sm bg-cyan-500/20 text-cyan-50"
+                        : "rounded-bl-sm bg-white/8 text-slate-100"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
+                )
+              )}
               {interim && (
                 <div className="ml-auto max-w-[88%] rounded-2xl rounded-br-sm border border-cyan-400/20 bg-cyan-500/10 px-3.5 py-2 text-sm italic text-cyan-200/80">
                   {interim}…
@@ -1519,38 +1724,98 @@ export default function Home() {
             </div>
             <div className="flex-1 space-y-3 overflow-auto pr-1">
               {messages.length === 0 && <p className="text-sm text-slate-500">Ancora niente.</p>}
-              {messages.map((m, i) => (
-                <div
-                  key={i}
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm ${
-                    m.role === "user"
-                      ? "ml-auto rounded-br-sm bg-cyan-500/20 text-cyan-50"
-                      : "rounded-bl-sm bg-white/8 text-slate-100"
-                  }`}
-                >
-                  {m.content}
-                </div>
-              ))}
+              {messages.map((m, i) =>
+                m.arrivo ? (
+                  <BollaArrivo key={i} a={m.arrivo} onRispondi={() => avviaRisposta(m.arrivo!)} />
+                ) : (
+                  <div
+                    key={i}
+                    className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm ${
+                      m.role === "user"
+                        ? "ml-auto rounded-br-sm bg-cyan-500/20 text-cyan-50"
+                        : "rounded-bl-sm bg-white/8 text-slate-100"
+                    }`}
+                  >
+                    {m.content}
+                  </div>
+                )
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {notifica && (
-        <div className="fade-in fixed left-1/2 top-16 z-40 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-cyan-400/40 bg-cyan-500/15 px-3.5 py-2.5 text-sm text-cyan-50 shadow-lg backdrop-blur">
-          <span className="size-2 shrink-0 rounded-full bg-cyan-300 shadow-[0_0_8px] shadow-cyan-300" />
-          <button
-            onClick={() => {
-              inviaAOrion(`Mostra i messaggi di ${notifica.cliente}`);
-              setNotifica(null);
-            }}
-            className="font-medium hover:underline"
-          >
-            {notifica.testo} — tocca per vedere
-          </button>
-          <button onClick={() => setNotifica(null)} className="text-cyan-200/60 hover:text-cyan-100">
-            <IconClose className="h-3.5 w-3.5" />
-          </button>
+      {/* L'ANNUNCIO della posta: «È arrivato un messaggio da X, vuoi aprirlo?» */}
+      {annuncio.length > 0 && !rispostaA && (
+        <div
+          className="fade-in rounded-2xl border border-emerald-400/30 bg-[#081712]/95 p-4 shadow-2xl backdrop-blur"
+          style={{ position: "fixed", right: 20, bottom: 96, width: 320, zIndex: 40 }}
+        >
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-emerald-100">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-base">📩</span>
+            {annuncio.length === 1 ? `Messaggio da ${chiDi(annuncio[0])}` : `${annuncio.length} nuovi messaggi`}
+          </div>
+          {annuncio.length === 1 && annuncio[0].tipo === "testo" && annuncio[0].contenuto && (
+            <p className="mb-2 line-clamp-2 text-xs text-slate-300/80">{annuncio[0].contenuto}</p>
+          )}
+          {annuncio.length === 1 && annuncio[0].tipo !== "testo" && (
+            <p className="mb-2 text-xs text-slate-300/80">
+              {annuncio[0].tipo === "audio" ? "🎙 Messaggio vocale" : annuncio[0].tipo === "foto" ? "📷 Foto" : annuncio[0].tipo === "video" ? "🎬 Video" : "📎 Documento"}
+            </p>
+          )}
+          {annuncio.length > 1 && <p className="mb-2 text-xs text-slate-300/80">{annuncio.map(chiDi).join(", ")}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={apriAnnunciati}
+              className="flex-1 rounded-lg border border-emerald-400/40 bg-emerald-400/20 px-3 py-1.5 text-sm font-medium text-emerald-50 hover:bg-emerald-400/30"
+            >
+              Apri
+            </button>
+            <button
+              onClick={() => setAnnuncio([])}
+              className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:bg-white/5"
+            >
+              Più tardi
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] text-slate-500">A voce: «sì» per aprire · «più tardi» per rimandare</p>
+        </div>
+      )}
+
+      {/* LA RISPOSTA: dettata o scritta, parte con le parole esatte del titolare. */}
+      {rispostaA && (
+        <div
+          className="fade-in rounded-2xl border border-cyan-400/30 bg-[#081420]/95 p-4 shadow-2xl backdrop-blur"
+          style={{ position: "fixed", right: 20, bottom: 96, width: 320, zIndex: 40 }}
+        >
+          <div className="mb-1 flex items-center justify-between text-sm font-semibold text-cyan-100">
+            <span>↩︎ Risposta a {chiDi(rispostaA)}</span>
+            <button onClick={annullaRisposta} className="text-cyan-200/50 hover:text-cyan-100" title="Annulla">
+              <IconClose className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {bozzaRisposta === null ? (
+            <p className="text-xs text-slate-400">Detta la risposta a voce, oppure scrivila qui sotto e premi invio.</p>
+          ) : (
+            <>
+              <p className="mb-2 rounded-lg bg-white/5 p-2 text-sm text-slate-100">«{bozzaRisposta}»</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void confermaBozza()}
+                  className="flex-1 rounded-lg border border-cyan-400/40 bg-cyan-400/20 px-3 py-1.5 text-sm font-medium text-cyan-50 hover:bg-cyan-400/30"
+                >
+                  Invia
+                </button>
+                <button
+                  onClick={() => setBozzaRisposta(null)}
+                  className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:bg-white/5"
+                >
+                  Riprova
+                </button>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-500">A voce: «sì, invia» oppure «annulla»</p>
+            </>
+          )}
         </div>
       )}
 

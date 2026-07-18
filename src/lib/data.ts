@@ -136,6 +136,8 @@ export type Comunicazione = {
   allegato_nome: string | null;
   allegato_url: string | null;
   stato: string;
+  letto?: number; // 0 = nuovo (da annunciare), 1 = aperto dal titolare
+  telefono?: string | null; // mittente: per rispondere anche a numeri nuovi
   created_at: string;
 };
 
@@ -2054,16 +2056,19 @@ export function logCommunication(c: {
   allegato_nome?: string | null;
   allegato_url?: string | null;
   stato?: string;
+  telefono?: string | null;
 }): Comunicazione {
   const r = db()
     .prepare(
-      `INSERT INTO comunicazioni (tenant_id, cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, created_at)
-       VALUES (?, ?, ?, 'whatsapp', ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO comunicazioni (tenant_id, cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, letto, telefono, created_at)
+       VALUES (?, ?, ?, 'whatsapp', ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       T(), c.cliente_id ?? null, c.direzione, c.tipo ?? "testo", c.contenuto ?? null,
       c.allegato_nome ?? null, c.allegato_url ?? null,
-      c.stato ?? (c.direzione === "out" ? "inviato" : "ricevuto"), nowISO()
+      c.stato ?? (c.direzione === "out" ? "inviato" : "ricevuto"),
+      c.direzione === "in" ? 0 : 1, // gli arrivi nascono "da annunciare"
+      c.telefono ?? null, nowISO()
     );
   return db()
     .prepare(
@@ -2089,6 +2094,36 @@ export function messaggiInArrivoDopo(iso: string): Comunicazione[] {
        WHERE cm.tenant_id = ? AND cm.direzione = 'in' AND cm.created_at > ? ORDER BY cm.created_at`
     )
     .all(T(), iso) as Comunicazione[];
+}
+
+// ── Posta in arrivo (annuncio → apertura → risposta) ────────────────────────
+
+// I messaggi dei clienti non ancora aperti dal titolare (ordine di arrivo).
+export function arriviNonLetti(limite = 12): Comunicazione[] {
+  return db()
+    .prepare(
+      `SELECT cm.*, c.nome AS cliente_nome, COALESCE(cm.telefono, c.telefono) AS telefono
+       FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id
+       WHERE cm.tenant_id = ? AND cm.direzione = 'in' AND cm.letto = 0
+       ORDER BY cm.id LIMIT ?`
+    )
+    .all(T(), limite) as Comunicazione[];
+}
+
+export function segnaComunicazioniLette(ids: number[]): void {
+  if (!ids.length) return;
+  const segna = db().prepare(`UPDATE comunicazioni SET letto = 1 WHERE tenant_id = ? AND id = ?`);
+  for (const id of ids) segna.run(T(), Number(id));
+}
+
+export function getComunicazione(id: number): Comunicazione | undefined {
+  return db()
+    .prepare(
+      `SELECT cm.*, c.nome AS cliente_nome, COALESCE(cm.telefono, c.telefono) AS telefono
+       FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id
+       WHERE cm.tenant_id = ? AND cm.id = ?`
+    )
+    .get(T(), id) as Comunicazione | undefined;
 }
 
 // ── Fatture (con fatturazione elettronica SDI) ──────────────────────────────

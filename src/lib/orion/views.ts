@@ -243,7 +243,22 @@ export type Azione =
   | { tipo: "esegui_comando"; comando: string; cwd?: string; etichetta?: string; riporta?: boolean }
   | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string }
   // ORION su misura: ricolora interfaccia e nucleo (null = torna all'originale).
-  | { tipo: "tema"; tema: { accento: string; nucleo?: string | null; sfondo?: string | null; nome?: string | null } | null };
+  | { tipo: "tema"; tema: { accento: string; nucleo?: string | null; sfondo?: string | null; nome?: string | null } | null }
+  // La bolla del messaggio WhatsApp in arrivo: si apre in chat, media inclusi.
+  | {
+      tipo: "apri_messaggio";
+      arrivo: {
+        id: number;
+        cliente: string | null;
+        cliente_id?: number | null;
+        telefono: string | null;
+        tipo: string;
+        contenuto: string | null;
+        allegato_url: string | null;
+        allegato_nome: string | null;
+        quando: string;
+      };
+    };
 
 // Pillola tappabile mostrata dopo una risposta: una frase breve che l'utente
 // direbbe ("Fagli la fattura"), che al tap viene inviata come suo messaggio.

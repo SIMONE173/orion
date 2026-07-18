@@ -94,6 +94,7 @@ import {
   type EntitaEsterna,
 } from "../data";
 import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti } from "../data";
+import { arriviNonLetti, segnaComunicazioniLette, getComunicazione } from "../data";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
 import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
 import { trasmettiFattura, sdiConfigurato } from "../sdi";
@@ -742,6 +743,33 @@ export const TOOLS: Anthropic.Tool[] = [
     description:
       "PONTE UNIVERSALE — apre il pannello CONSEGNE AL GESTIONALE: la coda delle modifiche (appuntamenti, clienti) da portare nel software del professionista quando il canale d'uscita è in modalità Ponte (senza API). Ogni voce ha il copia-incolla perfetto e la spunta 'fatto'. Usalo quando l'utente chiede 'cosa devo riportare nel gestionale?', 'le consegne', 'la coda', o dopo aver attivato il Ponte, o quando nel briefing noti consegne accumulate.",
     input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "messaggi_in_arrivo",
+    description:
+      "POSTA IN ARRIVO WhatsApp — elenca i messaggi dei clienti non ancora aperti dal titolare (l'app li annuncia da sola appena arrivano, anche senza di te). Usalo quando l'utente chiede 'che messaggi ho', 'chi mi ha scritto', 'ci sono novità dai clienti'.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
+    name: "apri_messaggio",
+    description:
+      "Apre UN messaggio in arrivo e lo segna come letto: il contenuto compare in chat, e se è un vocale/foto/video l'app lo riproduce o lo mostra da sola. Usalo quando l'utente dice 'apri il messaggio', 'fammelo vedere', 'sentiamo il vocale', o dopo messaggi_in_arrivo se chiede di aprirne uno.",
+    input_schema: { type: "object", properties: { id: { type: "number", description: "id del messaggio (da messaggi_in_arrivo)" } }, required: ["id"] },
+  },
+  {
+    name: "rispondi_whatsapp",
+    description:
+      "Invia su WhatsApp la RISPOSTA DEL TITOLARE al cliente, con le sue parole ESATTE: niente firme, niente rielaborazioni (al massimo ripulisci gli intercalari se dettata a voce). Destinatario in ordine di precisione: comunicazione_id del messaggio a cui risponde, oppure nome del cliente, oppure numero di telefono. Usalo quando l'utente dice 'rispondigli che…', 'digli che…', 'scrivile che…'. Se Meta non è ancora collegato l'invio risulta simulato: dillo con onestà.",
+    input_schema: {
+      type: "object",
+      properties: {
+        comunicazione_id: { type: "number", description: "id del messaggio a cui si risponde" },
+        cliente: { type: "string", description: "nome del cliente destinatario" },
+        telefono: { type: "string", description: "numero diretto (se non in rubrica)" },
+        testo: { type: "string", description: "la risposta, con le parole del titolare" },
+      },
+      required: ["testo"],
+    },
   },
   {
     name: "configura_risponditore",
@@ -2216,6 +2244,87 @@ const handlers: Record<string, Handler> = {
     return {
       result: { ok: true, in_coda: consegne.length },
       vista: { tipo: "consegne", dati: { consegne } },
+    };
+  },
+
+  messaggi_in_arrivo: () => {
+    const arrivi = arriviNonLetti();
+    return {
+      result: {
+        ok: true,
+        nuovi: arrivi.length,
+        messaggi: arrivi.map((m) => ({
+          id: m.id,
+          da: m.cliente_nome ?? m.telefono ?? "numero sconosciuto",
+          tipo: m.tipo,
+          anteprima: (m.contenuto ?? `[${m.tipo}]`).slice(0, 140),
+          quando: m.created_at,
+        })),
+        nota: arrivi.length === 0 ? "Nessun messaggio nuovo: dillo in una frase." : "Riassumi chi ha scritto e proponi di aprirli.",
+      },
+    };
+  },
+
+  apri_messaggio: (input) => {
+    const id = Number((input as { id?: number }).id);
+    const com = getComunicazione(id);
+    if (!com || com.direzione !== "in") return { result: { ok: false, errore: "messaggio non trovato" } };
+    segnaComunicazioniLette([id]);
+    const arrivo = {
+      id: com.id,
+      cliente: com.cliente_nome ?? null,
+      cliente_id: com.cliente_id,
+      telefono: com.telefono ?? null,
+      tipo: com.tipo,
+      contenuto: com.contenuto,
+      allegato_url: com.allegato_url,
+      allegato_nome: com.allegato_nome,
+      quando: com.created_at,
+    };
+    return {
+      result: {
+        ok: true,
+        da: arrivo.cliente ?? arrivo.telefono ?? "sconosciuto",
+        tipo: com.tipo,
+        testo: com.contenuto,
+        nota:
+          com.tipo === "testo"
+            ? "Il messaggio compare in chat: riportane il senso con naturalezza, senza rileggerlo parola per parola."
+            : "Il contenuto (vocale/foto/video) si apre e si riproduce da solo in chat: NON descriverlo, invita solo a guardarlo o ascoltarlo.",
+      },
+      azione: { tipo: "apri_messaggio", arrivo },
+    };
+  },
+
+  rispondi_whatsapp: async (input) => {
+    const i = input as { comunicazione_id?: number; cliente?: string; telefono?: string; testo?: string };
+    const testo = String(i.testo ?? "").trim().slice(0, 2000);
+    if (!testo) return { result: { ok: false, errore: "testo vuoto" } };
+    const com = i.comunicazione_id ? getComunicazione(Number(i.comunicazione_id)) : undefined;
+    const cliente =
+      (com?.cliente_id ? getCliente(com.cliente_id) : undefined) ??
+      (i.cliente ? cercaCliente(String(i.cliente))[0] : undefined);
+    const telefono = com?.telefono ?? cliente?.telefono ?? (i.telefono ? String(i.telefono) : null);
+    if (!telefono) return { result: { ok: false, errore: "nessun numero di telefono per il destinatario" } };
+    const esito = await inviaMessaggioWhatsApp(telefono, testo);
+    if (!esito.ok) return { result: { ok: false, errore: esito.errore ?? "invio fallito" } };
+    logCommunication({
+      cliente_id: cliente?.id ?? com?.cliente_id ?? null,
+      direzione: "out",
+      tipo: "testo",
+      contenuto: testo,
+      telefono,
+      stato: esito.simulato ? "simulato" : "inviato",
+    });
+    return {
+      result: {
+        ok: true,
+        inviato_a: cliente?.nome ?? telefono,
+        simulato: Boolean(esito.simulato),
+        nota: esito.simulato
+          ? "WhatsApp non è ancora collegato: la risposta è registrata ma NON è partita davvero — dillo con onestà."
+          : "Inviata davvero su WhatsApp: conferma in una frase.",
+      },
     };
   },
 

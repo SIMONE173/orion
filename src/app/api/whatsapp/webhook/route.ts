@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getClienteByTelefono, logCommunication, tenantDaPhoneNumberId } from "@/lib/data";
+import { inviaPushATutti } from "@/lib/push";
 import { scaricaMediaWhatsApp } from "@/lib/whatsapp";
 import { gestisciMessaggioCliente } from "@/lib/orion/segreteria";
 import { primoTenant } from "@/lib/auth";
@@ -99,17 +100,27 @@ export async function POST(req: NextRequest) {
           contenuto: contenuto ?? (tipo !== "testo" ? `[${tipo}]` : null),
           allegato_nome,
           allegato_url,
+          telefono,
           stato: "ricevuto",
         });
 
         // Risposte automatiche: offerte di slot → conferme scriptate →
         // SEGRETERIA AI (se accesa: assistita o autopilota). Un solo ingresso.
+        let rispostaInviata = false;
         if (tipo === "testo" && contenuto) {
           try {
-            await gestisciMessaggioCliente({ cliente, telefono, testo: contenuto });
+            rispostaInviata = await gestisciMessaggioCliente({ cliente, telefono, testo: contenuto });
           } catch (e) {
             console.error("[whatsapp webhook] risposta automatica:", e);
           }
+        }
+
+        // Se la segreteria non ha gestito da sola, il titolare va avvisato
+        // subito anche ad app chiusa (in app ci pensa l'annuncio vocale).
+        if (!rispostaInviata) {
+          const chi = cliente?.nome ?? telefono;
+          const anteprima = (contenuto ?? `[${tipo}]`).slice(0, 90);
+          void inviaPushATutti({ titolo: "📩 Messaggio WhatsApp", corpo: `${chi}: ${anteprima}`, url: "/app" }).catch(() => {});
         }
       }
     });

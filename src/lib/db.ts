@@ -132,6 +132,8 @@ function migrate(d: Database.Database) {
       allegato_nome TEXT,
       allegato_url TEXT,
       stato TEXT NOT NULL DEFAULT 'inviato',
+      letto INTEGER NOT NULL DEFAULT 1,
+      telefono TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -656,6 +658,11 @@ function migrate(d: Database.Database) {
   const alters = [
     "ALTER TABLE profili ADD COLUMN risponditore TEXT", // segreteria clienti: spenta | assistita | autopilota
     "ALTER TABLE comunicazioni ADD COLUMN allegato_url TEXT",
+    // Posta in arrivo: i messaggi dei clienti hanno un ciclo di vita
+    // nuovo (letto=0) → aperto dal titolare (letto=1). Il telefono del
+    // mittente serve per rispondere anche ai numeri non in rubrica.
+    "ALTER TABLE comunicazioni ADD COLUMN letto INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE comunicazioni ADD COLUMN telefono TEXT",
     "ALTER TABLE promemoria ADD COLUMN notificato INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE clienti ADD COLUMN tenant_id INTEGER",
     "ALTER TABLE appuntamenti ADD COLUMN tenant_id INTEGER",
