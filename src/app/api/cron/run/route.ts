@@ -20,6 +20,7 @@ import { runWithTenant } from "@/lib/tenant";
 import { backupGiornaliero, controllaIntegrita, percorsoBackupOggi } from "@/lib/db";
 import { caricaBackupRemoto } from "@/lib/backup-remoto";
 import { consegnaEventiUscita } from "@/lib/uscita";
+import { sincronizzaEmailArrivi } from "@/lib/posta";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -225,6 +226,16 @@ export async function POST(req: NextRequest) {
         await sincronizzaCalendario();
       } catch (e) {
         console.error("[cron] sync calendario:", e instanceof Error ? e.message : e);
+      }
+    });
+
+    // Posta email: anche ad app chiusa, le mail IMPORTANTI diventano push
+    // («✉️ Mail importante») e trovano l'annuncio pronto alla prossima apertura.
+    await runWithTenant(tenantId, async () => {
+      try {
+        await sincronizzaEmailArrivi();
+      } catch (e) {
+        console.error("[cron] posta email:", e instanceof Error ? e.message : e);
       }
     });
   }

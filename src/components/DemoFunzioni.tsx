@@ -11,11 +11,12 @@ import { OrionCore } from "./OrionCore";
 // Ogni scena è coreografata su un orologio (ms) che riparte da capo da solo.
 // ──────────────────────────────────────────────────────────────────────────
 
-export type DemoId = "agenda" | "segreteria" | "team" | "strumenti" | "mano" | "fortezza" | "voce" | "misura";
+export type DemoId = "agenda" | "segreteria" | "posta" | "team" | "strumenti" | "mano" | "fortezza" | "voce" | "misura";
 
 const TITOLI: Record<DemoId, string> = {
   agenda: "Un'agenda che si difende da sola",
   segreteria: "Risponde ai clienti al posto tuo",
+  posta: "La posta che si annuncia da sola",
   team: "Il tuo team, dentro",
   strumenti: "Si aggancia ai tuoi strumenti",
   mano: "La Mano: usa i tuoi programmi lui",
@@ -1155,6 +1156,134 @@ function ScenaSegreteria() {
   );
 }
 
+// ── SCENA · La posta che si annuncia da sola (email filtrate + annuncio) ─────
+function ScenaPosta() {
+  const T = 15000;
+  const t = useOrologio(T);
+  useSuoni(t, [
+    [250, "avvio"],
+    [800, "pop"], // arriva la newsletter
+    [2000, "bonk"], // silenziata
+    [2600, "pop"], // arriva lo spam
+    [3800, "bonk"], // silenziato
+    [4400, "pop"], // arriva la mail vera
+    [5400, "ding"], // IMPORTANTE
+    [6300, "pop"], // ORION annuncia
+    [8300, "pop"], // «sì, aprila»
+    [9100, "whoosh"], // la mail si apre
+    [11900, "pop"], // la risposta dettata
+    [13000, "ding"], // inviata
+    [13600, "tada"], // timbro
+  ]);
+  const uscita = t > T - 900;
+  const m1Silenziata = t >= 2000;
+  const m2Silenziato = t >= 3800;
+  const m3Importante = t >= 5400;
+
+  const rigaMail = (
+    on: boolean,
+    da: string,
+    oggetto: string,
+    stato: "attesa" | "silenziata" | "importante"
+  ) => (
+    <div
+      style={{
+        display: on ? "block" : "none",
+        padding: "9px 11px",
+        borderRadius: 10,
+        transition: "all .5s",
+        opacity: stato === "silenziata" ? 0.45 : 1,
+        background: stato === "importante" ? "rgba(56,232,255,.12)" : "rgba(255,255,255,.045)",
+        border: `1.5px solid ${stato === "importante" ? "rgba(56,232,255,.6)" : "rgba(255,255,255,.08)"}`,
+      }}
+    >
+      <div style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12.5 }}>
+        <span style={{ color: stato === "importante" ? "#7ff0ff" : "#8fb2c4", fontWeight: 700 }}>{da}</span>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontSize: 10.5,
+            fontWeight: 800,
+            letterSpacing: ".06em",
+            color: stato === "importante" ? "#38e8ff" : stato === "silenziata" ? "#64748b" : "#7fa5b5",
+          }}
+        >
+          {stato === "importante" ? "IMPORTANTE ⚡" : stato === "silenziata" ? "SILENZIATA 🔕" : ""}
+        </span>
+      </div>
+      <div style={{ fontSize: 13.5, color: stato === "silenziata" ? "#7c8ea0" : "#e6f4fa", textDecoration: stato === "silenziata" ? "line-through" : "none", transition: "all .4s" }}>
+        {oggetto}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: "absolute", inset: 0, opacity: uscita ? 0 : 1, transition: "opacity .8s" }}>
+      <El on={t >= 250} da="translateY(-8px)" style={{ position: "absolute", left: 0, right: 0, top: 14, textAlign: "center" }}>
+        <span style={{ fontSize: 15, color: "#8fb2c4", letterSpacing: ".08em" }}>
+          📬 la tua posta, <strong style={{ color: "#dff6fc" }}>filtrata e annunciata da ORION</strong>
+        </span>
+      </El>
+
+      {/* La casella: ORION separa il rumore da ciò che conta */}
+      <El on={t >= 500} da="translateX(-40px)" style={{ position: "absolute", left: 56, top: 62, width: 330 }}>
+        <Finestra label="EMAIL · IN ARRIVO" style={{ width: "100%", minHeight: 240 }}>
+          <div style={{ padding: 12, display: "grid", gap: 8 }}>
+            {rigaMail(t >= 800, "newsletter@offerte.it", "SOLO OGGI −50% SU TUTTO!!!", m1Silenziata ? "silenziata" : "attesa")}
+            {rigaMail(t >= 2600, "premi@lotteria.win", "Hai vinto un iPhone 🎁", m2Silenziato ? "silenziata" : "attesa")}
+            {rigaMail(t >= 4400, "Avv. Marchi", "Preventivo urgente — pratica Rossi", m3Importante ? "importante" : "attesa")}
+          </div>
+        </Finestra>
+      </El>
+
+      {/* Il nucleo annuncia SOLO ciò che conta */}
+      <div style={{ position: "absolute", left: 430, top: 96, opacity: t >= 800 ? 1 : 0, transition: "opacity .6s" }}>
+        <OrionCore state={fra(t, 4400, 6200) ? "thinking" : fra(t, 6300, 8200) ? "speaking" : "idle"} size={74} />
+      </div>
+      <El on={t >= 6300} da="translateY(10px)" style={{ position: "absolute", left: 350, top: 196, width: 240 }}>
+        <Bolla on style={{ fontSize: 13, textAlign: "center" }}>
+          «È arrivata una mail importante dall&apos;avvocato Marchi. Vuoi aprirla?»
+        </Bolla>
+      </El>
+      <El on={t >= 8300} da="translateY(10px)" style={{ position: "absolute", left: 404, top: 288, width: 130 }}>
+        <Bolla mia on style={{ fontSize: 13, textAlign: "center" }}>
+          «Sì, aprila»
+        </Bolla>
+      </El>
+
+      {/* La mail aperta + la risposta con le parole del titolare */}
+      <El on={t >= 9100} da="translateX(40px)" style={{ position: "absolute", right: 48, top: 62, width: 320 }}>
+        <Finestra label="✉️ AVV. MARCHI · Re: automatico" style={{ width: "100%" }}>
+          <div style={{ padding: 12 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#f2fbff" }}>Preventivo urgente — pratica Rossi</div>
+            <div style={{ fontSize: 12.5, color: "#c9dee8", marginTop: 6, lineHeight: 1.5 }}>
+              {digita("Gentile dottore, mi conferma il preventivo entro venerdì? Cordiali saluti.", t, 9300)}
+            </div>
+            <div style={{ marginTop: 10, display: t >= 11900 ? "block" : "none" }}>
+              <div style={{ fontSize: 10.5, color: "#7fd7ea", letterSpacing: ".1em", fontWeight: 800 }}>🎙 LA TUA RISPOSTA, DETTATA</div>
+              <div style={{ fontSize: 12.5, color: "#dff6fc", marginTop: 4 }}>{digita("«Confermato: lo invio venerdì mattina.»", t, 12000)}</div>
+            </div>
+            <div style={{ marginTop: 8, display: t >= 13000 ? "inline-block" : "none", padding: "5px 10px", borderRadius: 999, border: "1.5px solid rgba(52,211,153,.55)", background: "rgba(52,211,153,.13)", fontSize: 11, fontWeight: 800, color: "#6ee7b7" }}>
+              INVIATA · Re: Preventivo urgente ✓
+            </div>
+          </div>
+        </Finestra>
+      </El>
+
+      {/* Il digest del silenzio: il regalo nascosto */}
+      <El on={t >= 13000} da="translateY(12px)" style={{ position: "absolute", left: 56, top: 330, width: 330 }}>
+        <div style={{ borderRadius: 14, border: "1px solid rgba(56,232,255,.35)", background: "rgba(10,20,28,.96)", padding: "10px 14px", fontSize: 12.5, color: "#bfe9f5" }}>
+          Oggi ORION ti ha tolto di torno <strong style={{ color: "#f2fbff" }}>12 mail inutili</strong>. Tu hai letto solo quella che conta.
+        </div>
+      </El>
+
+      <Timbro on={t >= 13600} style={{ position: "absolute", left: 400, bottom: 36 }}>
+        SOLO CIÒ CHE CONTA ✓
+      </Timbro>
+    </div>
+  );
+}
+
 // ── SCENA · La Mano: ORION usa i programmi del professionista ────────────────
 function ScenaMano() {
   const T = 14500;
@@ -1262,6 +1391,7 @@ function ScenaMano() {
 const SCENE: Record<DemoId, () => ReactNode> = {
   agenda: () => <ScenaAgenda />,
   segreteria: () => <ScenaSegreteria />,
+  posta: () => <ScenaPosta />,
   mano: () => <ScenaMano />,
   team: () => <ScenaTeam />,
   strumenti: () => <ScenaStrumenti />,
@@ -1434,6 +1564,7 @@ export function DemoFunzioni({ id, onClose }: { id: DemoId; onClose: () => void 
 const DURATE_SCENE: Record<DemoId, number> = {
   agenda: 14500,
   segreteria: 14500,
+  posta: 15000,
   mano: 14500,
   team: 14000,
   strumenti: 14000,

@@ -244,14 +244,17 @@ export type Azione =
   | { tipo: "scrivi_file"; percorso: string; contenuto: string; etichetta?: string }
   // ORION su misura: ricolora interfaccia e nucleo (null = torna all'originale).
   | { tipo: "tema"; tema: { accento: string; nucleo?: string | null; sfondo?: string | null; nome?: string | null } | null }
-  // La bolla del messaggio WhatsApp in arrivo: si apre in chat, media inclusi.
+  // La bolla della posta in arrivo (WhatsApp o email): si apre in chat, media inclusi.
   | {
       tipo: "apri_messaggio";
       arrivo: {
         id: number;
+        canale?: "whatsapp" | "email";
         cliente: string | null;
         cliente_id?: number | null;
         telefono: string | null;
+        mittente?: string | null;
+        oggetto?: string | null;
         tipo: string;
         contenuto: string | null;
         allegato_url: string | null;

@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-18", testo: "La posta ora ha un cervello: ORION riconosce le email importanti e ti annuncia solo quelle — newsletter e spam silenziati e contati nel digest" },
   { data: "2026-07-17", testo: "«È arrivato un messaggio da Sara, vuoi aprirlo?» — ORION ti annuncia i WhatsApp dei clienti, li apre in chat (vocali, foto e video inclusi) e risponde con le tue parole" },
   { data: "2026-07-17", testo: "La Mano di ORION: sul Desktop usa DAVVERO il tuo software al posto tuo — apre, clicca, scrive e verifica, mentre guardi" },
   { data: "2026-07-17", testo: "ORION cambia volto: la conversazione diventa una chat, il nucleo vola in alto — e sul desktop resta con te sopra ogni finestra" },

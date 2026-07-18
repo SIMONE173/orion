@@ -137,7 +137,10 @@ export type Comunicazione = {
   allegato_url: string | null;
   stato: string;
   letto?: number; // 0 = nuovo (da annunciare), 1 = aperto dal titolare
-  telefono?: string | null; // mittente: per rispondere anche a numeri nuovi
+  telefono?: string | null; // mittente WhatsApp: per rispondere anche a numeri nuovi
+  mittente?: string | null; // mittente email (indirizzo, per il Re:)
+  oggetto?: string | null; // oggetto della mail
+  importanza?: string | null; // importante | normale | rumore
   created_at: string;
 };
 
@@ -2051,24 +2054,29 @@ export function analisiEconomica(dataDa: string, dataA: string) {
 export function logCommunication(c: {
   cliente_id?: number | null;
   direzione: "in" | "out";
+  canale?: "whatsapp" | "email";
   tipo?: string;
   contenuto?: string | null;
   allegato_nome?: string | null;
   allegato_url?: string | null;
   stato?: string;
   telefono?: string | null;
+  mittente?: string | null; // indirizzo email del mittente (per rispondere)
+  oggetto?: string | null; // oggetto della mail
+  importanza?: string | null; // importante | normale | rumore
+  letto?: 0 | 1; // forza il ciclo di annuncio (default: gli arrivi nascono da annunciare)
 }): Comunicazione {
   const r = db()
     .prepare(
-      `INSERT INTO comunicazioni (tenant_id, cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, letto, telefono, created_at)
-       VALUES (?, ?, ?, 'whatsapp', ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO comunicazioni (tenant_id, cliente_id, direzione, canale, tipo, contenuto, allegato_nome, allegato_url, stato, letto, telefono, mittente, oggetto, importanza, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
-      T(), c.cliente_id ?? null, c.direzione, c.tipo ?? "testo", c.contenuto ?? null,
+      T(), c.cliente_id ?? null, c.direzione, c.canale ?? "whatsapp", c.tipo ?? "testo", c.contenuto ?? null,
       c.allegato_nome ?? null, c.allegato_url ?? null,
       c.stato ?? (c.direzione === "out" ? "inviato" : "ricevuto"),
-      c.direzione === "in" ? 0 : 1, // gli arrivi nascono "da annunciare"
-      c.telefono ?? null, nowISO()
+      c.letto ?? (c.direzione === "in" ? 0 : 1), // gli arrivi nascono "da annunciare"
+      c.telefono ?? null, c.mittente ?? null, c.oggetto ?? null, c.importanza ?? null, nowISO()
     );
   return db()
     .prepare(

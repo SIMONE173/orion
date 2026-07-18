@@ -95,6 +95,7 @@ import {
 } from "../data";
 import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti } from "../data";
 import { arriviNonLetti, segnaComunicazioniLette, getComunicazione } from "../data";
+import { silenziateOggi } from "../posta";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
 import { generaFatturaPA, destinoFattura, type ParteFattura } from "../fatturapa";
 import { trasmettiFattura, sdiConfigurato } from "../sdi";
@@ -747,14 +748,29 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "messaggi_in_arrivo",
     description:
-      "POSTA IN ARRIVO WhatsApp — elenca i messaggi dei clienti non ancora aperti dal titolare (l'app li annuncia da sola appena arrivano, anche senza di te). Usalo quando l'utente chiede 'che messaggi ho', 'chi mi ha scritto', 'ci sono novità dai clienti'.",
+      "POSTA IN ARRIVO — elenca WhatsApp ed EMAIL IMPORTANTI non ancora aperti dal titolare (l'app li annuncia da sola appena arrivano, anche senza di te; newsletter e spam vengono silenziati e contati nel digest). Usalo quando l'utente chiede 'che messaggi ho', 'chi mi ha scritto', 'ho mail nuove', 'ci sono novità dai clienti'.",
     input_schema: { type: "object", properties: {} },
   },
   {
     name: "apri_messaggio",
     description:
-      "Apre UN messaggio in arrivo e lo segna come letto: il contenuto compare in chat, e se è un vocale/foto/video l'app lo riproduce o lo mostra da sola. Usalo quando l'utente dice 'apri il messaggio', 'fammelo vedere', 'sentiamo il vocale', o dopo messaggi_in_arrivo se chiede di aprirne uno.",
+      "Apre UN elemento della posta in arrivo (messaggio WhatsApp o email) e lo segna come letto: il contenuto compare in chat, e se è un vocale/foto/video l'app lo riproduce o lo mostra da sola. Usalo quando l'utente dice 'apri il messaggio', 'apri la mail', 'fammelo vedere', 'sentiamo il vocale', o dopo messaggi_in_arrivo se chiede di aprirne uno.",
     input_schema: { type: "object", properties: { id: { type: "number", description: "id del messaggio (da messaggi_in_arrivo)" } }, required: ["id"] },
+  },
+  {
+    name: "rispondi_email",
+    description:
+      "Invia per email la RISPOSTA DEL TITOLARE, con le sue parole ESATTE (niente firme aggiunte, niente rielaborazioni; al massimo ripulisci gli intercalari se dettata). L'oggetto diventa automaticamente «Re: …» se si risponde a una mail. Destinatario: comunicazione_id della mail a cui risponde, oppure indirizzo diretto in 'a'. Usalo quando l'utente dice 'rispondi alla mail che…', 'scrivile per email che…'. Se la casella non è collegata l'invio è simulato: dillo con onestà.",
+    input_schema: {
+      type: "object",
+      properties: {
+        comunicazione_id: { type: "number", description: "id della mail a cui si risponde" },
+        a: { type: "string", description: "indirizzo email diretto (se non si risponde a una mail)" },
+        oggetto: { type: "string", description: "oggetto (ometti per il Re: automatico)" },
+        testo: { type: "string", description: "la risposta, con le parole del titolare" },
+      },
+      required: ["testo"],
+    },
   },
   {
     name: "rispondi_whatsapp",
@@ -2253,14 +2269,20 @@ const handlers: Record<string, Handler> = {
       result: {
         ok: true,
         nuovi: arrivi.length,
+        mail_silenziate_oggi: silenziateOggi(),
         messaggi: arrivi.map((m) => ({
           id: m.id,
-          da: m.cliente_nome ?? m.telefono ?? "numero sconosciuto",
+          canale: m.canale === "email" ? "email" : "whatsapp",
+          da: m.cliente_nome ?? m.mittente ?? m.telefono ?? "sconosciuto",
+          oggetto: m.oggetto ?? undefined,
           tipo: m.tipo,
           anteprima: (m.contenuto ?? `[${m.tipo}]`).slice(0, 140),
           quando: m.created_at,
         })),
-        nota: arrivi.length === 0 ? "Nessun messaggio nuovo: dillo in una frase." : "Riassumi chi ha scritto e proponi di aprirli.",
+        nota:
+          arrivi.length === 0
+            ? "Nessun messaggio nuovo: dillo in una frase (se ci sono mail silenziate oggi, puoi citarle: sono newsletter e promozioni che hai tolto di torno)."
+            : "Riassumi chi ha scritto (e per le email l'oggetto) e proponi di aprirli.",
       },
     };
   },
@@ -2272,9 +2294,12 @@ const handlers: Record<string, Handler> = {
     segnaComunicazioniLette([id]);
     const arrivo = {
       id: com.id,
+      canale: (com.canale === "email" ? "email" : "whatsapp") as "email" | "whatsapp",
       cliente: com.cliente_nome ?? null,
       cliente_id: com.cliente_id,
       telefono: com.telefono ?? null,
+      mittente: com.mittente ?? null,
+      oggetto: com.oggetto ?? null,
       tipo: com.tipo,
       contenuto: com.contenuto,
       allegato_url: com.allegato_url,
@@ -2284,15 +2309,55 @@ const handlers: Record<string, Handler> = {
     return {
       result: {
         ok: true,
-        da: arrivo.cliente ?? arrivo.telefono ?? "sconosciuto",
+        canale: arrivo.canale,
+        da: arrivo.cliente ?? arrivo.mittente ?? arrivo.telefono ?? "sconosciuto",
+        oggetto: arrivo.oggetto ?? undefined,
         tipo: com.tipo,
         testo: com.contenuto,
         nota:
-          com.tipo === "testo"
-            ? "Il messaggio compare in chat: riportane il senso con naturalezza, senza rileggerlo parola per parola."
-            : "Il contenuto (vocale/foto/video) si apre e si riproduce da solo in chat: NON descriverlo, invita solo a guardarlo o ascoltarlo.",
+          arrivo.canale === "email"
+            ? "La mail compare in chat: di' oggetto e senso in due frasi, senza leggere tutto il corpo."
+            : com.tipo === "testo"
+              ? "Il messaggio compare in chat: riportane il senso con naturalezza, senza rileggerlo parola per parola."
+              : "Il contenuto (vocale/foto/video) si apre e si riproduce da solo in chat: NON descriverlo, invita solo a guardarlo o ascoltarlo.",
       },
       azione: { tipo: "apri_messaggio", arrivo },
+    };
+  },
+
+  rispondi_email: async (input) => {
+    const i = input as { comunicazione_id?: number; a?: string; oggetto?: string; testo?: string };
+    const testo = String(i.testo ?? "").trim().slice(0, 4000);
+    if (!testo) return { result: { ok: false, errore: "testo vuoto" } };
+    const com = i.comunicazione_id ? getComunicazione(Number(i.comunicazione_id)) : undefined;
+    const a = com?.mittente ?? (i.a ? String(i.a) : null);
+    if (!a) return { result: { ok: false, errore: "nessun indirizzo per il destinatario" } };
+    const oggetto =
+      (i.oggetto ? String(i.oggetto) : null) ??
+      (com?.oggetto ? (/^re:/i.test(com.oggetto) ? com.oggetto : `Re: ${com.oggetto}`) : "Risposta");
+    const esito = await inviaEmail(a, oggetto, testo);
+    const simulato = !esito.ok && esito.errore === "non_configurato";
+    if (!esito.ok && !simulato) return { result: { ok: false, errore: esito.errore } };
+    logCommunication({
+      cliente_id: com?.cliente_id ?? null,
+      direzione: "out",
+      canale: "email",
+      tipo: "email",
+      contenuto: testo,
+      oggetto,
+      mittente: a,
+      stato: simulato ? "simulato" : "inviato",
+    });
+    return {
+      result: {
+        ok: true,
+        inviata_a: com?.cliente_nome ?? a,
+        oggetto,
+        simulato,
+        nota: simulato
+          ? "La casella email non è ancora collegata: la risposta è registrata ma NON è partita — dillo con onestà."
+          : "Email inviata davvero (con le parole esatte del titolare): conferma in una frase.",
+      },
     };
   },
 

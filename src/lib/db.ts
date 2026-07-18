@@ -137,6 +137,16 @@ function migrate(d: Database.Database) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS email_sync (
+      tenant_id INTEGER PRIMARY KEY,
+      uidvalidity TEXT,
+      ultimo_uid INTEGER NOT NULL DEFAULT 0,
+      ultimo_controllo TEXT,
+      silenziate_oggi INTEGER NOT NULL DEFAULT 0,
+      giorno TEXT,
+      updated_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS fatture (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tenant_id INTEGER NOT NULL,
@@ -663,6 +673,11 @@ function migrate(d: Database.Database) {
     // mittente serve per rispondere anche ai numeri non in rubrica.
     "ALTER TABLE comunicazioni ADD COLUMN letto INTEGER NOT NULL DEFAULT 1",
     "ALTER TABLE comunicazioni ADD COLUMN telefono TEXT",
+    // Posta EMAIL: mittente (indirizzo per rispondere), oggetto e importanza
+    // (importante | normale | rumore — solo le importanti vengono annunciate).
+    "ALTER TABLE comunicazioni ADD COLUMN mittente TEXT",
+    "ALTER TABLE comunicazioni ADD COLUMN oggetto TEXT",
+    "ALTER TABLE comunicazioni ADD COLUMN importanza TEXT",
     "ALTER TABLE promemoria ADD COLUMN notificato INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE clienti ADD COLUMN tenant_id INTEGER",
     "ALTER TABLE appuntamenti ADD COLUMN tenant_id INTEGER",
