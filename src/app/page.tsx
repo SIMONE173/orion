@@ -329,25 +329,10 @@ export default function Vetrina() {
     return () => window.removeEventListener("keydown", suTasto);
   }, [menuProfilo]);
 
-  const chiuso = Boolean(lancio && !lancio.lanciato && new Date(lancio.quando).getTime() > oraTick);
+  // Niente date né conto alla rovescia: chiuso finché il server non dice "lanciato".
+  const chiuso = Boolean(lancio && !lancio.lanciato);
   // Per i tester del collaudo il sito è già aperto (bottoni e download attivi).
   const bloccato = chiuso && !tester;
-  useEffect(() => {
-    if (!chiuso) return;
-    const iv = setInterval(() => setOraTick(Date.now()), 1000);
-    return () => clearInterval(iv);
-  }, [chiuso]);
-  const conto = (() => {
-    if (!chiuso || !lancio) return null;
-    const resto = Math.max(0, new Date(lancio.quando).getTime() - oraTick);
-    const s = Math.floor(resto / 1000);
-    return {
-      g: Math.floor(s / 86400),
-      h: String(Math.floor((s % 86400) / 3600)).padStart(2, "0"),
-      m: String(Math.floor((s % 3600) / 60)).padStart(2, "0"),
-      s: String(s % 60).padStart(2, "0"),
-    };
-  })();
 
   const FUNZIONI: { icona: string; titolo: string; testo: string; demo: DemoId }[] = [
     { icona: "🗓", titolo: "Un'agenda che si difende da sola", testo: "Prenota, conferma, ricorda ai clienti l'appuntamento e riempie i buchi offrendo gli slot liberati alla lista d'attesa. Tu parli, lei lavora.", demo: "agenda" },
@@ -540,14 +525,14 @@ export default function Vetrina() {
             <a href="#funzioni" className="glass cta-secondaria">Guarda cosa fa</a>
           </div>
 
-          {/* Il conto alla rovescia del lancio */}
-          {chiuso && conto && (
+          {/* Il lucchetto del lancio: niente date — si apre quando lo decide il titolare */}
+          {chiuso && (
             <div className="glass" style={{ display: "inline-flex", alignItems: "center", gap: 14, marginTop: 24, padding: "12px 22px", borderRadius: 16, border: "1px solid rgba(56,232,255,0.3)" }}>
               <span style={{ fontSize: 16 }}>🔒</span>
               <div style={{ textAlign: "left" }}>
-                <div style={{ fontSize: 12, letterSpacing: "0.14em", color: "#7fd7ea", fontWeight: 700 }}>ORION APRE IL 21 LUGLIO, ORE 19:00</div>
-                <div style={{ fontVariantNumeric: "tabular-nums", fontSize: "clamp(20px,3.4vw,28px)", fontWeight: 800, color: "#e8fbff", letterSpacing: "0.06em" }}>
-                  {conto.g}g : {conto.h}h : {conto.m}m : {conto.s}s
+                <div style={{ fontSize: 12, letterSpacing: "0.14em", color: "#7fd7ea", fontWeight: 700 }}>ORION STA ARRIVANDO</div>
+                <div style={{ fontSize: "clamp(20px,3.4vw,28px)", fontWeight: 800, color: "#e8fbff", letterSpacing: "0.08em" }}>
+                  PRESTO DISPONIBILE
                 </div>
               </div>
             </div>
@@ -662,7 +647,7 @@ export default function Vetrina() {
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>Nel browser, subito</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Niente installazioni: apri e parla.</p>
             {bloccato ? (
-              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
+              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Presto disponibile</span>
             ) : (
               <a href="/app" className="cta-primaria" style={{ display: "inline-block" }}>Apri ORION</a>
             )}
@@ -680,7 +665,7 @@ export default function Vetrina() {
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>ORION per Mac</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Con i superpoteri: stampa, app, file, gesti, affiancamento.</p>
             {bloccato ? (
-              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
+              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Presto disponibile</span>
             ) : scaricabili.mac ? (
               <a href="/api/scarica?os=mac" className="cta-primaria" style={{ display: "inline-block" }}>Scarica per Mac</a>
             ) : (
@@ -700,7 +685,7 @@ export default function Vetrina() {
             <h3 style={{ margin: "10px 0 6px", color: "#dff6fc" }}>ORION per Windows</h3>
             <p style={{ color: "#8fb2c2", fontSize: 14, margin: "0 0 16px" }}>Con i superpoteri: stampa, app, file, gesti, affiancamento.</p>
             {bloccato ? (
-              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Dal 21 luglio, ore 19:00</span>
+              <span className="glass cta-secondaria" style={{ display: "inline-block", opacity: 0.75 }}>🔒 Presto disponibile</span>
             ) : scaricabili.win ? (
               <a href="/api/scarica?os=win" className="cta-primaria" style={{ display: "inline-block" }}>Scarica per Windows</a>
             ) : (

@@ -249,7 +249,8 @@ export default function Home() {
       .then((s) => setLancio({ lanciato: Boolean(s.lanciato), quando: String(s.quando) }))
       .catch(() => setLancio({ lanciato: true, quando: "" })); // rete ko → non bloccare la UI (i cancelli server proteggono)
   }, []);
-  const lancioChiuso = Boolean(lancio && !lancio.lanciato && new Date(lancio.quando).getTime() > oraTick);
+  // Niente date: il lucchetto resta chiuso finché il server non dice "lanciato".
+  const lancioChiuso = Boolean(lancio && !lancio.lanciato);
   useEffect(() => {
     if (!lancioChiuso) return;
     const iv = setInterval(() => setOraTick(Date.now()), 1000);
@@ -1393,23 +1394,15 @@ export default function Home() {
   if (!autenticato) {
     // Lucchetto del lancio: conto alla rovescia al posto dell'accesso.
     if (lancioChiuso && !mostraAccesso) {
-      const resto = Math.max(0, new Date(lancio!.quando).getTime() - oraTick);
-      const sTot = Math.floor(resto / 1000);
-      const g = Math.floor(sTot / 86400);
-      const h = String(Math.floor((sTot % 86400) / 3600)).padStart(2, "0");
-      const m = String(Math.floor((sTot % 3600) / 60)).padStart(2, "0");
-      const s = String(sTot % 60).padStart(2, "0");
       return (
         <main className="flex min-h-screen flex-col items-center justify-center px-5 text-center">
           <OrionCore state="idle" size={130} />
-          <h1 className="mt-6 text-2xl font-semibold text-slate-50">ORION apre il 21 luglio, ore 19:00</h1>
+          <h1 className="mt-6 text-2xl font-semibold text-slate-50">ORION sta arrivando</h1>
           <p className="mt-2 max-w-md text-slate-400">
             Stiamo accendendo i motori. Al lancio, i founding member entrano per primi.
           </p>
           <div className="mt-6 rounded-2xl border border-cyan-400/30 bg-cyan-400/5 px-8 py-4">
-            <div className="text-3xl font-extrabold tracking-wider text-slate-50" style={{ fontVariantNumeric: "tabular-nums" }}>
-              {g}g : {h}h : {m}m : {s}s
-            </div>
+            <div className="text-2xl font-extrabold tracking-widest text-slate-50">PRESTO DISPONIBILE</div>
           </div>
           <a href="/#beta" className="mt-6 rounded-xl bg-cyan-500/90 px-6 py-3 font-medium text-slate-900 transition hover:bg-cyan-400">
             Prenota il tuo posto founding member

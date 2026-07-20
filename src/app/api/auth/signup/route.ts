@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     // Lucchetto del lancio: prima dell'apertura si registrano solo le eccezioni.
     if (!lanciato() && !eccezioneLancio(email)) {
       return NextResponse.json(
-        { ok: false, errore: `Le registrazioni aprono il ${quandoInParole()}. Intanto prenota il posto founding member sulla home. 🚀` },
+        { ok: false, errore: `Le registrazioni aprono ${quandoInParole()}. Intanto prenota il posto founding member sulla home. 🚀` },
         { status: 403 }
       );
     }

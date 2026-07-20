@@ -115,7 +115,7 @@ test("email nella lista beta → founder con sconto a vita (case-insensitive)", 
 // ── COLLAUDO PRE-LANCIO: le eccezioni del lancio usano ORION gratis ─────────
 
 test("prima del lancio: chi è nelle eccezioni entra senza abbonamento; dopo, paywall normale", () => {
-  process.env.ORION_LANCIO = "2099-01-01T00:00:00+01:00"; // lucchetto chiuso
+  delete process.env.ORION_LANCIO; // lucchetto chiuso (si apre solo con "aperto")
   process.env.ORION_LANCIO_ECCEZIONI = "tester@collaudo.it";
   runWithTenant(TN, () => {
     // il tester entra gratis, senza carta
@@ -126,7 +126,7 @@ test("prima del lancio: chi è nelle eccezioni entra senza abbonamento; dopo, pa
     assert.equal(statoAbbonamento("estraneo@x.it").accessoConsentito, false);
   });
   // Al lancio la regola sparisce da sola: il tester torna al paywall.
-  process.env.ORION_LANCIO = "2000-01-01T00:00:00+01:00"; // lucchetto aperto
+  process.env.ORION_LANCIO = "aperto"; // l'interruttore manuale
   runWithTenant(TN, () => {
     assert.equal(statoAbbonamento("tester@collaudo.it").accessoConsentito, false);
   });

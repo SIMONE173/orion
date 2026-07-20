@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     const r = await conTenant(async (u) => eccezioneLancio(u.email));
     if (!r.ok || !r.data) {
       return NextResponse.json(
-        { ok: false, errore: `Il download apre il ${quandoInParole()}.` },
+        { ok: false, errore: `Il download apre ${quandoInParole()}.` },
         { status: 403 }
       );
     }

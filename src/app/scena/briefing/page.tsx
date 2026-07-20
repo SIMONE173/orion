@@ -412,7 +412,7 @@ export default function ScenaBriefing() {
         <El on={azione && t >= 27600} da="translateY(16px)" style={{ position: "absolute", left: 0, right: 0, top: 520, textAlign: "center", zIndex: 40 }}>
           <div style={{ fontSize: 54, letterSpacing: ".3em", fontWeight: 800, color: "#f2fbff" }}>ORION</div>
           <div style={{ fontSize: 22, color: "#9fdcec", marginTop: 10 }}>Il primo Sistema Operativo Conversazionale</div>
-          <div style={{ fontSize: 19, color: "#5e8798", marginTop: 16 }}>orionvision.it · si apre il 21 luglio, ore 19:00</div>
+          <div style={{ fontSize: 19, color: "#5e8798", marginTop: 16 }}>orionvision.it · presto disponibile</div>
         </El>
 
         {/* ── REGIA: attesa e ciak ── */}

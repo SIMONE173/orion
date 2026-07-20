@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     // Lucchetto del lancio: prima dell'apertura entrano solo le eccezioni.
     if (!lanciato() && !eccezioneLancio(email)) {
       return NextResponse.json(
-        { ok: false, errore: `ORION apre il ${quandoInParole()}. Prenota il tuo posto founding member sulla home. 🚀` },
+        { ok: false, errore: `ORION apre ${quandoInParole()}. Prenota il tuo posto founding member sulla home. 🚀` },
         { status: 403 }
       );
     }

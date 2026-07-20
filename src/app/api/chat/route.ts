@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     // Lucchetto del lancio: vale anche per sessioni già aperte (tranne eccezioni).
     const r = await conTenant(async (utente) => {
       if (!lanciato() && !eccezioneLancio(utente.email)) {
-        return { testo: `ORION apre il ${quandoInParole()}. Ci vediamo lì! 🚀`, viste: [], errore: "lancio" };
+        return { testo: `ORION apre ${quandoInParole()}. Ci vediamo lì! 🚀`, viste: [], errore: "lancio" };
       }
       return runConversation(storico, avvio, allegato, desktop, utente);
     });

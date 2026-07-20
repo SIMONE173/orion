@@ -152,7 +152,7 @@ export async function inviaEmailBeta(email: string, sconto: number, apertura: st
     </p>
     ${bottone("Scopri cosa sa fare", SITO)}
   `;
-  const testo = `Il tuo posto founding member è riservato: sconto del ${sconto}% a vita, agganciato a ${email}. ORION apre il ${apertura}. ${SITO}`;
+  const testo = `Il tuo posto founding member è riservato: sconto del ${sconto}% a vita, agganciato a ${email}. ORION apre ${apertura}. ${SITO}`;
   return inviaEmail(
     email,
     `Sei dentro: founding member di ORION 🏆`,
