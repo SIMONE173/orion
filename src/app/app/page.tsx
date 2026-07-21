@@ -1216,11 +1216,18 @@ export default function Home() {
             setTimeout(() => annuncia(tentativi + 1), 2500);
             return;
           }
+          // La segretaria VERA: annuncia e FA, senza chiedere il permesso.
+          // Un piccolo respiro (3.5s) per dire «aspetta», poi parte da sola.
           speakRef.current?.(
             desktopBridge()?.manoClic
-              ? `${descriviConsegna(nuove[0])}. Te lo scrivo nel gestionale ora? Dimmi sì e guarda.`
-              : `${descriviConsegna(nuove[0])}. C'è una consegna pronta per il tuo gestionale: vuoi vederla?`
+              ? `${descriviConsegna(nuove[0])}. Te lo scrivo nel gestionale: guarda.`
+              : `${descriviConsegna(nuove[0])}. Ti apro le consegne pronte per il gestionale.`
           );
+          setTimeout(() => {
+            if (fermo || manoAttivaRef.current) return;
+            if (!consegneViveRef.current.length) return; // «aspetta» detto in tempo
+            void scriviConsegneVive();
+          }, 3500);
         };
         annuncia();
       } catch {
@@ -1275,15 +1282,16 @@ export default function Home() {
         return;
       }
     }
-    // «Sì / scrivi» dopo l'annuncio di una consegna del Ponte.
+    // La consegna del Ponte sta per partire da sola: «aspetta» la ferma,
+    // «sì/vai» la fa partire subito senza aspettare il respiro.
     if (consegneViveRef.current.length) {
-      if (bassa.length < 30 && /^(s[iì]\b|scrivi|scrivile|scrivilo|vai\b|procedi|fallo|ok\b)/.test(bassa)) {
-        void scriviConsegneVive();
-        return;
-      }
-      if (/^(no\b|dopo\b|più tardi|non ora|adesso no|lascia)/.test(bassa)) {
+      if (/^(aspetta|ferma(ti)?|no\b|dopo\b|più tardi|non ora|adesso no|lascia)/.test(bassa)) {
         setConsegneVive([]);
         speakRef.current?.("Va bene, resta in coda: la trovi nelle consegne.");
+        return;
+      }
+      if (bassa.length < 30 && /^(s[iì]\b|scrivi|scrivile|scrivilo|vai\b|subito|procedi|fallo|ok\b)/.test(bassa)) {
+        void scriviConsegneVive();
         return;
       }
     }
@@ -2041,16 +2049,16 @@ export default function Home() {
               onClick={() => void scriviConsegneVive()}
               className="flex-1 rounded-lg border border-amber-400/40 bg-amber-400/20 px-3 py-1.5 text-sm font-medium text-amber-50 hover:bg-amber-400/30"
             >
-              {desktopBridge()?.manoClic ? "Scrivi ora (Mano)" : "Vedi consegne"}
+              {desktopBridge()?.manoClic ? "Scrivi subito" : "Vedi consegne"}
             </button>
             <button
               onClick={() => setConsegneVive([])}
               className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:bg-white/5"
             >
-              Più tardi
+              Aspetta
             </button>
           </div>
-          <p className="mt-2 text-[10px] text-slate-500">A voce: «sì» per procedere · «più tardi» per rimandare</p>
+          <p className="mt-2 text-[10px] text-slate-500">Parte da sola tra un attimo — a voce: «aspetta» per fermarla</p>
         </div>
       )}
 
