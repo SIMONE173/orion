@@ -93,7 +93,7 @@ import {
   type Compito,
   type EntitaEsterna,
 } from "../data";
-import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti } from "../data";
+import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti, segnaConsegnaManuale } from "../data";
 import { arriviNonLetti, segnaComunicazioniLette, getComunicazione } from "../data";
 import { silenziateOggi } from "../posta";
 import { emailConfigurato, leggiInbox, inviaEmail, getEmailAccount } from "../email";
@@ -785,6 +785,15 @@ export const TOOLS: Anthropic.Tool[] = [
         testo: { type: "string", description: "la risposta, con le parole del titolare" },
       },
       required: ["testo"],
+    },
+  },
+  {
+    name: "segna_consegne_fatte",
+    description:
+      "Spunta le consegne del PONTE come riportate nel gestionale (svuota il pannello). Usalo SOLO dopo che il lavoro è stato fatto davvero: la Mano ha scritto le modifiche (esito [Sistema] positivo) oppure l'utente conferma di averle incollate lui. Senza 'ids' spunta tutte le consegne in coda.",
+    input_schema: {
+      type: "object",
+      properties: { ids: { type: "array", items: { type: "number" }, description: "Ometti per spuntarle tutte" } },
     },
   },
   {
@@ -2263,6 +2272,16 @@ const handlers: Record<string, Handler> = {
     };
   },
 
+  segna_consegne_fatte: (input) => {
+    const i = input as { ids?: number[] };
+    const bersagli = Array.isArray(i?.ids) && i.ids.length
+      ? i.ids.map(Number).filter(Number.isFinite)
+      : consegneManualiPendenti().map((c) => c.id);
+    let segnate = 0;
+    for (const id of bersagli) if (segnaConsegnaManuale(id)) segnate++;
+    return { result: { ok: true, segnate, nota: segnate ? "Consegne spuntate: il pannello è pulito. Dillo in una frase." : "Non c'era nulla da spuntare." } };
+  },
+
   messaggi_in_arrivo: () => {
     const arrivi = arriviNonLetti();
     return {
@@ -3096,6 +3115,20 @@ const handlers: Record<string, Handler> = {
 
   briefing: (_input, ctx) => {
     let dati = briefingOggi();
+    // IL MATTINO DELLA SEGRETARIA: le modifiche accumulate (notte/PC spento)
+    // per il gestionale entrano nel briefing (solo per il modello: il pannello
+    // resta invariato) — su Desktop le allinea LEI, subito, con la Mano.
+    const extra: Record<string, unknown> = {};
+    const consegne = consegneManualiPendenti(12);
+    if (consegne.length) {
+      extra.consegne_gestionale = {
+        in_coda: consegne.length,
+        sistema: consegne[0].sistema,
+        elenco: consegne.map((c) => ({ id: c.id, evento: c.evento, dettagli: c.payload })),
+        nota_consegne:
+          "SU DESKTOP: da vera segretaria, nel briefing annuncia in UNA frase che ora allinei TU il gestionale e AVVIA SUBITO usa_computer (obiettivo = le modifiche dell'elenco, una per riga, chiare e complete) senza aspettare l'ordine; quando l'esito [Sistema] conferma, chiama segna_consegne_fatte e dillo in una frase. SU WEB (niente Mano): annuncia le consegne e apri il pannello con mostra_consegne. Se l'utente dice di fermarti, fermati senza discutere.",
+      };
+    }
     // In azienda il briefing PARLATO è role-aware (operatore/responsabile/titolare/
     // amministrativo): aggiungo i dati scoped al result, il pannello resta generico.
     const azienda = getAzienda();
@@ -3118,6 +3151,7 @@ const handlers: Record<string, Handler> = {
       return {
         result: {
           ...dati,
+          ...extra,
           azienda: az,
           messaggi_team: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
           approvazioni_da_decidere: daApprovare.map((a) => ({ id: a.id, da: a.da_nome, richiesta: a.richiesta, urgente: a.urgente === 1 })),
@@ -3132,7 +3166,7 @@ const handlers: Record<string, Handler> = {
         vista: { tipo: "briefing", dati },
       };
     }
-    return { result: dati, vista: { tipo: "briefing", dati } };
+    return { result: { ...dati, ...extra }, vista: { tipo: "briefing", dati } };
   },
 
   analisi_proattiva: (_input, ctx) => {
