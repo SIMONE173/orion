@@ -46,6 +46,32 @@ type ArrivoWA = {
 const chiDi = (a: ArrivoWA) =>
   a.cliente ?? (a.canale === "email" ? (a.mittente ?? "mittente sconosciuto") : (a.telefono ?? "numero sconosciuto"));
 
+// Una consegna del Ponte apparsa MENTRE si lavora: la segretaria la annuncia
+// e (su Desktop) la scrive lei nel gestionale con la Mano.
+type ConsegnaViva = { id: number; evento: string; payload: Record<string, unknown>; sistema: string };
+const ETICHETTE_CONSEGNA: Record<string, string> = {
+  appuntamento_creato: "Nuovo appuntamento",
+  appuntamento_spostato: "Appuntamento spostato",
+  appuntamento_stato: "Stato aggiornato",
+  appuntamento_cancellato: "Appuntamento cancellato",
+  cliente_creato: "Nuovo cliente",
+  cliente_aggiornato: "Cliente aggiornato",
+};
+const descriviConsegna = (c: ConsegnaViva): string => {
+  const p = c.payload || {};
+  const chi = String(p.cliente ?? p.cliente_nome ?? p.nome ?? p.titolo ?? "");
+  const quando =
+    typeof p.inizio === "string" && /^\d{4}-\d{2}-\d{2}T/.test(p.inizio)
+      ? new Date(p.inizio).toLocaleString("it-IT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      : "";
+  return [ETICHETTE_CONSEGNA[c.evento] ?? c.evento, chi, quando].filter(Boolean).join(" · ");
+};
+const dettaglioConsegna = (c: ConsegnaViva): string =>
+  Object.entries(c.payload || {})
+    .filter(([, v]) => v !== null && v !== undefined && v !== "" && typeof v !== "object")
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join("; ");
+
 // Riassunto parlabile di una mail: le prime frasi utili, mai un muro di testo.
 const riassuntoParlato = (corpo: string, max = 220): string => {
   const pulito = corpo.replace(/\s+/g, " ").trim();
@@ -237,6 +263,10 @@ export default function Home() {
   const [rispostaA, setRispostaA] = useState<ArrivoWA | null>(null);
   const [bozzaRisposta, setBozzaRisposta] = useState<string | null>(null);
   const annunciati = useRef<Set<number>>(new Set());
+  // LA SEGRETARIA LIVE DI GIORNO: consegne del Ponte apparse in sessione.
+  const [consegneVive, setConsegneVive] = useState<ConsegnaViva[]>([]);
+  const consegneAnnunciate = useRef<Set<number>>(new Set());
+  const consegneBaseline = useRef(false); // il primo giro fa da base (ci pensa il briefing)
   const [autenticato, setAutenticato] = useState<boolean | null>(null);
   // Lucchetto del lancio: prima dell'apertura l'app mostra il conto alla
   // rovescia (chi è in lista può comunque accedere dalla porticina).
@@ -673,7 +703,7 @@ export default function Home() {
   // ORION si riduce a icona (il mini-nucleo racconta i passi), apre il software
   // e lo usa DAVVERO: screenshot → /api/mano decide UNA azione → mani native →
   // nuovo screenshot. Si ferma a obiettivo raggiunto, su STOP, o al primo dubbio.
-  const avviaMano = useCallback(async (a: { obiettivo: string; app?: string }) => {
+  const avviaMano = useCallback(async (a: { obiettivo: string; app?: string; codaConsegne?: number[] }) => {
     const attesa = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const d = desktopBridge();
     if (!d?.manoClic || !d?.catturaSchermo) {
@@ -775,8 +805,11 @@ export default function Home() {
       } catch {
         /* noop */
       }
+      const codaPonte = a.codaConsegne?.length
+        ? ` Questo lavoro riguardava le consegne del Ponte (ids: ${a.codaConsegne.join(", ")}): se l'esito è positivo spuntale con segna_consegne_fatte, altrimenti lasciale in coda e dillo con onestà.`
+        : "";
       inviaAOrionRef.current?.(
-        `[Sistema] Esito della Mano per l'obiettivo "${a.obiettivo}": ${esitoFinale}. Riferisci all'utente in UNA frase, con verità operativa (se è una domanda, faglela).`,
+        `[Sistema] Esito della Mano per l'obiettivo "${a.obiettivo}": ${esitoFinale}. Riferisci all'utente in UNA frase, con verità operativa (se è una domanda, faglela).${codaPonte}`,
         false,
         undefined,
         true
@@ -1122,6 +1155,86 @@ export default function Home() {
     }
   }, []);
 
+  // ── LA SEGRETARIA LIVE: la consegna appare, lei la scrive (o apre il pannello) ──
+  const consegneViveRef = useRef(consegneVive);
+  consegneViveRef.current = consegneVive;
+
+  const scriviConsegneVive = useCallback(async () => {
+    const vive = consegneViveRef.current;
+    if (!vive.length) return;
+    setConsegneVive([]);
+    const d = desktopBridge();
+    if (d?.manoClic) {
+      // Desktop: la Mano scrive nel gestionale, live, davanti all'utente.
+      const obiettivo =
+        `Apri ${vive[0].sistema} e riporta ESATTAMENTE queste modifiche (sono le consegne del Ponte), una alla volta, poi salva:\n` +
+        vive.map((c, i) => `${i + 1}) ${descriviConsegna(c)} — ${dettaglioConsegna(c)}`).join("\n");
+      speakRef.current?.("Vado: guarda lo schermo.");
+      await avviaManoRef.current?.({ obiettivo, app: vive[0].sistema, codaConsegne: vive.map((c) => c.id) });
+    } else {
+      // Web: niente Mano — pannello con il copia-incolla perfetto.
+      try {
+        const r = await fetch("/api/consegne");
+        const dd: { consegne?: ConsegnaViva[] } = await r.json();
+        setViste([{ tipo: "consegne", dati: { consegne: (dd.consegne ?? []) as never } } as Vista]);
+        speakRef.current?.("Ecco le consegne pronte da incollare nel tuo gestionale.");
+      } catch {
+        /* offline: resteranno in coda */
+      }
+    }
+  }, []);
+
+  // Sondaggio del Ponte (30s): le consegne NUOVE apparse mentre lavori vengono
+  // annunciate; quelle già in coda all'avvio le orchestra il briefing.
+  useEffect(() => {
+    if (!autenticato) return;
+    let fermo = false;
+    const controlla = async () => {
+      if (fermo || manoAttivaRef.current) return;
+      try {
+        const r = await fetch("/api/consegne");
+        if (!r.ok) return;
+        const d: { consegne?: ConsegnaViva[] } = await r.json();
+        const tutte = d.consegne ?? [];
+        if (!consegneBaseline.current) {
+          consegneBaseline.current = true;
+          tutte.forEach((c) => consegneAnnunciate.current.add(c.id));
+          return;
+        }
+        const nuove = tutte.filter((c) => !consegneAnnunciate.current.has(c.id));
+        if (!nuove.length) return;
+        nuove.forEach((c) => consegneAnnunciate.current.add(c.id));
+        setConsegneVive((prev) => [...prev, ...nuove]);
+        try {
+          canaleNucleo.current?.postMessage({ tipo: "azione", nome: "consegne", testo: descriviConsegna(nuove[0]).slice(0, 30) });
+        } catch {
+          /* noop */
+        }
+        const annuncia = (tentativi = 0) => {
+          if (fermo) return;
+          if ((occupatoRef.current || document.hidden) && tentativi < 8) {
+            setTimeout(() => annuncia(tentativi + 1), 2500);
+            return;
+          }
+          speakRef.current?.(
+            desktopBridge()?.manoClic
+              ? `${descriviConsegna(nuove[0])}. Te lo scrivo nel gestionale ora? Dimmi sì e guarda.`
+              : `${descriviConsegna(nuove[0])}. C'è una consegna pronta per il tuo gestionale: vuoi vederla?`
+          );
+        };
+        annuncia();
+      } catch {
+        /* offline o errore: si riprova al prossimo giro */
+      }
+    };
+    void controlla();
+    const id = setInterval(controlla, 30000);
+    return () => {
+      fermo = true;
+      clearInterval(id);
+    };
+  }, [autenticato]);
+
   // Quando il mic è attivo in modalità appunti, la voce o detta o comanda.
   gestisciVoceRef.current = (t: string) => {
     // ── Prima di tutto: il giro della POSTA (sì/apri, dettatura, conferma) ──
@@ -1159,6 +1272,18 @@ export default function Home() {
       if (/^(no\b|dopo\b|più tardi|non ora|adesso no)/.test(bassa)) {
         setAnnuncio([]);
         speakRef.current?.("Va bene, restano in attesa.");
+        return;
+      }
+    }
+    // «Sì / scrivi» dopo l'annuncio di una consegna del Ponte.
+    if (consegneViveRef.current.length) {
+      if (bassa.length < 30 && /^(s[iì]\b|scrivi|scrivile|scrivilo|vai\b|procedi|fallo|ok\b)/.test(bassa)) {
+        void scriviConsegneVive();
+        return;
+      }
+      if (/^(no\b|dopo\b|più tardi|non ora|adesso no|lascia)/.test(bassa)) {
+        setConsegneVive([]);
+        speakRef.current?.("Va bene, resta in coda: la trovi nelle consegne.");
         return;
       }
     }
@@ -1894,6 +2019,38 @@ export default function Home() {
               <p className="mt-2 text-[10px] text-slate-500">A voce: «sì, invia» oppure «annulla»</p>
             </>
           )}
+        </div>
+      )}
+
+      {/* LA CONSEGNA LIVE: la segretaria vuole scrivere nel gestionale, ora. */}
+      {consegneVive.length > 0 && annuncio.length === 0 && !rispostaA && (
+        <div
+          className="fade-in rounded-2xl border border-amber-400/30 bg-[#1a1206]/95 p-4 shadow-2xl backdrop-blur"
+          style={{ position: "fixed", right: 20, bottom: 96, width: 320, zIndex: 40 }}
+        >
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-100">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-amber-400/15 text-base">🌉</span>
+            {consegneVive.length === 1 ? "Modifica per il gestionale" : `${consegneVive.length} modifiche per il gestionale`}
+          </div>
+          <p className="mb-2 text-xs text-slate-300/85">
+            {descriviConsegna(consegneVive[0])}
+            {consegneVive.length > 1 ? ` — e altre ${consegneVive.length - 1}` : ""}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => void scriviConsegneVive()}
+              className="flex-1 rounded-lg border border-amber-400/40 bg-amber-400/20 px-3 py-1.5 text-sm font-medium text-amber-50 hover:bg-amber-400/30"
+            >
+              {desktopBridge()?.manoClic ? "Scrivi ora (Mano)" : "Vedi consegne"}
+            </button>
+            <button
+              onClick={() => setConsegneVive([])}
+              className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-slate-400 hover:bg-white/5"
+            >
+              Più tardi
+            </button>
+          </div>
+          <p className="mt-2 text-[10px] text-slate-500">A voce: «sì» per procedere · «più tardi» per rimandare</p>
         </div>
       )}
 
