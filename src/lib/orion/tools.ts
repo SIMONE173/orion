@@ -1,6 +1,19 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Vista, Azione } from "./views";
 import type { Cliente } from "../data";
+import { tenantIdCorrente } from "../tenant";
+import { tenantDemo } from "../demo";
+import {
+  type StatoTutorial,
+  statoTutorial,
+  tappaCorrente,
+  tappeDi,
+  riepilogoTutorial,
+  avviaTutorial,
+  avanzaTutorial,
+  salvaFeedbackTutorial,
+  simulaPostaDemo,
+} from "./tutorial";
 import { eseguiImport } from "../importa";
 import {
   getProfilo,
@@ -1664,6 +1677,49 @@ export const TOOLS: Anthropic.Tool[] = [
         etichetta: { type: "string", description: "Breve descrizione di cosa fa il comando (per l'utente)" },
       },
       required: ["comando"],
+    },
+  },
+  {
+    name: "tutorial",
+    description:
+      "SOLO IN ORION DEMO — il timone del giro guidato. Azioni: 'avvia' (dopo la Chiamata 0: sceglie il percorso, prepara lo studio di prova e ti dà la prima tappa), 'tappa_completata' (chiude la tappa corrente e ti dà la guida della successiva: chiamala quando la tappa è stata VISSUTA o l'utente dice di andare avanti), 'stato' (dove siamo), 'apri_telefono' (apre il telefono finto del cliente per la tappa WhatsApp), 'simula_posta' (fa arrivare le email di prova per la tappa posta), 'feedback' (registra piaciuto/utile nel finale), 'finale' (apre il sito di ORION nel browser dell'utente: solo alla chiusura del giro).",
+    input_schema: {
+      type: "object",
+      properties: {
+        azione: {
+          type: "string",
+          enum: ["avvia", "tappa_completata", "stato", "apri_telefono", "simula_posta", "feedback", "finale"],
+        },
+        piaciuto: { type: "boolean", description: "Solo per azione=feedback" },
+        utile: { type: "boolean", description: "Solo per azione=feedback" },
+      },
+      required: ["azione"],
+    },
+  },
+  {
+    name: "presentazione",
+    description:
+      "SOLO IN ORION DEMO. Apre la presentazione animata di fine tappa: pochi punti, grandi e belli, che fissano ciò che l'utente ha appena vissuto. 2-4 punti, titoli di 2-4 parole, testi di UNA riga. Con finale=true usa la veste da gran finale (per l'ultima della demo).",
+    input_schema: {
+      type: "object",
+      properties: {
+        titolo: { type: "string", description: "Titolo grande della presentazione (corto, evocativo)" },
+        sottotitolo: { type: "string" },
+        punti: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              icona: { type: "string", description: "Un'emoji" },
+              titolo: { type: "string", description: "2-4 parole" },
+              testo: { type: "string", description: "Una riga" },
+            },
+            required: ["icona", "titolo", "testo"],
+          },
+        },
+        finale: { type: "boolean" },
+      },
+      required: ["titolo", "punti"],
     },
   },
 ];
@@ -4421,6 +4477,93 @@ const handlers: Record<string, Handler> = {
       riporta: true,
     },
   }),
+
+  // ── ORION DEMO: il timone del giro guidato ────────────────────────────────
+  tutorial: (input) => {
+    if (!tenantDemo(tenantIdCorrente())) {
+      return { result: { ok: false, errore: "Il tutorial esiste solo nella demo di ORION." } };
+    }
+    const azione = String(input.azione ?? "stato");
+    const conBinario = (s: StatoTutorial, extra: Record<string, unknown> = {}): Esito => {
+      const tappa = tappaCorrente(s);
+      return {
+        result: {
+          ok: true,
+          percorso: s.percorso,
+          finito: s.finito,
+          ...(tappa
+            ? { tappa: { numero: s.indice + 1, di: s.percorso ? tappeDi(s.percorso).length : 0, titolo: tappa.titolo, guida: tappa.guida } }
+            : {}),
+          ...extra,
+        },
+        vista: { tipo: "tutorial", dati: riepilogoTutorial(s) },
+      };
+    };
+    switch (azione) {
+      case "avvia":
+        return conBinario(avviaTutorial(), { nota: "Studio di prova pronto. Parti con la prima tappa: segui la sua guida." });
+      case "tappa_completata":
+        return conBinario(avanzaTutorial(), { nota: "Tappa chiusa. Prosegui con la guida della nuova tappa (se il giro è finito, saluta secondo la tappa finale)." });
+      case "apri_telefono":
+        return {
+          result: {
+            ok: true,
+            nota: "Telefono del cliente aperto: l'utente scrive come Giulia Marchetti, la segreteria automatica risponde DA SOLA (tu non rispondere al posto suo).",
+          },
+          vista: { tipo: "telefono", dati: { cliente: "Giulia Marchetti", telefono: "+393901000001" } },
+        };
+      case "simula_posta": {
+        const esito = simulaPostaDemo();
+        return {
+          result: {
+            ok: true,
+            ...esito,
+            nota: "Posta in arrivo: 1 email importante (verrà annunciata DA SOLA dall'app a momenti) e 2 silenziate nel digest.",
+          },
+        };
+      }
+      case "feedback":
+        return conBinario(
+          salvaFeedbackTutorial({
+            ...(typeof input.piaciuto === "boolean" ? { piaciuto: input.piaciuto } : {}),
+            ...(typeof input.utile === "boolean" ? { utile: input.utile } : {}),
+          }),
+          { nota: "Feedback registrato." }
+        );
+      case "finale":
+        return {
+          result: { ok: true, nota: "Sito aperto nel browser dell'utente. Saluta come da guida." },
+          azione: { tipo: "apri_url", url: "https://www.orionvision.it", etichetta: "orionvision.it" },
+        };
+      default:
+        return conBinario(statoTutorial());
+    }
+  },
+
+  presentazione: (input) => {
+    if (!tenantDemo(tenantIdCorrente())) {
+      return { result: { ok: false, errore: "La presentazione esiste solo nella demo di ORION." } };
+    }
+    const punti = (Array.isArray(input.punti) ? input.punti : [])
+      .filter((p: unknown): p is { icona: string; titolo: string; testo: string } => {
+        const x = p as Record<string, unknown>;
+        return typeof x?.icona === "string" && typeof x?.titolo === "string" && typeof x?.testo === "string";
+      })
+      .slice(0, 4);
+    if (!punti.length) return { result: { ok: false, errore: "Servono da 2 a 4 punti (icona, titolo, testo)." } };
+    return {
+      result: { ok: true, punti: punti.length },
+      vista: {
+        tipo: "presentazione",
+        dati: {
+          titolo: String(input.titolo ?? ""),
+          ...(input.sottotitolo ? { sottotitolo: String(input.sottotitolo) } : {}),
+          punti,
+          ...(input.finale === true ? { finale: true } : {}),
+        },
+      },
+    };
+  },
 };
 
 // AREE RISERVATE: quali strumenti toccano dati protetti per ruolo (in azienda).
@@ -4436,6 +4579,10 @@ const AREA_DI_TOOL: Record<string, AreaPermessi> = {
   imposta_permessi: "azienda_config",
 };
 
+// ORION DEMO: gli strumenti che toccano account e dati VERI restano spenti
+// nello studio di prova (il prompt non li propone; questo è il paletto duro).
+const SPENTI_IN_DEMO = new Set(["collega_whatsapp", "collega_email", "collega_calendario", "importa_dati", "esegui_import"]);
+
 export async function dispatch(
   name: string,
   input: unknown,
@@ -4443,6 +4590,15 @@ export async function dispatch(
 ): Promise<Esito> {
   const h = handlers[name];
   if (!h) return { result: { ok: false, errore: `Strumento sconosciuto: ${name}` } };
+  if (SPENTI_IN_DEMO.has(name) && tenantDemo(tenantIdCorrente())) {
+    return {
+      result: {
+        ok: false,
+        errore: "non_disponibile_in_demo",
+        nota: "Nella demo i collegamenti e i dati VERI restano fuori (questo è uno studio di prova). Spiegalo con leggerezza: nella versione completa si collega tutto in pochi minuti.",
+      },
+    };
+  }
   const area = AREA_DI_TOOL[name];
   if (area) {
     const p = permessoArea(area, ctx.utenteId);

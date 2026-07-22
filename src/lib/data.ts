@@ -4,6 +4,7 @@ import { tenantIdCorrente } from "./tenant";
 import { cifra } from "./crypto";
 import { eBetaTester, SCONTO_BETA } from "./beta";
 import { lanciato, eccezioneLancio } from "./lancio";
+import { emailDemo } from "./demo";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Accesso ai dati, MULTI-TENANT: ogni query è filtrata per tenant_id, preso
@@ -2095,6 +2096,17 @@ export function listComunicazioni(clienteId?: number): Comunicazione[] {
   return db().prepare(`${base} WHERE cm.tenant_id = ? ORDER BY cm.created_at DESC LIMIT 30`).all(T()) as Comunicazione[];
 }
 
+// Le risposte USCITE verso un cliente dopo una certa comunicazione: è come il
+// telefono finto della demo "vede arrivare" la risposta della segreteria.
+export function risposteDopo(clienteId: number, dopoId: number): Comunicazione[] {
+  return db()
+    .prepare(
+      `SELECT cm.*, c.nome AS cliente_nome FROM comunicazioni cm LEFT JOIN clienti c ON c.id = cm.cliente_id
+       WHERE cm.tenant_id = ? AND cm.cliente_id = ? AND cm.direzione = 'out' AND cm.id > ? ORDER BY cm.id`
+    )
+    .all(T(), clienteId, dopoId) as Comunicazione[];
+}
+
 export function messaggiInArrivoDopo(iso: string): Comunicazione[] {
   return db()
     .prepare(
@@ -2534,6 +2546,12 @@ export function statoAbbonamento(email?: string | null): StatoAbbonamento {
   // Proprietario: accesso pieno senza pagare.
   const admin = adminEmail();
   if (email && admin && email.trim().toLowerCase() === admin) {
+    return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
+  }
+
+  // ORION DEMO: niente carta e niente paywall — il suo limite è il tetto di
+  // spesa della demo, non l'abbonamento. Vale prima e dopo il lancio.
+  if (emailDemo(emailAccount)) {
     return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
   }
 

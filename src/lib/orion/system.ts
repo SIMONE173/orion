@@ -1,6 +1,8 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { getProfilo, getAzienda, gestionaleFonte } from "../data";
 import { costruisciContextPack } from "./memoria";
+import { emailDemo } from "../demo";
+import { bloccoTutorialSystem } from "./tutorial";
 import type { Utente } from "../auth";
 
 const GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
@@ -317,7 +319,11 @@ ${profiloTxt}`;
     ? costruisciContextPack({ ruolo: utente?.ruolo, reparto: utente?.reparto })
     : "";
 
-  const volatile = `${profiloTxt}${contextPack}
+  // ORION DEMO: il blocco del tutorial guidato (la guida della SOLA tappa
+  // corrente). Vive nel volatile perché cambia a ogni avanzamento di tappa.
+  const bloccoDemo = utente && emailDemo(utente.email) ? bloccoTutorialSystem(onboarding) : "";
+
+  const volatile = `${profiloTxt}${contextPack}${bloccoDemo}
 
 CONTESTO TEMPORALE: oggi è ${dataOggi}. Sono le ${oraOra}. Data ISO di oggi: ${isoOggi}. Quando crei o sposti appuntamenti usa il formato ISO YYYY-MM-DDTHH:MM.`;
 

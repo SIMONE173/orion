@@ -638,6 +638,33 @@ export default function Vetrina() {
         </section>
       )}
 
+      {/* ── ORION DEMO: l'assaggio scaricabile, libero anche a lancio chiuso ── */}
+      <section id="demo" data-sboccia style={{ position: "relative", zIndex: 5, padding: "70px 20px 0", maxWidth: 980, margin: "0 auto", opacity: 0 }}>
+        <div
+          className="glass carta"
+          onMouseMove={inclina}
+          onMouseLeave={raddrizza}
+          style={{ textAlign: "center", border: "1px solid rgba(103,232,249,0.28)", boxShadow: "0 0 50px rgba(103,232,249,0.08)", padding: "34px 24px" }}
+        >
+          <div style={{ display: "inline-block", borderRadius: 999, border: "1px solid rgba(103,232,249,0.35)", background: "rgba(103,232,249,0.1)", padding: "4px 14px", fontSize: 11, fontWeight: 700, letterSpacing: "0.25em", textTransform: "uppercase", color: "#9ceef9" }}>
+            🎬 ORION Demo — gratis
+          </div>
+          <h2 className="titolo-sezione" style={{ marginTop: 14 }}>Non crederci sulla parola: provalo ORA</h2>
+          <p style={{ color: "#8fb2c2", fontSize: 15, maxWidth: 560, margin: "10px auto 0", lineHeight: 1.55 }}>
+            Scarica la demo e conosci ORION di persona: ti accoglie, capisce il tuo lavoro e ti porta
+            in un giro guidato dove fa succedere tutto davanti ai tuoi occhi — perfino dentro il software
+            che già usi. Senza carta, senza registrazione: lo studio di prova si cancella da solo.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", marginTop: 22 }}>
+            <a href="/api/scarica?os=demo_mac" className="cta-primaria" style={{ display: "inline-block" }}> Demo per Mac</a>
+            <a href="/api/scarica?os=demo_win" className="cta-primaria" style={{ display: "inline-block" }}>⊞ Demo per Windows</a>
+          </div>
+          <p style={{ color: "#6b8b9b", fontSize: 12.5, marginTop: 14 }}>
+            Guidata da ORION in persona · dura un quarto d&apos;ora · <a href="/demo" style={{ color: "#8fd9e8" }}>come funziona</a>
+          </p>
+        </div>
+      </section>
+
       {/* ── USALO ORA: WEB + DOWNLOAD ── */}
       <section id="scarica" data-sboccia style={{ position: "relative", zIndex: 5, padding: "70px 20px 90px", maxWidth: 980, margin: "0 auto", opacity: 0 }}>
         <h2 className="titolo-sezione">Prendilo con te</h2>

@@ -45,6 +45,8 @@ import { VerbalePanel } from "./panels/VerbalePanel";
 import { IntegrazioniPanel } from "./panels/IntegrazioniPanel";
 import { ImportaPanel } from "./panels/ImportaPanel";
 import { AffiancaPanel } from "./panels/AffiancaPanel";
+import { PresentazionePanel } from "./panels/PresentazionePanel";
+import { TelefonoPanel } from "./panels/TelefonoPanel";
 
 export function renderPanel(v: Vista) {
   switch (v.tipo) {
@@ -114,6 +116,10 @@ export function renderPanel(v: Vista) {
       return <ImportaPanel dati={v.dati} />;
     case "affianca":
       return <AffiancaPanel dati={v.dati} />;
+    case "presentazione":
+      return <PresentazionePanel dati={v.dati} />;
+    case "telefono":
+      return <TelefonoPanel dati={v.dati} />;
     default:
       return null;
   }

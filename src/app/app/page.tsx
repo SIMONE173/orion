@@ -93,6 +93,60 @@ function LogoWhatsApp({ size = 16 }: { size?: number }) {
   );
 }
 
+// ── ORION DEMO: il binario del tutorial ──────────────────────────────────────
+// La colonnina fissa a sinistra che rende VISIBILE il giro guidato: le tappe,
+// le spunte, la tappa viva che pulsa. Stili inline (pattern del progetto per
+// gli elementi fissi) + una vena di animazione per la tappa corrente.
+type BinarioTutorial = Extract<Vista, { tipo: "tutorial" }>["dati"];
+
+function BinarioDemo({ t }: { t: BinarioTutorial }) {
+  const fatte = t.tappe.filter((x) => x.fatta).length;
+  const pct = t.totale > 0 ? Math.round((fatte / t.totale) * 100) : 0;
+  return (
+    <div
+      className="fade-in rounded-2xl border border-cyan-400/20 bg-[#060d16]/92 shadow-2xl backdrop-blur"
+      style={{ position: "fixed", right: 16, top: "50%", transform: "translateY(-50%)", width: 208, zIndex: 40, padding: 14 }}
+    >
+      <style>{`@keyframes binario-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(103,232,249,0.35); } 50% { box-shadow: 0 0 10px 2px rgba(103,232,249,0.25); } }`}</style>
+      <div className="mb-1 flex items-center gap-1.5">
+        <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-cyan-200">
+          Demo
+        </span>
+        <span className="text-[11px] font-semibold text-slate-200">Giro guidato</span>
+      </div>
+      <div className="mb-2 text-[10px] text-slate-500">
+        {t.finito ? "Giro completato 🎉" : `Tappa ${Math.min(t.indice + 1, t.totale)} di ${t.totale}`}
+      </div>
+      <div className="mb-3 h-1 overflow-hidden rounded-full bg-white/[0.07]">
+        <div
+          className="h-full rounded-full bg-cyan-400/80"
+          style={{ width: `${t.finito ? 100 : pct}%`, transition: "width 0.8s cubic-bezier(0.2,0.8,0.2,1)", boxShadow: "0 0 8px rgba(103,232,249,0.6)" }}
+        />
+      </div>
+      <div className="space-y-1">
+        {t.tappe.map((tp) => (
+          <div
+            key={tp.id}
+            className="flex items-center gap-2 rounded-lg px-1.5 py-1"
+            style={
+              tp.corrente
+                ? { background: "rgba(103,232,249,0.08)", border: "1px solid rgba(103,232,249,0.25)", animation: "binario-pulse 2.4s ease-in-out infinite" }
+                : { opacity: tp.fatta ? 0.75 : 0.38 }
+            }
+          >
+            <span className="grid size-5 shrink-0 place-items-center text-[13px]">{tp.fatta ? "✅" : tp.icona}</span>
+            <span
+              className={`truncate text-[11px] ${tp.corrente ? "font-semibold text-cyan-100" : tp.fatta ? "text-slate-400 line-through decoration-slate-600" : "text-slate-400"}`}
+            >
+              {tp.titolo}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // La bolla della posta: WhatsApp (verde, col suo logo) o email (azzurra, con
 // oggetto). Testo, vocale, foto o video — vivi in chat.
 function BollaArrivo({ a, onRispondi }: { a: ArrivoWA; onRispondi: () => void }) {
@@ -220,6 +274,9 @@ export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [viste, setViste] = useState<Vista[]>([]);
   const [suggerimenti, setSuggerimenti] = useState<string[]>([]);
+  // ORION DEMO: account demo + binario del tutorial (fisso a lato, non un pannello).
+  const [demo, setDemo] = useState(false);
+  const [tutorial, setTutorial] = useState<BinarioTutorial | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasKey, setHasKey] = useState(true);
   const [testoInput, setTestoInput] = useState("");
@@ -365,15 +422,20 @@ export default function Home() {
           speakRef.current?.(data.testo);
         }
         if (Array.isArray(data.viste) && data.viste.length) {
+          // Il binario del tutorial NON è un pannello: vive fisso a lato.
+          data.viste
+            .filter((v) => v.tipo === "tutorial")
+            .forEach((v) => setTutorial((v as Extract<Vista, { tipo: "tutorial" }>).dati));
+          const pannelli = data.viste.filter((v) => v.tipo !== "tutorial");
           const d = desktopBridge();
           if (d?.apriVista) {
             // Desktop: ogni vista in una finestra SEPARATA (sempre, anche coi gesti).
-            data.viste.forEach((v) => d.apriVista!(v));
-          } else {
-            setViste(data.viste);
+            pannelli.forEach((v) => d.apriVista!(v));
+          } else if (pannelli.length) {
+            setViste(pannelli);
           }
           // Il mini-nucleo mostra il disegnino di cosa sta succedendo.
-          data.viste.forEach((v) => {
+          pannelli.forEach((v) => {
             try {
               canaleNucleo.current?.postMessage({ tipo: "azione", nome: v.tipo });
             } catch {
@@ -451,9 +513,15 @@ export default function Home() {
   // Esegue le azioni che ORION comanda sullo schermo (apri sito, appunti, foto…).
   const eseguiAzione = useCallback((a: Azione) => {
     switch (a.tipo) {
-      case "apri_url":
-        if (a.url) window.open(a.url, "_blank", "noopener,noreferrer");
+      case "apri_url": {
+        if (!a.url) break;
+        // Desktop: nel browser VERO dell'utente (scheda nuova), non in una
+        // finestra di ORION — è il suo computer, si usa il suo browser.
+        const dUrl = desktopBridge();
+        if (dUrl?.apriApp) void dUrl.apriApp(a.url);
+        else window.open(a.url, "_blank", "noopener,noreferrer");
         break;
+      }
       case "modalita_appunti":
         setAppuntiStato("idle");
         setAppunti({ titolo: a.titolo ?? "Appunti", cliente_id: a.cliente_id ?? null, testo: "" });
@@ -1186,11 +1254,15 @@ export default function Home() {
 
   // Sondaggio del Ponte (30s): le consegne NUOVE apparse mentre lavori vengono
   // annunciate; quelle già in coda all'avvio le orchestra il briefing.
+  // In DEMO il flusso automatico tace: le consegne le orchestra il tutorial
+  // (la tappa del gestionale), non un annuncio che piomba a metà giro.
+  const demoRef = useRef(demo);
+  demoRef.current = demo;
   useEffect(() => {
     if (!autenticato) return;
     let fermo = false;
     const controlla = async () => {
-      if (fermo || manoAttivaRef.current) return;
+      if (fermo || manoAttivaRef.current || demoRef.current) return;
       try {
         const r = await fetch("/api/consegne");
         if (!r.ok) return;
@@ -1359,6 +1431,9 @@ export default function Home() {
         setAutenticato(Boolean(s.autenticato));
         nomeUtenteRef.current = s.nome || s.utente?.nome || null;
         if (s.abbonamento) setAbbonamento(s.abbonamento as StatoAbb);
+        // ORION DEMO: badge e binario del tutorial sopravvivono al reload.
+        setDemo(Boolean(s.demo));
+        if (s.demo && s.tutorial) setTutorial(s.tutorial as BinarioTutorial);
         // ORION su misura: il tema del profilo vince su quello in cache locale
         // (così l'account porta il suo look su ogni dispositivo, senza onda).
         if (s.autenticato) applicaTema((s.tema as Tema | null) ?? null);
@@ -1946,6 +2021,9 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* ORION DEMO: il binario del giro guidato, sempre sott'occhio. */}
+      {demo && tutorial && tutorial.percorso && autenticato && <BinarioDemo t={tutorial} />}
 
       {/* L'ANNUNCIO della posta: «È arrivato un messaggio da X, vuoi aprirlo?» */}
       {annuncio.length > 0 && !rispostaA && (

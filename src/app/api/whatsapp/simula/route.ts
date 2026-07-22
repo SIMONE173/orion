@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cercaCliente, getClienteByTelefono, logCommunication } from "@/lib/data";
+import { cercaCliente, getClienteByTelefono, logCommunication, risposteDopo } from "@/lib/data";
 import { gestisciMessaggioCliente } from "@/lib/orion/segreteria";
 import { conTenant } from "@/lib/sessione";
 
@@ -40,10 +40,19 @@ export async function POST(req: NextRequest) {
           testo: String(body.testo),
         });
       }
-      return { com, rispostaInviata };
+      // Le risposte partite in QUESTO scambio: il telefono finto della demo le
+      // mostra come le vedrebbe il cliente vero.
+      const risposte =
+        rispostaInviata && cliente ? risposteDopo(cliente.id, com.id).map((r) => r.contenuto ?? "") : [];
+      return { com, rispostaInviata, risposte };
     });
     if (!r.ok) return NextResponse.json({ ok: false, errore: "Non autenticato" }, { status: 401 });
-    return NextResponse.json({ ok: true, comunicazione: r.data.com, rispostaInviata: r.data.rispostaInviata });
+    return NextResponse.json({
+      ok: true,
+      comunicazione: r.data.com,
+      rispostaInviata: r.data.rispostaInviata,
+      risposte: r.data.risposte,
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, errore: e instanceof Error ? e.message : String(e) },

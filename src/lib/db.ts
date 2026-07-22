@@ -769,6 +769,8 @@ function migrate(d: Database.Database) {
     "ALTER TABLE utenti ADD COLUMN email_verificata INTEGER NOT NULL DEFAULT 1",
     // ABBONAMENTO: quale piano ha scelto (pro | azienda).
     "ALTER TABLE abbonamenti ADD COLUMN piano TEXT",
+    // ORION DEMO: lo stato del tutorial guidato (JSON), per tenant demo.
+    "ALTER TABLE profili ADD COLUMN tutorial TEXT",
   ];
   for (const sql of alters) {
     try {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { FILE_DOWNLOAD, clientR2, bucketR2 } from "@/lib/download";
+import { FILE_DOWNLOAD, DOWNLOAD_LIBERI, clientR2, bucketR2 } from "@/lib/download";
 import { lanciato, chiaveVipValida, eccezioneLancio, quandoInParole } from "@/lib/lancio";
 import { conTenant } from "@/lib/sessione";
 
@@ -16,9 +16,11 @@ export const dynamic = "force-dynamic";
 // ──────────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  const os = (req.nextUrl.searchParams.get("os") ?? "").toLowerCase();
   // Lucchetto del lancio: prima dell'apertura scaricano solo la parola
   // d'ordine (?vip=...) o i TESTER loggati (eccezioni del lancio).
-  if (!lanciato() && !chiaveVipValida(req.nextUrl.searchParams.get("vip"))) {
+  // La DEMO invece è LIBERA sempre: è la porta d'assaggio pre-lancio.
+  if (!DOWNLOAD_LIBERI.has(os) && !lanciato() && !chiaveVipValida(req.nextUrl.searchParams.get("vip"))) {
     const r = await conTenant(async (u) => eccezioneLancio(u.email));
     if (!r.ok || !r.data) {
       return NextResponse.json(
@@ -27,7 +29,6 @@ export async function GET(req: NextRequest) {
       );
     }
   }
-  const os = (req.nextUrl.searchParams.get("os") ?? "").toLowerCase();
   const chiave = FILE_DOWNLOAD[os];
   const s3 = clientR2();
   if (!chiave || !s3) {

@@ -206,7 +206,31 @@ export type Vista =
         scadenze: { cosa: string; quando: string | null }[];
         note: string | null;
       };
-    };
+    }
+  // ── ORION DEMO ──
+  // Il binario del tutorial (non è un pannello: il client lo tiene fisso a lato).
+  | {
+      tipo: "tutorial";
+      dati: {
+        percorso: string | null;
+        indice: number;
+        totale: number;
+        finito: boolean;
+        tappe: { id: string; titolo: string; icona: string; fatta: boolean; corrente: boolean }[];
+      };
+    }
+  // La presentazione animata di fine tappa: pochi punti, belli, che restano.
+  | {
+      tipo: "presentazione";
+      dati: {
+        titolo: string;
+        sottotitolo?: string;
+        punti: { icona: string; titolo: string; testo: string }[];
+        finale?: boolean;
+      };
+    }
+  // Il telefono del cliente (demo): l'utente scrive come Giulia, la segreteria risponde.
+  | { tipo: "telefono"; dati: { cliente: string; telefono: string } };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
 // siti, entrare in modalità appunti, aprire/zoomare un documento, ecc.

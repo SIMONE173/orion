@@ -10,6 +10,14 @@ const whisper = require("./whisper");
 // la variabile ORION_URL (utile per puntare al localhost in sviluppo).
 const ORION_URL = process.env.ORION_URL || "https://orionvision.it";
 
+// ORION DEMO: stessa app, veste demo — la si riconosce dal nome prodotto
+// impostato in build ("ORION Demo", script dist:demo). In demo:
+//  - lo user agent porta il contrassegno ORIONDemo/<versione>: l'ingresso demo
+//    del server accetta solo l'app (dal browser si scarica, non si prova);
+//  - la finestra parte dall'ingresso /demo (un bottone e si comincia).
+const DEMO = app.getName().includes("Demo") || process.env.ORION_DEMO === "1";
+if (DEMO) app.userAgentFallback = `${app.userAgentFallback} ORIONDemo/${app.getVersion()}`;
+
 // Cartelle in cui cercare i file dell'utente (no scansione dell'intero disco).
 const CARTELLE = [
   os.homedir(),
@@ -27,7 +35,7 @@ function creaFinestra() {
     height: 760,
     minWidth: 420,
     backgroundColor: "#05070d",
-    title: "ORION",
+    title: DEMO ? "ORION Demo" : "ORION",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -59,7 +67,8 @@ function creaFinestra() {
   });
 
   // Carica DIRETTAMENTE l'app (la radice del sito è la vetrina di marketing).
-  win.loadURL(`${ORION_URL}/app`);
+  // In demo si parte dall'ingresso /demo: un bottone e comincia il giro.
+  win.loadURL(DEMO ? `${ORION_URL}/demo` : `${ORION_URL}/app`);
   return win;
 }
 

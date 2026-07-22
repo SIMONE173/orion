@@ -4,6 +4,7 @@ import { rateLimit, ipRichiesta } from "@/lib/ratelimit";
 import { inviaCodice } from "@/lib/mailer";
 import { emailValida } from "@/lib/validazione";
 import { lanciato, eccezioneLancio, quandoInParole } from "@/lib/lancio";
+import { emailDemo } from "@/lib/demo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,11 @@ export async function POST(req: NextRequest) {
 
     if (!emailValida(email)) {
       return NextResponse.json({ ok: false, errore: "Inserisci un indirizzo email valido." }, { status: 400 });
+    }
+    // Il dominio demo è riservato: gli account demo nascono SOLO dall'app
+    // ORION Demo (così il suffisso resta una prova affidabile che è una demo).
+    if (emailDemo(email)) {
+      return NextResponse.json({ ok: false, errore: "Questo dominio email è riservato alla demo di ORION." }, { status: 400 });
     }
     if (password.length < 8) {
       return NextResponse.json({ ok: false, errore: "La password deve avere almeno 8 caratteri." }, { status: 400 });

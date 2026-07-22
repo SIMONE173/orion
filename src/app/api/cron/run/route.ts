@@ -21,6 +21,7 @@ import { backupGiornaliero, controllaIntegrita, percorsoBackupOggi } from "@/lib
 import { caricaBackupRemoto } from "@/lib/backup-remoto";
 import { consegnaEventiUscita } from "@/lib/uscita";
 import { sincronizzaEmailArrivi } from "@/lib/posta";
+import { pulisciDemoScadute } from "@/lib/demo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,9 +97,13 @@ export async function POST(req: NextRequest) {
   // FORTEZZA: prima il controllo di salute (un backup corrotto è una falsa
   // sicurezza), poi la copia locale, poi la copia CIFRATA fuori da Railway.
   // Igiene: via sessioni e codici di verifica scaduti (una volta per giro).
+  let demoSmontate = 0;
   try {
     eliminaSessioniScadute();
     eliminaCodiciScaduti();
+    // Le demo sono usa-e-getta: scadute le si smonta per intero (dati+account).
+    demoSmontate = pulisciDemoScadute();
+    if (demoSmontate > 0) console.log(`[cron] demo smontate: ${demoSmontate}`);
   } catch {
     /* mai bloccare il cron per la pulizia */
   }
@@ -247,6 +252,7 @@ export async function POST(req: NextRequest) {
     promemoriaAppuntamenti: totPromemoriaApp,
     backup: backupFatto,
     backupRemoto,
+    demoSmontate,
     integrita: salute.ok ? "ok" : salute.dettaglio,
   });
 }
