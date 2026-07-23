@@ -393,8 +393,9 @@ function prestazioneDi(professione: string | null): { nome: string; durataMin: n
     parole.some((w) => p.includes(w)) ? { nome, durataMin } : null;
   return (
     tra(["dentist", "odontoiatr", "igienist"], "Visita di controllo", 45) ??
+    tra(["nutrizionist", "dietist", "dietolog", "biolog"], "Visita nutrizionale", 45) ??
     tra(["avvocat", "legale", "notai"], "Consulenza", 60) ??
-    tra(["fisioterap", "osteopat", "massaggi"], "Seduta", 50) ??
+    tra(["fisioterap", "osteopat", "massaggi", "chinesiolog"], "Seduta", 50) ??
     tra(["psicolog", "psicoterap"], "Seduta", 50) ??
     tra(["parrucchier", "barbier", "estetist", "nail"], "Appuntamento in salone", 60) ??
     tra(["personal trainer", "allenator", "palestra", "fitness"], "Allenamento", 60) ??
@@ -428,11 +429,23 @@ function inserisciCliente(c: { nome: string; telefono: string; email: string | n
   return Number(r.lastInsertRowid);
 }
 
-// L'agenda di ORION vive in ora LOCALE "naive" ("YYYY-MM-DDTHH:MM"): i
-// pannelli mostrano la stringa così com'è. Niente toISOString (che è UTC).
+// L'agenda di ORION vive in ora ITALIANA "naive" ("YYYY-MM-DDTHH:MM"): i
+// pannelli mostrano la stringa così com'è. Il server però può vivere in un
+// ALTRO fuso (Railway = UTC): la semina deve ragionare in Europe/Rome, mai
+// nell'ora locale della macchina — sennò «le 10» diventano «le 18 per tutti».
 function isoLocale(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Rome",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit",
+  })
+    .format(d)
+    .replace(" ", "T");
+}
+
+// L'ora corrente in Italia (0-23), qualunque sia il fuso del server.
+function oraItaliana(): number {
+  return Number(new Intl.DateTimeFormat("it-IT", { timeZone: "Europe/Rome", hour: "numeric", hourCycle: "h23" }).format(new Date()));
 }
 
 function inserisciAppuntamento(a: { cliente_id: number; titolo: string; inizio: Date; durataMin: number; stato: string; note?: string | null }): void {
@@ -444,22 +457,28 @@ function inserisciAppuntamento(a: { cliente_id: number; titolo: string; inizio: 
     .run(T(), a.cliente_id, a.titolo, isoLocale(a.inizio), isoLocale(fine), a.stato, a.note ?? null, new Date().toISOString());
 }
 
-// Un orario "di studio" nel futuro prossimo: oggi se c'è ancora giornata,
-// altrimenti scala a domani (il briefing deve sempre avere qualcosa davanti).
+// Il momento (assoluto) che in ITALIA corrisponde a "tra N giorni alle H:00":
+// aritmetica sui minuti a partire dall'ora italiana corrente, così il fuso
+// del server non conta nulla.
+function dataRoma(giorniAvanti: number, ora: number): Date {
+  const parti = new Intl.DateTimeFormat("it-IT", {
+    timeZone: "Europe/Rome", hour: "numeric", minute: "numeric", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const h = Number(parti.find((p) => p.type === "hour")?.value ?? 0);
+  const m = Number(parti.find((p) => p.type === "minute")?.value ?? 0);
+  const deltaMin = giorniAvanti * 24 * 60 + ora * 60 - (h * 60 + m);
+  return new Date(Date.now() + deltaMin * 60_000);
+}
+
+// Un orario "di studio" nel futuro prossimo (in ora ITALIANA): oggi se c'è
+// ancora giornata, altrimenti scala a domattina.
 function prossimaOra(oraBase: number, giorniAvanti: number): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + giorniAvanti);
-  d.setHours(oraBase, 0, 0, 0);
+  let d = dataRoma(giorniAvanti, oraBase);
   if (giorniAvanti === 0 && d.getTime() < Date.now() + 30 * 60_000) {
-    // Quell'ora di oggi è già passata: la prima utile tra un'ora tonda.
-    const traUnOra = new Date(Date.now() + 60 * 60_000);
-    traUnOra.setMinutes(0, 0, 0);
-    d.setTime(traUnOra.getTime());
-    if (d.getHours() >= 19) {
-      // Giornata finita: si va a domattina.
-      d.setDate(d.getDate() + 1);
-      d.setHours(9, 0, 0, 0);
-    }
+    // Quell'ora di oggi è già passata: la prossima ora tonda italiana —
+    // e se la giornata di studio è finita, domattina alle 9.
+    const prossima = oraItaliana() + 1;
+    d = prossima >= 19 ? dataRoma(1, 9) : dataRoma(0, prossima);
   }
   return d;
 }
@@ -469,10 +488,19 @@ export function seminaStudioDiProva(percorso: Percorso, professione: string | nu
   const ids = CLIENTI_DEMO.map(inserisciCliente);
   const [giulia, andrea, elena, paolo, martina] = ids;
 
-  // La giornata di oggi: piena il giusto, con una cosa da confermare.
-  inserisciAppuntamento({ cliente_id: andrea, titolo: `${prest.nome} — Andrea Colombo`, inizio: prossimaOra(10, 0), durataMin: prest.durataMin, stato: "confermato" });
-  inserisciAppuntamento({ cliente_id: elena, titolo: `${prest.nome} — Elena Ricci`, inizio: prossimaOra(15, 0), durataMin: prest.durataMin, stato: "confermato" });
-  inserisciAppuntamento({ cliente_id: paolo, titolo: `${prest.nome} — Paolo Fontana`, inizio: prossimaOra(17, 0), durataMin: prest.durataMin, stato: "da_confermare" });
+  // La giornata "viva": piena il giusto, con una cosa da confermare, in ORARI
+  // DISTINTI e sensati. Se in Italia la giornata di studio è quasi finita
+  // (dalle 14 in poi non c'è più spazio per 3 appuntamenti), il trio va a
+  // DOMANI in orari da studio — mai tre appuntamenti ammassati alla stessa ora.
+  const hRoma = oraItaliana();
+  const oggiVivo = hRoma < 14;
+  const base = Math.max(10, hRoma + 1);
+  const trio: [number, number][] = oggiVivo
+    ? [[0, base], [0, base + 2], [0, base + 4]]
+    : [[1, 10], [1, 15], [1, 17]];
+  inserisciAppuntamento({ cliente_id: andrea, titolo: `${prest.nome} — Andrea Colombo`, inizio: dataRoma(...trio[0]), durataMin: prest.durataMin, stato: "confermato" });
+  inserisciAppuntamento({ cliente_id: elena, titolo: `${prest.nome} — Elena Ricci`, inizio: dataRoma(...trio[1]), durataMin: prest.durataMin, stato: "confermato" });
+  inserisciAppuntamento({ cliente_id: paolo, titolo: `${prest.nome} — Paolo Fontana`, inizio: dataRoma(...trio[2]), durataMin: prest.durataMin, stato: "da_confermare" });
 
   // Domani: Giulia (la protagonista del telefono) al mattino, con documenti
   // pronti; Martina a metà mattina (carburante per l'imprevisto).
@@ -549,8 +577,8 @@ export function bloccoTutorialSystem(onboardingCompleto: boolean): string {
     return `\n\n═══ ORION DEMO — CHIAMATA 0 ═══\nQuesto è un account DEMO (l'app "ORION Demo"): l'utente sta assaggiando ORION prima di sceglierlo. La Chiamata 0 si fa COME SEMPRE (stessa qualità, stessa naturalezza), con QUESTI adattamenti:
 - All'inizio, UNA frase di benvenuto in più: è la demo, facciamo conoscenza e poi lo porti a fare un giro guidato dove gli mostri dal vivo come lavoreresti per lui.
 - Colloquio SNELLO: punta a 5-6 domande totali. SALTA del tutto i dati fiscali (P.IVA, regime, indirizzo) e NON proporre import di file né collegamenti reali (WhatsApp/email/calendario): nella demo non servono.
-- La domanda sul software gestionale FALLA (è importantissima per il giro): se ne usa uno, registralo (collega_sistema, con COME si apre) e imposta la fonte (imposta_fonte_dati); se no, fonte='orion'.
-- Appena imposti onboarding_completo=1: NELLO STESSO TURNO chiama lo strumento tutorial con azione "avvia" e parti con la prima tappa del giro.
+- La domanda sul software gestionale FALLA (è importantissima per il giro), ed è L'ULTIMA del colloquio: se ne usa uno, registralo (collega_sistema, con COME si apre) e imposta la fonte (imposta_fonte_dati); se no, fonte='orion'. Se risponde «Google Calendar»: fonte='orion' e digli con leggerezza che nella versione completa ORION si collega al suo Google Calendar in due minuti (sincronia vera nei due sensi) — nella demo lo studio di prova basta e avanza.
+- APPENA ricevi la risposta sul software, NELLO STESSO TURNO e senza altre domande: salva tutto, imposta onboarding_completo=1, chiama lo strumento tutorial con azione "avvia" e parti con la prima tappa. Un «Grazie.» o «Perfetto.» che si ferma lì è un ERRORE GRAVE: il giro parte SUBITO.
 - REGOLA ANTI-STALLO (assoluta): OGNI tuo turno fa SEMPRE la mossa successiva — o la prossima domanda del colloquio, o la chiusura (onboarding_completo=1 + tutorial avvia + prima tappa) nello stesso turno. MAI rispondere con un semplice cenno («Bene», «Salvato», «Perfetto») e fermarti lì: la demo non deve mai sembrare finita quando non lo è.
 - Se la conversazione è GIÀ iniziata (c'è storico) e arriva una nuova direttiva d'avvio: NON ripresentarti e NON rifare il benvenuto — riprendi esattamente dall'ultima domanda rimasta aperta.
 ${REGOLE_TUTOR}`;
