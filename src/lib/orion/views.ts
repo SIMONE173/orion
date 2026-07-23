@@ -208,7 +208,8 @@ export type Vista =
       };
     }
   // ── ORION DEMO ──
-  // Il binario del tutorial (non è un pannello: il client lo tiene fisso a lato).
+  // Il binario del tutorial (non è un pannello: il client lo tiene fisso a lato)
+  // + il PALCO della tappa corrente (la presentazione animata al centro).
   | {
       tipo: "tutorial";
       dati: {
@@ -217,6 +218,18 @@ export type Vista =
         totale: number;
         finito: boolean;
         tappe: { id: string; titolo: string; icona: string; fatta: boolean; corrente: boolean }[];
+        palco:
+          | {
+              titolo: string;
+              icona: string;
+              numero: number;
+              totale: number;
+              sottotitolo: string;
+              cosa: string;
+              perche: string;
+              prova: string;
+            }
+          | null;
       };
     }
   // La presentazione animata di fine tappa: pochi punti, belli, che restano.

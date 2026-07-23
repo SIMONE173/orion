@@ -1691,6 +1691,12 @@ export const TOOLS: Anthropic.Tool[] = [
           type: "string",
           enum: ["avvia", "tappa_completata", "stato", "apri_telefono", "simula_posta", "feedback", "finale"],
         },
+        prestazione: {
+          type: "string",
+          description:
+            "Solo per azione=avvia. Come si chiama UN appuntamento nel mestiere dell'utente (tu lo sai da qualsiasi professione): es. avvocato→'Udienza', medico/nutrizionista→'Visita', parrucchiere→'Appuntamento', consulente→'Sessione', idraulico→'Sopralluogo', fotografo→'Servizio'. Se non sai il mestiere, ometti.",
+        },
+        durata_min: { type: "integer", description: "Solo per azione=avvia. Durata tipica in minuti di quell'appuntamento (es. 30, 45, 60)." },
         piaciuto: { type: "boolean", description: "Solo per azione=feedback" },
         utile: { type: "boolean", description: "Solo per azione=feedback" },
       },
@@ -4502,7 +4508,13 @@ const handlers: Record<string, Handler> = {
     };
     switch (azione) {
       case "avvia":
-        return conBinario(avviaTutorial(), { nota: "Studio di prova pronto. Parti con la prima tappa: segui la sua guida." });
+        return conBinario(
+          avviaTutorial(
+            typeof input.prestazione === "string" ? input.prestazione : undefined,
+            typeof input.durata_min === "number" ? input.durata_min : undefined
+          ),
+          { nota: "Studio di prova pronto. Il palco al centro mostra la prima tappa: seguila e accompagnala." }
+        );
       case "tappa_completata":
         return conBinario(avanzaTutorial(), { nota: "Tappa chiusa. Prosegui con la guida della nuova tappa (se il giro è finito, saluta secondo la tappa finale)." });
       case "apri_telefono":

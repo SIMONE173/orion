@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
+import { PalcoDemo, PalcoApertura } from "@/components/PalcoDemo";
 import { CameraCapture } from "@/components/CameraCapture";
 import { VisioneMode, type VisioneHandle } from "@/components/VisioneMode";
 import dynamic from "next/dynamic";
@@ -1807,7 +1808,10 @@ export default function Home() {
       <section className="relative flex min-h-0 flex-1 px-5">
         {/* La conversazione, come una chat: ORION a sinistra, tu a destra. */}
         {chatAttiva && (
-          <aside className="chat-entra chat-colonna mr-4 w-[520px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] 2xl:w-[640px]">
+          <aside
+            className="chat-entra chat-colonna mr-4 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]"
+            style={{ width: "clamp(360px, 40vw, 600px)" }}
+          >
             <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
               <span className="size-2 rounded-full bg-cyan-400 shadow-[0_0_8px] shadow-cyan-400/80" />
               <span className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">CONVERSAZIONE</span>
@@ -1852,7 +1856,9 @@ export default function Home() {
         )}
 
         {/* Il palco dei pannelli */}
-        <div className="relative min-w-0 flex-1">
+        {/* In demo il binario è fisso a destra: riservo lo spazio così il palco
+            e i pannelli non ci finiscono sotto. */}
+        <div className="relative min-w-0 flex-1" style={demo ? { paddingRight: 236 } : undefined}>
           {haPannelli && !gestiAttivi ? (
             <div className="fade-in relative h-full pb-2">
               <button
@@ -1864,6 +1870,19 @@ export default function Home() {
               </button>
               <PanelStage viste={viste} />
             </div>
+          ) : demo && !gestiAttivi && !(tutorial && tutorial.finito) ? (
+            // ORION DEMO: il PALCO al centro — la presentazione animata che
+            // spiega ogni tappa (o l'apertura durante la Chiamata 0). I pannelli
+            // veri restano quelli di sempre e si aprono a parte.
+            tutorial && tutorial.palco ? (
+              <PalcoDemo c={tutorial.palco} />
+            ) : tutorial && tutorial.percorso ? (
+              <div className="grid h-full place-items-center">
+                <p className="max-w-md px-6 text-center text-sm text-slate-600">Un attimo…</p>
+              </div>
+            ) : (
+              <PalcoApertura />
+            )
           ) : chatAttiva ? (
             <div className="grid h-full place-items-center">
               <p className="max-w-md px-6 text-center text-sm text-slate-600">

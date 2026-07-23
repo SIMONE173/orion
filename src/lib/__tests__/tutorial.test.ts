@@ -47,7 +47,8 @@ test("prima della Chiamata 0: percorso nullo e blocco demo da colloquio", () => 
 test("avvio: professione salvata → percorso professionista, studio di prova seminato", () => {
   runWithTenant(tenantId, () => {
     db().prepare("UPDATE profili SET professione = 'Dentista', tipo_lavoro = 'autonomo' WHERE tenant_id = ?").run(tenantId);
-    const s = avviaTutorial();
+    // La prestazione la passa ORION (nessuna lista di professioni): adatto a chiunque.
+    const s = avviaTutorial("Visita di controllo", 45);
     assert.equal(s.percorso, "professionista");
     // Lo studio di prova: clienti, appuntamenti col nome della prestazione,
     // documenti pronti, lista d'attesa carica.
@@ -56,9 +57,12 @@ test("avvio: professione salvata → percorso professionista, studio di prova se
     assert.ok(clienti.length >= 5);
     const app = db().prepare("SELECT titolo FROM appuntamenti WHERE tenant_id = ?").all(tenantId) as { titolo: string }[];
     assert.ok(app.length >= 5);
-    assert.ok(app.some((a) => a.titolo.includes("Visita di controllo"))); // dentista, non "appuntamento"
+    assert.ok(app.some((a) => a.titolo.includes("Visita di controllo"))); // la prestazione passata da ORION
     assert.ok(db().prepare("SELECT id FROM documenti WHERE tenant_id = ?").get(tenantId));
     assert.ok(db().prepare("SELECT id FROM lista_attesa WHERE tenant_id = ?").get(tenantId));
+    // Il palco della prima tappa viaggia nel riepilogo, pronto per il centro.
+    const palco = riepilogoTutorial(s).palco;
+    assert.ok(palco && palco.numero === 1 && palco.cosa.length > 0 && palco.prova.length > 0);
     // Idempotente: un secondo avvio NON risemina.
     avviaTutorial();
     const dopo = db().prepare("SELECT COUNT(*) AS n FROM clienti WHERE tenant_id = ?").get(tenantId) as { n: number };
