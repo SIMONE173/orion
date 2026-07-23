@@ -101,23 +101,31 @@ export default function MiniNucleo() {
   };
 
   return (
+    // La finestrella è TRASCINABILE (drag region di Electron) — così se dà
+    // fastidio la si sposta. L'orbe resta cliccabile: un tap e ORION torna.
     <main
-      onClick={tornaAOrion}
-      title="Torna a ORION"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "transparent",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        paddingTop: 10,
-        cursor: "pointer",
-        userSelect: "none",
-        overflow: "hidden",
-      }}
+      style={
+        {
+          position: "fixed",
+          inset: 0,
+          background: "transparent",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 10,
+          userSelect: "none",
+          overflow: "hidden",
+          WebkitAppRegion: "drag",
+        } as React.CSSProperties
+      }
     >
-      <OrionCore state={core} size={104} />
+      <div
+        onClick={tornaAOrion}
+        title="Torna a ORION (trascina il resto per spostarmi)"
+        style={{ cursor: "pointer", WebkitAppRegion: "no-drag" } as React.CSSProperties}
+      >
+        <OrionCore state={core} size={104} />
+      </div>
 
       {/* Il disegnino di ciò che sta facendo, sotto il nucleo */}
       {doodle && (

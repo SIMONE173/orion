@@ -36,10 +36,6 @@ function creaFinestra() {
     minWidth: 420,
     backgroundColor: "#05070d",
     title: DEMO ? "ORION Demo" : "ORION",
-    // DEMO: il bottone verde MASSIMIZZA invece del tutto-schermo di macOS
-    // (che senza Spazi separati lascia la finestra dietro al Dock, senza
-    // semafori: da demo deve essere sempre professionale e prevedibile).
-    fullscreenable: !DEMO,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -79,22 +75,25 @@ function creaFinestra() {
 
 // ── IL MINI-NUCLEO: solo il nucleo, sempre in primo piano ────────────────────
 // Quando ORION è ridotto a icona, resta una finestrella TRASPARENTE in alto a
-// sinistra, sopra qualsiasi app: il nucleo che respira + i disegnini delle
+// DESTRA, sopra qualsiasi app: il nucleo che respira + i disegnini delle
 // azioni (la pagina /nucleo si sincronizza via BroadcastChannel con l'app).
+// È TRASCINABILE (drag region nella pagina /nucleo): se dà fastidio, si sposta.
 let finestraNucleo = null;
 
 function apriMiniNucleo() {
   if (finestraNucleo && !finestraNucleo.isDestroyed()) return;
+  const area = screen.getPrimaryDisplay().workArea;
   const nucleo = new BrowserWindow({
     width: 180,
     height: 210,
-    x: 22,
-    y: 34,
+    x: area.x + area.width - 180 - 22,
+    y: area.y + 10,
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
     hasShadow: false,
     resizable: false,
+    movable: true,
     skipTaskbar: true,
     alwaysOnTop: true,
     title: "ORION",
