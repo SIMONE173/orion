@@ -213,6 +213,14 @@ export function useSpeech(onFinal: (testo: string) => void) {
     (testo: string) => {
       if (!voiceOn || !testo) return;
       if (typeof window === "undefined") return;
+      // Le FACCINE non si leggono: la voce salta emoji e simboli decorativi
+      // (in chat restano; ad alta voce sarebbero «faccina che sorride…»).
+      testo = testo
+        .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{20E3}]/gu, "")
+        .replace(/\*\*/g, "")
+        .replace(/[ \t]{2,}/g, " ")
+        .trim();
+      if (!testo) return;
       // Stiamo per parlare: BLOCCA SUBITO il microfono per evitare l'eco.
       speakingRef.current = true;
       setSpeaking(true);

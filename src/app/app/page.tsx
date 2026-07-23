@@ -20,13 +20,17 @@ import { DocumentoViewer, type DocVisore } from "@/components/DocumentoViewer";
 import { scaricaTestoPdf } from "@/components/panels/pdf";
 import { useSpeech } from "@/components/useSpeech";
 import { useClapWake } from "@/components/useClapWake";
-import { useSchiocco } from "@/components/useSchiocco";
+import { suonoInviato, suonoRicevuto, suonoTasto } from "@/lib/suoniChat";
 import { applicaTema, type Tema } from "@/lib/tema";
 import { PIANI } from "@/lib/prezzi";
 import { IconMic, IconKeyboard, IconDoc, IconClose, IconSound, IconMute, IconChat, IconLogout } from "@/components/icons";
 import type { Vista, Azione } from "@/lib/orion/views";
 
-type Msg = { role: "user" | "assistant"; content: string; arrivo?: ArrivoWA };
+type Msg = { role: "user" | "assistant"; content: string; arrivo?: ArrivoWA; ora?: string };
+
+// L'orario del messaggio, come su WhatsApp: "17:42".
+const oraAdesso = () =>
+  new Date().toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
 
 // Un elemento della POSTA del titolare: messaggio WhatsApp o EMAIL importante.
 type ArrivoWA = {
@@ -99,7 +103,39 @@ function LogoWhatsApp({ size = 16 }: { size?: number }) {
 // gli elementi fissi) + una vena di animazione per la tappa corrente.
 type BinarioTutorial = Extract<Vista, { tipo: "tutorial" }>["dati"];
 
-function BinarioDemo({ t }: { t: BinarioTutorial }) {
+function BinarioDemo({ t }: { t: BinarioTutorial | null }) {
+  // Prima che il giro parta (chiamata 0 in corso) il binario c'è comunque:
+  // mostra la tappa d'accoglienza, così si CAPISCE subito che è un tutorial.
+  const conosciamoci = !t || !t.percorso;
+  if (conosciamoci) {
+    return (
+      <div
+        className="fade-in rounded-2xl border border-cyan-400/20 bg-[#060d16]/92 shadow-2xl backdrop-blur"
+        style={{ position: "fixed", right: 16, top: "50%", transform: "translateY(-50%)", width: 208, zIndex: 40, padding: 14 }}
+      >
+        <style>{`@keyframes binario-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(103,232,249,0.35); } 50% { box-shadow: 0 0 10px 2px rgba(103,232,249,0.25); } }`}</style>
+        <div className="mb-1 flex items-center gap-1.5">
+          <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-cyan-200">
+            Demo
+          </span>
+          <span className="text-[11px] font-semibold text-slate-200">Giro guidato</span>
+        </div>
+        <div className="mb-3 h-1 overflow-hidden rounded-full bg-white/[0.07]">
+          <div className="h-full w-[6%] rounded-full bg-cyan-400/80" style={{ boxShadow: "0 0 8px rgba(103,232,249,0.6)" }} />
+        </div>
+        <div
+          className="flex items-center gap-2 rounded-lg px-1.5 py-1"
+          style={{ background: "rgba(103,232,249,0.08)", border: "1px solid rgba(103,232,249,0.25)", animation: "binario-pulse 2.4s ease-in-out infinite" }}
+        >
+          <span className="grid size-5 shrink-0 place-items-center text-[13px]">🤝</span>
+          <span className="truncate text-[11px] font-semibold text-cyan-100">Conosciamoci</span>
+        </div>
+        <p className="mt-2 text-[10px] leading-snug text-slate-500">
+          Due domande per capirti, poi il giro a tappe: ORION ti mostra tutto dal vivo.
+        </p>
+      </div>
+    );
+  }
   const fatte = t.tappe.filter((x) => x.fatta).length;
   const pct = t.totale > 0 ? Math.round((fatte / t.totale) * 100) : 0;
   return (
@@ -390,10 +426,15 @@ export default function Home() {
       // Le pillole del turno precedente spariscono appena parte una nuova richiesta.
       setSuggerimenti([]);
 
-      const storico: Msg[] = testo ? [...messagesRef.current, { role: "user", content: testo }] : messagesRef.current;
+      const storico: Msg[] = testo
+        ? [...messagesRef.current, { role: "user", content: testo, ora: oraAdesso() }]
+        : messagesRef.current;
       // quiet: il messaggio (es. esito di un comando) va al modello ma NON si
       // mostra come bolla utente nella trascrizione.
-      if (testo && !quiet) setMessages(storico);
+      if (testo && !quiet) {
+        setMessages(storico);
+        suonoInviato();
+      }
 
       try {
         const res = await fetch("/api/chat", {
@@ -418,7 +459,8 @@ export default function Home() {
           setAvviso(null);
         }
         if (data.testo) {
-          setMessages((m) => [...m, { role: "assistant", content: data.testo }]);
+          setMessages((m) => [...m, { role: "assistant", content: data.testo, ora: oraAdesso() }]);
+          suonoRicevuto();
           speakRef.current?.(data.testo);
         }
         if (Array.isArray(data.viste) && data.viste.length) {
@@ -488,7 +530,8 @@ export default function Home() {
 
   // UNO SCHIOCCO DI DITA mentre ORION parla → zittisce SOLO la frase in corso
   // (il testo resta in chat: la voce torna al prossimo messaggio).
-  useSchiocco(speaking, () => cancelSpeakRef.current?.());
+  // Lo schiocco di dita NON zittisce più ORION: si zittisce SOLO coi pulsanti
+  // (scelta precisa: niente stop accidentali mentre si lavora).
   const micAttivoRef = useRef(micAttivo);
   micAttivoRef.current = micAttivo;
   const standbyRef = useRef(standby);
@@ -754,7 +797,8 @@ export default function Home() {
         if (arr) {
           annunciati.current.add(arr.id);
           setAnnuncio((prev) => prev.filter((x) => x.id !== arr.id));
-          setMessages((m) => [...m, { role: "assistant", content: "", arrivo: arr }]);
+          setMessages((m) => [...m, { role: "assistant", content: "", arrivo: arr, ora: oraAdesso() }]);
+          suonoRicevuto();
         }
         break;
       }
@@ -1157,7 +1201,8 @@ export default function Home() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids: [a.id] }),
     }).catch(() => {});
-    setMessages((m) => [...m, { role: "assistant", content: "", arrivo: a }]);
+    setMessages((m) => [...m, { role: "assistant", content: "", arrivo: a, ora: oraAdesso() }]);
+    suonoRicevuto();
     if (!conVoce) return;
     const chi = chiDi(a);
     if (a.canale === "email") {
@@ -1212,10 +1257,10 @@ export default function Home() {
             ? " · invio simulato: la casella email non è ancora collegata"
             : " · invio simulato: WhatsApp non è ancora collegato"
           : "";
-        setMessages((m) => [...m, { role: "assistant", content: `✓ Risposta a ${chiDi(a)}${via}: «${testo}»${nota}` }]);
+        setMessages((m) => [...m, { role: "assistant", content: `✓ Risposta a ${chiDi(a)}${via}: «${testo}»${nota}`, ora: oraAdesso() }]);
         speakRef.current?.(d.simulato ? "Registrata: partirà appena il canale sarà collegato." : "Inviata.");
       } else {
-        setMessages((m) => [...m, { role: "assistant", content: `Non sono riuscito a inviare la risposta a ${chiDi(a)}: ${d.errore ?? "errore"}.` }]);
+        setMessages((m) => [...m, { role: "assistant", content: `Non sono riuscito a inviare la risposta a ${chiDi(a)}: ${d.errore ?? "errore"}.`, ora: oraAdesso() }]);
         speakRef.current?.("Non sono riuscito a inviarla.");
       }
     } catch {
@@ -1762,7 +1807,7 @@ export default function Home() {
       <section className="relative flex min-h-0 flex-1 px-5">
         {/* La conversazione, come una chat: ORION a sinistra, tu a destra. */}
         {chatAttiva && (
-          <aside className="chat-entra chat-colonna mr-4 w-[360px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03]">
+          <aside className="chat-entra chat-colonna mr-4 w-[520px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] 2xl:w-[640px]">
             <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
               <span className="size-2 rounded-full bg-cyan-400 shadow-[0_0_8px] shadow-cyan-400/80" />
               <span className="text-[11px] font-semibold tracking-[0.22em] text-slate-400">CONVERSAZIONE</span>
@@ -1781,6 +1826,11 @@ export default function Home() {
                     }`}
                   >
                     {m.content}
+                    {m.ora && (
+                      <span className="float-right ml-2.5 mt-2 select-none text-[10px] leading-none text-slate-400/60">
+                        {m.ora}
+                      </span>
+                    )}
                   </div>
                 )
               )}
@@ -1875,6 +1925,8 @@ export default function Home() {
                 ref={inputRef}
                 value={testoInput}
                 onChange={(e) => {
+                  // Il tic morbido della scrittura (solo quando si AGGIUNGE testo).
+                  if (e.target.value.length > testoInput.length) suonoTasto();
                   setTestoInput(e.target.value);
                   if (e.target.value) setSuggerimenti([]);
                 }}
@@ -2017,6 +2069,11 @@ export default function Home() {
                     }`}
                   >
                     {m.content}
+                    {m.ora && (
+                      <span className="float-right ml-2.5 mt-2 select-none text-[10px] leading-none text-slate-400/60">
+                        {m.ora}
+                      </span>
+                    )}
                   </div>
                 )
               )}
@@ -2025,8 +2082,9 @@ export default function Home() {
         </div>
       )}
 
-      {/* ORION DEMO: il binario del giro guidato, sempre sott'occhio. */}
-      {demo && tutorial && tutorial.percorso && autenticato && <BinarioDemo t={tutorial} />}
+      {/* ORION DEMO: il binario del giro guidato, visibile DALLA PRIMA PAROLA
+          (durante la chiamata 0 mostra la tappa d'accoglienza «Conosciamoci»). */}
+      {demo && autenticato && <BinarioDemo t={tutorial} />}
 
       {/* L'ANNUNCIO della posta: «È arrivato un messaggio da X, vuoi aprirlo?» */}
       {annuncio.length > 0 && !rispostaA && (

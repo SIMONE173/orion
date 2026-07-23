@@ -33,8 +33,13 @@ export async function GET() {
           return null;
         }
       })(),
-      // Continuità: ultimi messaggi per ripopolare la conversazione al reload.
-      storico: messaggiRecenti(40).map((m) => ({ role: m.ruolo, content: m.contenuto })),
+      // Continuità: ultimi messaggi per ripopolare la conversazione al reload
+      // (con l'ORARIO di ciascuno, come in ogni chat che si rispetti).
+      storico: messaggiRecenti(40).map((m) => ({
+        role: m.ruolo,
+        content: m.contenuto,
+        ora: new Date(m.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Rome" }),
+      })),
     };
   });
   const hasKey = Boolean(process.env.ANTHROPIC_API_KEY);

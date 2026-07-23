@@ -65,6 +65,22 @@ export async function runConversation(
 
   const client = new Anthropic({ apiKey });
 
+  // ORION DEMO, PRIMO ISTANTE: il benvenuto non si gioca alla lotteria del
+  // modello — è FISSO, perfetto, immediato e gratuito. Dal secondo turno in
+  // poi conduce il motore (che nel prompt ha la guida del giro).
+  if (
+    utente &&
+    emailDemo(utente.email) &&
+    avvio &&
+    utente.onboarding_completo !== 1 &&
+    storico.length === 0
+  ) {
+    const benvenuto =
+      "Ciao, benvenuto! 👋 Io sono ORION, la tua segretaria personale — e questa è la mia demo: prima due chiacchiere per conoscerci, poi ti porto a fare un giro guidato dove ti faccio VEDERE dal vivo come lavorerei per te, tappa per tappa (le vedi sulla destra).\n\nPartiamo dalla cosa più semplice: come ti chiami, o come preferisci che ti chiami?";
+    salvaMessaggio("assistant", benvenuto, utente?.id);
+    return { testo: benvenuto, viste: [], azioni: [], suggerimenti: undefined, consumo: undefined };
+  }
+
   // All'avvio della giornata: consolidazione PIGRA della memoria (1 sola volta/
   // giorno, modello economico) → aggiorna diario e intuizioni PRIMA di costruire
   // il prompt, così il saluto sa già "dove eravamo rimasti".
