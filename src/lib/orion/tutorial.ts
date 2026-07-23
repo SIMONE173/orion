@@ -428,13 +428,20 @@ function inserisciCliente(c: { nome: string; telefono: string; email: string | n
   return Number(r.lastInsertRowid);
 }
 
+// L'agenda di ORION vive in ora LOCALE "naive" ("YYYY-MM-DDTHH:MM"): i
+// pannelli mostrano la stringa così com'è. Niente toISOString (che è UTC).
+function isoLocale(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 function inserisciAppuntamento(a: { cliente_id: number; titolo: string; inizio: Date; durataMin: number; stato: string; note?: string | null }): void {
   const fine = new Date(a.inizio.getTime() + a.durataMin * 60_000);
   db()
     .prepare(
       "INSERT INTO appuntamenti (tenant_id, cliente_id, titolo, inizio, fine, stato, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
-    .run(T(), a.cliente_id, a.titolo, a.inizio.toISOString(), fine.toISOString(), a.stato, a.note ?? null, new Date().toISOString());
+    .run(T(), a.cliente_id, a.titolo, isoLocale(a.inizio), isoLocale(fine), a.stato, a.note ?? null, new Date().toISOString());
 }
 
 // Un orario "di studio" nel futuro prossimo: oggi se c'è ancora giornata,

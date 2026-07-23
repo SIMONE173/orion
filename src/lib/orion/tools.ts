@@ -6,6 +6,7 @@ import { tenantDemo } from "../demo";
 import {
   type StatoTutorial,
   statoTutorial,
+  salvaStatoTutorial,
   tappaCorrente,
   tappeDi,
   riepilogoTutorial,
@@ -4530,11 +4531,22 @@ const handlers: Record<string, Handler> = {
           }),
           { nota: "Feedback registrato." }
         );
-      case "finale":
+      case "finale": {
+        // Il gran finale chiude anche il binario: tutte le tappe spuntate.
+        const s = statoTutorial();
+        if (s.percorso && !s.finito) {
+          const corrente = tappaCorrente(s);
+          if (corrente) s.completate = [...s.completate.filter((id) => id !== corrente.id), corrente.id];
+          s.indice = tappeDi(s.percorso).length;
+          s.finito = true;
+          salvaStatoTutorial(s);
+        }
         return {
           result: { ok: true, nota: "Sito aperto nel browser dell'utente. Saluta come da guida." },
           azione: { tipo: "apri_url", url: "https://www.orionvision.it", etichetta: "orionvision.it" },
+          vista: { tipo: "tutorial", dati: riepilogoTutorial(s) },
         };
+      }
       default:
         return conBinario(statoTutorial());
     }

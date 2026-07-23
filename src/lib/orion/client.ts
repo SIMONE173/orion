@@ -6,6 +6,7 @@ import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
 import { salvaMessaggio } from "../data";
 import { tenantIdCorrente } from "../tenant";
 import { registraConsumo } from "../consumi";
+import { emailDemo } from "../demo";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
 
@@ -17,6 +18,10 @@ import type { Utente } from "../auth";
 // sul modello PIENO. Override: ORION_MODEL, ORION_MODEL_RAPIDO, ORION_ROUTING=off.
 const MODEL = (process.env.ORION_MODEL || "claude-opus-4-8").trim();
 const MODEL_RAPIDO = (process.env.ORION_MODEL_RAPIDO || "claude-haiku-4-5-20251001").trim();
+// ORION DEMO: il giro guidato recita su un motore intermedio — qualità alta,
+// costi ~5 volte sotto il modello pieno (la sola scrittura cache del prompt
+// su quello pieno vale più di 1€ a demo: qui pochi centesimi).
+const MODEL_DEMO = (process.env.ORION_MODEL_DEMO || "claude-sonnet-5").trim();
 const ROUTING_ATTIVO = (process.env.ORION_ROUTING || "on").trim() !== "off";
 
 const RE_OPERATIVA =
@@ -128,7 +133,10 @@ export async function runConversation(
   let testo = "";
 
   const onboardingCompleto = utente ? utente.onboarding_completo === 1 : true;
-  const modello = scegliModello(storico, avvio, allegato, onboardingCompleto);
+  // ORION DEMO: tutto il giro recita sul motore demo (qualità alta, spesa
+  // da centesimi) — il routing normale riguarda solo gli account veri.
+  const demo = Boolean(utente && emailDemo(utente.email));
+  const modello = demo ? MODEL_DEMO : scegliModello(storico, avvio, allegato, onboardingCompleto);
   const usaThinking = modello === MODEL; // il rapido risponde diretto (velocità)
 
   // PROMPT CACHING, parte due. Il blocco FISSO (106 strumenti + sistema

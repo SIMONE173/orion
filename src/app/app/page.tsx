@@ -1693,7 +1693,10 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-screen flex-col">
+    // overflowX nascosto: se un pannello sborda (righe che non vanno a capo su
+    // schermi stretti), il documento NON deve scorrere di lato — il focus
+    // sull'input trascinerebbe tutta l'app fuori schermo.
+    <main className="flex h-screen flex-col" style={{ overflowX: "hidden" }}>
       {/* Header */}
       <header className="flex items-center justify-between px-5 py-3">
         <div className="flex items-center gap-2.5">

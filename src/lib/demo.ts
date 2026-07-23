@@ -18,9 +18,10 @@ import { spesaMeseMicro } from "./consumi";
 // usarlo (bloccato in signup): il suffisso stesso È la prova che è una demo.
 export const DOMINIO_DEMO = "demo.orionvision.it";
 
-// Tetto di spesa AI per OGNI demo, in micro-euro (≈ 1,50 €): più che
-// sufficiente per l'intero tutorial guidato, poi la demo saluta con garbo.
-export const TETTO_DEMO_MICRO = 1_500_000;
+// Tetto di spesa AI per OGNI demo, in micro-euro (≈ 2,50 €): il giro completo
+// misurato dal vivo costa ~1,60 € col motore demo — c'è respiro per chi
+// chiacchiera di più, poi la demo saluta con garbo.
+export const TETTO_DEMO_MICRO = 2_500_000;
 
 // Vita di un account demo: dopo questi giorni la pulizia lo smonta.
 export const GIORNI_VITA_DEMO = 3;
