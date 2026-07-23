@@ -24,8 +24,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Poche demo al giorno per indirizzo: il tutorial si fa una volta, non a nastro.
-    const lim = rateLimit(`demo:${ipRichiesta(req)}`, 3, 24 * 60 * 60 * 1000);
+    // Poche demo al giorno per indirizzo: il tutorial si fa una volta, non a
+    // nastro. 6 e non 3: dietro la stessa rete può esserci uno studio intero.
+    const lim = rateLimit(`demo:${ipRichiesta(req)}`, 6, 24 * 60 * 60 * 1000);
     if (!lim.ok) {
       return NextResponse.json(
         { ok: false, errore: "Hai già provato la demo oggi. Domani puoi rifarla — o passare alla versione completa. 😉" },
