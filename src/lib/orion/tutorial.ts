@@ -114,16 +114,15 @@ const TAPPA_GESTIONALE: TappaTutorial = {
   titolo: "Il tuo software",
   icona: "🖥️",
   palco: {
-    sottotitolo: "Scrivo io nel programma che usi già",
-    cosa: "Le modifiche nate qui — un appuntamento spostato, un cliente nuovo — le riporto io nel tuo gestionale: lo apro e ci scrivo dentro, davanti a te.",
-    perche: "Non devi cambiare programma né imparare niente di nuovo: io lavoro nel TUO, qualunque sia. Tu guardi e basta.",
-    prova: "Sta' a guardare lo schermo: ora riporto io nel tuo software le modifiche di prima.",
+    sottotitolo: "So lavorare DENTRO il software che usi già",
+    cosa: "Apro il programma che usi ogni giorno — il tuo gestionale, il tuo Calendar — e ci scrivo io: clicco, compilo, salvo. Davanti ai tuoi occhi.",
+    perche: "Non ho un collegamento magico e non devi cambiare niente: guardo lo schermo e uso il tuo software come faresti tu. Per questo funziono con QUALSIASI programma, basta dirmi il nome.",
+    prova: "Sta' a guardare: apro il tuo software e ci scrivo io un appuntamento, col cursore.",
   },
-  guida: `SCOPO: il pezzo da fantascienza — ORION che scrive DAVVERO nel software dell'utente.
-CONTROLLA LA FONTE (profilo):
-• Se USA un gestionale: le modifiche appena nate (disdetta di Giulia, spostamenti) le riporti TU nel SUO software. Attiva il Ponte se serve (attiva_scrittura_gestionale senza url), poi usa_computer con obiettivo autosufficiente: apri il software e riporta ESATTAMENTE quelle modifiche, una per una. Prima digli di guardare. A esito positivo: segna_consegne_fatte e digli che quelle voci di prova può cancellarle quando vuole.
-• Se NON usa software (fonte ORION): spiega che ORION È il suo gestionale (agenda/clienti/archivio vivono qui) e mostra la coda Consegne (mostra_consegne): se un giorno adottasse un software, scriverei io lì con la Mano.
-Poi: "non devi cambiare software, lavoro nel TUO" → tutorial azione tappa_completata.`,
+  guida: `SCOPO: il pezzo da fantascienza — ORION che LAVORA DENTRO il software che l'utente usa (risponde al "come fa a saperci lavorare solo col nome?").
+1) Apri la finestra di prova del SUO software: chiama tutorial azione apri_software passando 'software' = il nome che ha detto alla Chiamata 0 (es. "Google Calendar" o il suo gestionale) e 'prestazione'. Compare una finestra di QUEL programma e ORION la opera col cursore, scrivendo un appuntamento.
+2) Mentre parte, SPIEGA il meccanismo con parole semplici: "non ho un collegamento magico — guardo lo schermo e uso il tuo software come faresti tu; ecco perché lavoro con qualsiasi programma, basta che me lo dici". È QUESTA la risposta alla domanda che si farà.
+3) Onestà: "questa è una finestra di prova; nella versione completa apro il tuo [nome] VERO e faccio esattamente questo". Poi tutorial azione tappa_completata.`,
 };
 
 const TAPPA_POSTA: TappaTutorial = {
@@ -544,18 +543,12 @@ export function seminaStudioDiProva(percorso: Percorso, prest: { nome: string; d
   const ids = CLIENTI_DEMO.map(inserisciCliente);
   const [giulia, andrea, elena, paolo, martina] = ids;
 
-  // La giornata "viva": piena il giusto, con una cosa da confermare, in ORARI
-  // DISTINTI. Se in Italia la giornata di studio è quasi finita (dalle 14 in
-  // poi), il trio va a DOMANI — mai tre appuntamenti ammassati alla stessa ora.
-  const hRoma = oraItaliana();
-  const oggiVivo = hRoma < 14;
-  const base = Math.max(10, hRoma + 1);
-  const trio: [number, number][] = oggiVivo
-    ? [[0, base], [0, base + 2], [0, base + 4]]
-    : [[1, 10], [1, 15], [1, 17]];
-  inserisciAppuntamento({ cliente_id: andrea, titolo: `${prest.nome} — Andrea Colombo`, inizio: dataRoma(...trio[0]), durataMin: prest.durataMin, stato: "confermato" });
-  inserisciAppuntamento({ cliente_id: elena, titolo: `${prest.nome} — Elena Ricci`, inizio: dataRoma(...trio[1]), durataMin: prest.durataMin, stato: "confermato" });
-  inserisciAppuntamento({ cliente_id: paolo, titolo: `${prest.nome} — Paolo Fontana`, inizio: dataRoma(...trio[2]), durataMin: prest.durataMin, stato: "da_confermare" });
+  // La giornata di OGGI è SEMPRE piena (orari da studio 10/15/17), a qualsiasi
+  // ora si apra la demo: il primo colpo d'occhio dev'essere una giornata viva,
+  // mai un'agenda vuota. Uno è da confermare (dà sostanza al briefing).
+  inserisciAppuntamento({ cliente_id: andrea, titolo: `${prest.nome} — Andrea Colombo`, inizio: dataRoma(0, 10), durataMin: prest.durataMin, stato: "confermato" });
+  inserisciAppuntamento({ cliente_id: elena, titolo: `${prest.nome} — Elena Ricci`, inizio: dataRoma(0, 15), durataMin: prest.durataMin, stato: "confermato" });
+  inserisciAppuntamento({ cliente_id: paolo, titolo: `${prest.nome} — Paolo Fontana`, inizio: dataRoma(0, 17), durataMin: prest.durataMin, stato: "da_confermare" });
 
   // Domani: Giulia (la protagonista del telefono) al mattino, con documenti
   // pronti; Martina a metà mattina (carburante per l'imprevisto).
@@ -612,7 +605,9 @@ function registraPagamentoDemo(clienteId: number, importo: number): void {
 const REGOLE_TUTOR = `REGOLE DEL TUTOR (valgono per tutto il giro guidato)
 - IL PALCO FA LA SPIEGAZIONE: al centro dello schermo compare da solo, per ogni tappa, un riquadro animato che spiega COS'È la funzione, PERCHÉ serve e COME provarla. NON leggerlo a voce parola per parola: tu lo ACCOMPAGNI con calore, aggiungi il tocco umano, e soprattutto AGISCI (apri i pannelli veri, fai succedere le cose).
 - Parole SEMPLICI, zero tecnicismi (mai "webhook", "API", "tool" — di' "si collega", "lo faccio io"). UNA cosa alla volta, frasi brevi, il tono di una collega in gamba il primo giorno.
-- Ritmo della tappa: 1) una frase che introduce (il palco ha già i dettagli), 2) AGISCI/mostra col pannello vero, 3) invita a provare ciò che dice il palco, 4) quando ha provato (o dice "avanti") chiama tutorial azione tappa_completata. Il binario a destra avanza da solo.
+- Ritmo della tappa: 1) una frase che introduce (il palco ha già i dettagli), 2) AGISCI/mostra col pannello vero, 3) invita a provare ciò che dice il palco, 4) POI FERMATI e aspetta la sua reazione. Chiama tutorial azione tappa_completata SOLO quando l'utente ha provato o dice "avanti".
+- UNA TAPPA PER TURNO, MAI DI PIÙ: non incatenare più tappe nello stesso turno, non fare tappa_completata due volte di fila. Mostri la tappa, inviti a provare, ti FERMI. È un giro passo-passo: l'utente deve toccare ogni cosa con calma, non guardarti correre.
+- SU AVVIO/RICARICA (direttiva d'avvio con giro già in corso): di' solo "bentornato, eravamo qui: [tappa]" e aspetta — NON rieseguire la tappa da capo, NON avanzare.
 - I PANNELLI restano quelli di sempre: aprili come fai normalmente (briefing, agenda, telefono…). Il palco è in più, non li sostituisce.
 - Segui la GUIDA DELLA TAPPA corrente. Non anticipare le altre tappe; se chiede cose di un'altra tappa, riportalo con leggerezza al filo.
 - L'utente comanda: "avanti" = tappa_completata; "salta questa" = idem; "aspetta/fermati" = fermati e rispondi.

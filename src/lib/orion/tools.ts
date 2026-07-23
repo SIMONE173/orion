@@ -1683,20 +1683,21 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: "tutorial",
     description:
-      "SOLO IN ORION DEMO — il timone del giro guidato. Azioni: 'avvia' (dopo la Chiamata 0: sceglie il percorso, prepara lo studio di prova e ti dà la prima tappa), 'tappa_completata' (chiude la tappa corrente e ti dà la guida della successiva: chiamala quando la tappa è stata VISSUTA o l'utente dice di andare avanti), 'stato' (dove siamo), 'apri_telefono' (apre il telefono finto del cliente per la tappa WhatsApp), 'simula_posta' (fa arrivare le email di prova per la tappa posta), 'feedback' (registra piaciuto/utile nel finale), 'finale' (apre il sito di ORION nel browser dell'utente: solo alla chiusura del giro).",
+      "SOLO IN ORION DEMO — il timone del giro guidato. Azioni: 'avvia' (dopo la Chiamata 0: sceglie il percorso, prepara lo studio di prova e ti dà la prima tappa), 'tappa_completata' (chiude la tappa corrente e ti dà la guida della successiva: chiamala quando la tappa è stata VISSUTA o l'utente dice di andare avanti), 'stato' (dove siamo), 'apri_telefono' (apre il telefono finto del cliente per la tappa WhatsApp), 'apri_software' (apre una FINESTRA DI PROVA del software che l'utente usa — Calendar o gestionale, col suo nome — e ORION la opera col cursore scrivendo un appuntamento: per la tappa «Il tuo software»), 'simula_posta' (fa arrivare le email di prova per la tappa posta), 'feedback' (registra piaciuto/utile nel finale), 'finale' (apre il sito di ORION nel browser dell'utente: solo alla chiusura del giro).",
     input_schema: {
       type: "object",
       properties: {
         azione: {
           type: "string",
-          enum: ["avvia", "tappa_completata", "stato", "apri_telefono", "simula_posta", "feedback", "finale"],
+          enum: ["avvia", "tappa_completata", "stato", "apri_telefono", "apri_software", "simula_posta", "feedback", "finale"],
         },
         prestazione: {
           type: "string",
           description:
-            "Solo per azione=avvia. Come si chiama UN appuntamento nel mestiere dell'utente (tu lo sai da qualsiasi professione): es. avvocato→'Udienza', medico/nutrizionista→'Visita', parrucchiere→'Appuntamento', consulente→'Sessione', idraulico→'Sopralluogo', fotografo→'Servizio'. Se non sai il mestiere, ometti.",
+            "Per azione=avvia (e utile anche per apri_software): come si chiama UN appuntamento nel mestiere dell'utente (tu lo sai da qualsiasi professione): es. avvocato→'Udienza', medico/nutrizionista→'Visita', parrucchiere→'Appuntamento', consulente→'Sessione', idraulico→'Sopralluogo', fotografo→'Servizio'. Se non sai il mestiere, ometti.",
         },
         durata_min: { type: "integer", description: "Solo per azione=avvia. Durata tipica in minuti di quell'appuntamento (es. 30, 45, 60)." },
+        software: { type: "string", description: "Solo per azione=apri_software. Il nome del software che l'utente ha detto di usare (es. 'Google Calendar', 'Dentalink', 'il tuo gestionale')." },
         piaciuto: { type: "boolean", description: "Solo per azione=feedback" },
         utile: { type: "boolean", description: "Solo per azione=feedback" },
       },
@@ -4525,6 +4526,21 @@ const handlers: Record<string, Handler> = {
           },
           vista: { tipo: "telefono", dati: { cliente: "Giulia Marchetti", telefono: "+393901000001" } },
         };
+      case "apri_software": {
+        const nomeSw = (typeof input.software === "string" && input.software.trim()) || "il tuo gestionale";
+        const skin: "calendar" | "gestionale" = /calendar|google|calendario/i.test(nomeSw) ? "calendar" : "gestionale";
+        const prest = (typeof input.prestazione === "string" && input.prestazione.trim()) || "Appuntamento";
+        return {
+          result: {
+            ok: true,
+            nota: `Finestra di prova di "${nomeSw}" aperta: ORION la sta operando col cursore e ci scrive un appuntamento (la vede l'utente). Mentre parte, SPIEGA il meccanismo: non un collegamento magico — guardi lo schermo e usi il software come una persona, ecco perché funzioni con QUALSIASI software solo sapendone il nome. Poi ricorda che nella versione completa apri il suo ${nomeSw} VERO.`,
+          },
+          vista: {
+            tipo: "software_prova",
+            dati: { nome: nomeSw, skin, cliente: "Giulia Marchetti", prestazione: prest, quando: "domani 09:00" },
+          },
+        };
+      }
       case "simula_posta": {
         const esito = simulaPostaDemo();
         return {

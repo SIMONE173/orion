@@ -243,7 +243,20 @@ export type Vista =
       };
     }
   // Il telefono del cliente (demo): l'utente scrive come Giulia, la segreteria risponde.
-  | { tipo: "telefono"; dati: { cliente: string; telefono: string } };
+  | { tipo: "telefono"; dati: { cliente: string; telefono: string } }
+  // La FINESTRA DI PROVA del software nominato dall'utente (demo): un finto
+  // Calendar / gestionale che ORION opera col cursore, per mostrare che sa
+  // lavorare dentro QUALSIASI software, non solo nel proprio ambiente.
+  | {
+      tipo: "software_prova";
+      dati: {
+        nome: string; // il nome del software dichiarato (es. "Google Calendar")
+        skin: "calendar" | "gestionale";
+        cliente: string; // il cliente dell'appuntamento che ORION scrive
+        prestazione: string; // come si chiama l'appuntamento (per il testo scritto)
+        quando: string; // es. "domani 09:00"
+      };
+    };
 
 // Azioni che ORION fa eseguire allo SCHERMO del client (alla Jarvis): aprire
 // siti, entrare in modalità appunti, aprire/zoomare un documento, ecc.

@@ -47,6 +47,7 @@ import { ImportaPanel } from "./panels/ImportaPanel";
 import { AffiancaPanel } from "./panels/AffiancaPanel";
 import { PresentazionePanel } from "./panels/PresentazionePanel";
 import { TelefonoPanel } from "./panels/TelefonoPanel";
+import { SoftwareProvaPanel } from "./panels/SoftwareProvaPanel";
 
 export function renderPanel(v: Vista) {
   switch (v.tipo) {
@@ -120,6 +121,8 @@ export function renderPanel(v: Vista) {
       return <PresentazionePanel dati={v.dati} />;
     case "telefono":
       return <TelefonoPanel dati={v.dati} />;
+    case "software_prova":
+      return <SoftwareProvaPanel dati={v.dati} />;
     default:
       return null;
   }
