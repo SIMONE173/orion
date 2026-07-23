@@ -9,7 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}'"
+    "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo'"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3"
