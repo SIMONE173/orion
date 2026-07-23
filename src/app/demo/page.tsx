@@ -46,34 +46,34 @@ export default function DemoPage() {
         style={{ background: "radial-gradient(closest-side, rgba(103,232,249,0.14), transparent)" }}
       />
 
-      <div className="relative w-full max-w-xl text-center">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.25em] text-cyan-200">
+      <div className="relative w-full max-w-xl text-center lg:max-w-3xl">
+        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.25em] text-cyan-200 lg:px-5 lg:py-1.5 lg:text-sm">
           🎬 ORION Demo
         </div>
 
         {dentroApp ? (
           <>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Benvenuto nella demo</h1>
-            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-6xl">Benvenuto nella demo</h1>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400 lg:mt-5 lg:max-w-2xl lg:text-xl lg:leading-relaxed">
               Adesso conosci ORION di persona: una breve chiacchierata per capire il tuo lavoro, poi ti porta
               lui a fare un giro guidato — parla, agisce e ti fa provare tutto. Nessun dato vero, nessun impegno.
             </p>
             <button
               onClick={avvia}
               disabled={avvio === "in_corso"}
-              className="mt-8 inline-flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-400/15 px-8 py-4 text-lg font-semibold text-cyan-50 shadow-[0_0_30px_rgba(103,232,249,0.15)] transition hover:bg-cyan-400/25 disabled:opacity-50"
+              className="mt-8 inline-flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-400/15 px-8 py-4 text-lg font-semibold text-cyan-50 shadow-[0_0_30px_rgba(103,232,249,0.15)] transition hover:bg-cyan-400/25 disabled:opacity-50 lg:mt-12 lg:rounded-3xl lg:px-14 lg:py-6 lg:text-2xl"
             >
               {avvio === "in_corso" ? "Preparo il tuo studio di prova…" : "Inizia la demo"}
             </button>
-            {errore && <p className="mt-4 text-sm text-rose-300">{errore}</p>}
-            <p className="mt-6 text-[11px] text-slate-500">
+            {errore && <p className="mt-4 text-sm text-rose-300 lg:text-base">{errore}</p>}
+            <p className="mt-6 text-[11px] text-slate-500 lg:mt-8 lg:text-sm">
               Serve il microfono per parlare con ORION (te lo chiede lui). Lo studio di prova si cancella da solo dopo pochi giorni.
             </p>
           </>
         ) : (
           <>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Prova ORION dal vivo</h1>
-            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400">
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-6xl">Prova ORION dal vivo</h1>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-400 lg:mt-5 lg:max-w-2xl lg:text-xl lg:leading-relaxed">
               La demo è ORION vero, guidato da ORION in persona: ti accoglie, ti fa un giro delle sue
               meraviglie e le fa succedere davanti ai tuoi occhi — anche dentro il software che già usi.
               Per questo vive sul computer, non nel browser.

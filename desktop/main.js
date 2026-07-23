@@ -36,6 +36,10 @@ function creaFinestra() {
     minWidth: 420,
     backgroundColor: "#05070d",
     title: DEMO ? "ORION Demo" : "ORION",
+    // DEMO: il bottone verde MASSIMIZZA invece del tutto-schermo di macOS
+    // (che senza Spazi separati lascia la finestra dietro al Dock, senza
+    // semafori: da demo deve essere sempre professionale e prevedibile).
+    fullscreenable: !DEMO,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -67,8 +71,9 @@ function creaFinestra() {
   });
 
   // Carica DIRETTAMENTE l'app (la radice del sito è la vetrina di marketing).
-  // In demo si parte dall'ingresso /demo: un bottone e comincia il giro.
+  // In demo si parte dall'ingresso /demo, con la finestra già bella grande.
   win.loadURL(DEMO ? `${ORION_URL}/demo` : `${ORION_URL}/app`);
+  if (DEMO) win.maximize();
   return win;
 }
 
