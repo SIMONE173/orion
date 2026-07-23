@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Moduli Node nativi/server: non vanno bundlati, vanno richiesti a runtime.
-  serverExternalPackages: ["better-sqlite3", "web-push", "imapflow", "nodemailer"],
+  serverExternalPackages: ["better-sqlite3", "web-push", "imapflow", "nodemailer", "msedge-tts"],
   // Nasconde l'indicatore dev di Next che si sovrapporrebbe al dock di ORION.
   devIndicators: false,
   // Header di sicurezza su ogni risposta. Niente CSP stretta per ora: ORION
