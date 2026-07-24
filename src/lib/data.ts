@@ -3,7 +3,7 @@ import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
 import { cifra } from "./crypto";
 import { eBetaTester, SCONTO_BETA } from "./beta";
-import { lanciato, eccezioneLancio } from "./lancio";
+import { lanciato, eccezioneLancio, accessoGratuitoPermanente } from "./lancio";
 import { emailDemo } from "./demo";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -2546,6 +2546,12 @@ export function statoAbbonamento(email?: string | null): StatoAbbonamento {
   // Proprietario: accesso pieno senza pagare.
   const admin = adminEmail();
   if (email && admin && email.trim().toLowerCase() === admin) {
+    return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
+  }
+
+  // Accessi gratuiti A VITA (regali del titolare): pieno accesso senza carta,
+  // prima e DOPO il lancio.
+  if (accessoGratuitoPermanente(emailAccount)) {
     return { ...base, stato: "attivo", attivo: true, accessoConsentito: true };
   }
 
