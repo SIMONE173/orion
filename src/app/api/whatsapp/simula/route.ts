@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cercaCliente, getClienteByTelefono, logCommunication, risposteDopo } from "@/lib/data";
+import { cercaCliente, getClienteByTelefono, logCommunication, risposteDopo, getRisponditore, segnaComunicazioneDaAnnunciare } from "@/lib/data";
 import { gestisciMessaggioCliente } from "@/lib/orion/segreteria";
 import { conTenant } from "@/lib/sessione";
 
@@ -20,6 +20,11 @@ export async function POST(req: NextRequest) {
         (body.telefono ? getClienteByTelefono(String(body.telefono)) : undefined);
 
       const tipo = body.tipo ?? "testo";
+      // Come il webhook: segreteria accesa + testo → nasce silenzioso (letto=1),
+      // gli appuntamenti li gestisce ORION; il titolare viene avvisato solo se
+      // la segreteria lo decide (non-appuntamenti o urgenze) o se resta ingestito.
+      const livello = getRisponditore();
+      const silenzioso = livello !== "spenta" && tipo === "testo";
       const com = logCommunication({
         cliente_id: cliente?.id ?? null,
         direzione: "in",
@@ -29,6 +34,7 @@ export async function POST(req: NextRequest) {
         allegato_url: body.allegato ?? null,
         telefono: cliente?.telefono ?? (body.telefono ? String(body.telefono) : null),
         stato: "ricevuto",
+        letto: silenzioso ? 1 : 0,
       });
       // processa:true → il messaggio attraversa la STESSA pipeline del webhook
       // vero (copioni + segreteria AI): perfetto per provare la segreteria.
@@ -40,6 +46,8 @@ export async function POST(req: NextRequest) {
           testo: String(body.testo),
         });
       }
+      // Ingestito ma la segreteria era accesa: il titolare deve vederlo.
+      if (!rispostaInviata && silenzioso) segnaComunicazioneDaAnnunciare(com.id);
       // Le risposte partite in QUESTO scambio: il telefono finto della demo le
       // mostra come le vedrebbe il cliente vero.
       const risposte =

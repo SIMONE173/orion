@@ -9,6 +9,7 @@ import {
   creaAppuntamento,
   trovaConflitti,
   creaPromemoria,
+  annunciaUltimoArrivo,
   listComunicazioni,
   logCommunication,
   logEvento,
@@ -165,8 +166,15 @@ const TOOLS_SEGRETERIA: Anthropic.Tool[] = [
   {
     name: "prendi_messaggio",
     description:
-      "Lascia un messaggio/richiamo al professionista (con push immediata). Usalo per tutto ciò che non puoi o non devi gestire da solo: richieste fuori dal tuo raggio, casi dubbi, clienti da richiamare.",
-    input_schema: { type: "object", properties: { messaggio: { type: "string" } }, required: ["messaggio"] },
+      "Avvisa il professionista di QUESTO messaggio (glielo mostra così può aprirlo e rispondere, con push). Usalo SOLO quando il messaggio NON riguarda appuntamenti (domande a cui non sai rispondere, documenti, questioni personali, lamentele, cose che deve decidere lui), OPPURE quando è URGENTE (in quel caso urgente=true, anche se riguarda appuntamenti). NON usarlo per la gestione ordinaria degli appuntamenti: quella la fai tu.",
+    input_schema: {
+      type: "object",
+      properties: {
+        messaggio: { type: "string" },
+        urgente: { type: "boolean", description: "true se è una richiesta urgente (il professionista va avvisato subito)" },
+      },
+      required: ["messaggio"],
+    },
   },
   {
     name: "disdici",
@@ -209,8 +217,8 @@ ${poteri}
 REGOLE D'ACCIAIO:
 - VERITÀ OPERATIVA: di' che una cosa è fatta SOLO se lo strumento l'ha confermata (ok:true) in questo scambio. Mai fingere.
 - Brevità e calore: 1-3 frasi, tono cortese e umano, dai del lei. NON aggiungere firme (viene aggiunta in automatico).
+- QUANDO AVVISARE IL PROFESSIONISTA (regola importantissima): gli APPUNTAMENTI (prenotare, spostare, disdire, chiedere gli orari liberi) li gestisci TU e basta, in autonomia — NON disturbare il professionista per questi, NON usare prendi_messaggio per la gestione ordinaria degli appuntamenti. Usa prendi_messaggio SOLO se: (a) il messaggio NON riguarda appuntamenti (una domanda a cui non sai rispondere, un documento, una questione personale, una lamentela, qualcosa che deve decidere lui), OPPURE (b) è una richiesta URGENTE (anche se sugli appuntamenti) → in quel caso prendi_messaggio con urgente=true. Solo così il professionista viene avvisato del messaggio e può aprirlo e rispondere.
 - MAI: parlare di altri clienti o dei loro dati; dare consigli medici/legali/tecnici; inventare prezzi, orari di apertura o informazioni che non conosci → in quei casi: "riferisco allo studio" + prendi_messaggio.
-- Se il cliente chiede qualcosa fuori dal tuo raggio o insiste per parlare col professionista: prendi_messaggio e rassicura.
 - Se non c'è nulla da rispondere di utile (spam, vocali che non puoi ascoltare), rispondi con una frase che invita a scrivere il motivo del contatto.`;
 }
 
@@ -309,16 +317,20 @@ function eseguiAttrezzo(nome: string, input: any, cliente: Cliente | undefined, 
       case "prendi_messaggio": {
         const msg = String(input?.messaggio ?? "").slice(0, 400);
         if (!msg) return { ok: false, errore: "messaggio vuoto" };
+        const urgente = input?.urgente === true;
         const chi = cliente ? cliente.nome : `numero nuovo ${telefono}`;
         creaPromemoria({
           cliente_id: cliente?.id ?? null,
-          testo: `Richiamare ${chi}: ${msg}`,
+          testo: `${urgente ? "🚨 URGENTE — " : ""}Richiamare ${chi}: ${msg}`,
           categoria: "richiamo",
           scadenza: new Date().toISOString().slice(0, 10),
         });
         logEvento({ tipo: "messaggio_cliente", soggetto: chi, cliente_id: cliente?.id ?? null, descrizione: `Segreteria: ${chi} — ${msg}` });
-        pushAlProfessionista("Messaggio dalla segreteria", `${chi}: ${msg}`);
-        azioni.push("messaggio");
+        // Il titolare deve VEDERE questo messaggio: lo si annuncia nella posta in
+        // arrivo (così può aprirlo e rispondere), oltre alla push.
+        annunciaUltimoArrivo(cliente?.id ?? null, telefono);
+        pushAlProfessionista(urgente ? "🚨 Messaggio URGENTE" : "Messaggio dalla segreteria", `${chi}: ${msg}`);
+        azioni.push(urgente ? "messaggio_urgente" : "messaggio");
         return { ok: true };
       }
       case "disdici": {

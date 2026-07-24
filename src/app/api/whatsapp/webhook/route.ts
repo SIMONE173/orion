@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getClienteByTelefono, logCommunication, tenantDaPhoneNumberId } from "@/lib/data";
+import { getClienteByTelefono, logCommunication, tenantDaPhoneNumberId, getRisponditore, segnaComunicazioneDaAnnunciare } from "@/lib/data";
 import { inviaPushATutti } from "@/lib/push";
 import { scaricaMediaWhatsApp } from "@/lib/whatsapp";
 import { gestisciMessaggioCliente } from "@/lib/orion/segreteria";
@@ -93,7 +93,14 @@ export async function POST(req: NextRequest) {
           if (scaricato) allegato_url = scaricato.dataUrl;
         }
 
-        logCommunication({
+        // Quando la segreteria è ACCESA e il messaggio è testo, nasce SILENZIOSO
+        // (letto=1): gli appuntamenti li gestisce ORION senza disturbare il
+        // titolare. È la segreteria a decidere se annunciarlo (prendi_messaggio,
+        // per roba non-appuntamenti o urgenze). Segreteria spenta o media (foto,
+        // vocali che non può gestire) → si annuncia subito (letto=0).
+        const livello = getRisponditore();
+        const silenzioso = livello !== "spenta" && tipo === "testo";
+        const com = logCommunication({
           cliente_id: cliente?.id ?? null,
           direzione: "in",
           tipo,
@@ -102,6 +109,7 @@ export async function POST(req: NextRequest) {
           allegato_url,
           telefono,
           stato: "ricevuto",
+          letto: silenzioso ? 1 : 0,
         });
 
         // Risposte automatiche: offerte di slot → conferme scriptate →
@@ -115,9 +123,10 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Se la segreteria non ha gestito da sola, il titolare va avvisato
-        // subito anche ad app chiusa (in app ci pensa l'annuncio vocale).
+        // Se la segreteria non ha gestito da sola (né risposto né preso in
+        // carico), il titolare va avvisato: si annuncia il messaggio e parte la push.
         if (!rispostaInviata) {
+          if (silenzioso) segnaComunicazioneDaAnnunciare(com.id);
           const chi = cliente?.nome ?? telefono;
           const anteprima = (contenuto ?? `[${tipo}]`).slice(0, 90);
           void inviaPushATutti({ titolo: "📩 Messaggio WhatsApp", corpo: `${chi}: ${anteprima}`, url: "/app" }).catch(() => {});

@@ -2136,6 +2136,26 @@ export function segnaComunicazioniLette(ids: number[]): void {
   for (const id of ids) segna.run(T(), Number(id));
 }
 
+// Forza l'annuncio (letto=0) di UN messaggio: il titolare deve vederlo.
+export function segnaComunicazioneDaAnnunciare(id: number): void {
+  db().prepare(`UPDATE comunicazioni SET letto = 0 WHERE tenant_id = ? AND id = ?`).run(T(), Number(id));
+}
+
+// Segna DA ANNUNCIARE l'ultimo messaggio in arrivo da questo cliente/telefono:
+// lo usa la segreteria quando decide che il titolare deve vedere il messaggio
+// (roba fuori dagli appuntamenti, oppure un'urgenza).
+export function annunciaUltimoArrivo(clienteId: number | null, telefono: string | null): void {
+  db()
+    .prepare(
+      `UPDATE comunicazioni SET letto = 0
+       WHERE tenant_id = ? AND id = (
+         SELECT id FROM comunicazioni
+         WHERE tenant_id = ? AND direzione = 'in' AND (cliente_id IS ? OR telefono = ?)
+         ORDER BY id DESC LIMIT 1)`
+    )
+    .run(T(), T(), clienteId, telefono ?? "");
+}
+
 export function getComunicazione(id: number): Comunicazione | undefined {
   return db()
     .prepare(
