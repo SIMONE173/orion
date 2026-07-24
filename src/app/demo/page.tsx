@@ -13,6 +13,8 @@ export default function DemoPage() {
   const [dentroApp, setDentroApp] = useState(false);
   const [avvio, setAvvio] = useState<"fermo" | "in_corso" | "errore">("fermo");
   const [errore, setErrore] = useState<string | null>(null);
+  // Chi entra SENZA account (la demo) accetta prima l'NDA: ORION è riservato.
+  const [nda, setNda] = useState(false);
 
   useEffect(() => {
     setDentroApp(navigator.userAgent.includes("ORIONDemo/"));
@@ -58,10 +60,17 @@ export default function DemoPage() {
               Adesso conosci ORION di persona: una breve chiacchierata per capire il tuo lavoro, poi ti porta
               lui a fare un giro guidato — parla, agisce e ti fa provare tutto. Nessun dato vero, nessun impegno.
             </p>
+            <label className="mx-auto mt-8 flex max-w-md cursor-pointer items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-xs leading-relaxed text-slate-400 lg:text-sm">
+              <input type="checkbox" checked={nda} onChange={(e) => setNda(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-cyan-400" />
+              <span>
+                Accetto l&apos;accordo di riservatezza: ciò che vedo di ORION — funzionamento e architettura — è riservato, e mi impegno a
+                non copiarlo, replicarlo, decompilarlo né diffonderlo.
+              </span>
+            </label>
             <button
               onClick={avvia}
-              disabled={avvio === "in_corso"}
-              className="mt-8 inline-flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-400/15 px-8 py-4 text-lg font-semibold text-cyan-50 shadow-[0_0_30px_rgba(103,232,249,0.15)] transition hover:bg-cyan-400/25 disabled:opacity-50 lg:mt-12 lg:rounded-3xl lg:px-14 lg:py-6 lg:text-2xl"
+              disabled={avvio === "in_corso" || !nda}
+              className="mt-5 inline-flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-cyan-400/15 px-8 py-4 text-lg font-semibold text-cyan-50 shadow-[0_0_30px_rgba(103,232,249,0.15)] transition hover:bg-cyan-400/25 disabled:opacity-40 lg:rounded-3xl lg:px-14 lg:py-6 lg:text-2xl"
             >
               {avvio === "in_corso" ? "Preparo il tuo studio di prova…" : "Inizia la demo"}
             </button>

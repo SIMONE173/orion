@@ -187,6 +187,10 @@ export function useSpeech(onFinal: (testo: string) => void) {
 
   // Audio della voce premium (ElevenLabs) attualmente in riproduzione.
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Gettone del TURNO di voce: ogni speak() prende un numero. Solo l'ultimo
+  // turno può produrre suono — così due frasi accavallate non fanno MAI due
+  // voci insieme (la premium femminile + il fallback maschile del browser).
+  const genVoce = useRef(0);
   const fermaAudioPremium = useCallback(() => {
     const a = audioRef.current;
     if (a) {
@@ -201,6 +205,7 @@ export function useSpeech(onFinal: (testo: string) => void) {
   }, []);
 
   const cancelSpeak = useCallback(() => {
+    genVoce.current += 1; // invalida qualsiasi turno in volo
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -221,6 +226,8 @@ export function useSpeech(onFinal: (testo: string) => void) {
         .replace(/[ \t]{2,}/g, " ")
         .trim();
       if (!testo) return;
+      // Questo è il turno più recente: ogni voce vecchia da qui è "scaduta".
+      const mio = ++genVoce.current;
       // Stiamo per parlare: BLOCCA SUBITO il microfono per evitare l'eco.
       speakingRef.current = true;
       setSpeaking(true);
@@ -242,12 +249,16 @@ export function useSpeech(onFinal: (testo: string) => void) {
 
       // Voce del BROWSER (fallback): sintesi locale con watchdog anti-utterance persa.
       const parlaBrowser = () => {
+        // Turno scaduto (è arrivata una frase più nuova): non emettere suono.
+        if (mio !== genVoce.current) return;
         if (!("speechSynthesis" in window)) {
           speakingRef.current = false;
           setSpeaking(false);
           maybeRestart();
           return;
         }
+        // Mai insieme al premium: se stava suonando l'audio premium, fermalo.
+        fermaAudioPremium();
         const synth = window.speechSynthesis;
         synth.cancel();
         let partito = false;
@@ -316,10 +327,17 @@ export function useSpeech(onFinal: (testo: string) => void) {
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ testo }),
           });
+          if (mio !== genVoce.current) return; // superato da una frase più nuova
           if (!res.ok || res.status === 204) return parlaBrowser();
           const blob = await res.blob();
           if (!blob || !blob.size) return parlaBrowser();
-          if (!speakingRef.current) return; // annullato nel frattempo
+          if (mio !== genVoce.current || !speakingRef.current) return; // annullato nel frattempo
+          // Mai insieme al browser: zittisci ogni sintesi locale prima di suonare.
+          try {
+            window.speechSynthesis?.cancel();
+          } catch {
+            /* noop */
+          }
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           audioRef.current = audio;
@@ -341,6 +359,10 @@ export function useSpeech(onFinal: (testo: string) => void) {
             chiudi();
             parlaBrowser();
           };
+          if (mio !== genVoce.current) {
+            chiudi();
+            return; // superato proprio ora: non partire
+          }
           audio.play().catch(() => {
             chiudi();
             parlaBrowser();

@@ -5,7 +5,12 @@ import { OrionCore } from "@/components/OrionCore";
 
 type Utente = { id: number; email: string; nome: string | null };
 
-export function AuthScreen({ onAuth }: { onAuth: (u: Utente) => void }) {
+export function AuthScreen(_props: { onAuth: (u: Utente) => void }) {
+  // Dopo login/registrazione NON si entra dritti in ORION: si torna al SITO,
+  // così l'utente naviga la vetrina e poi apre ORION quando vuole.
+  const vaiAlSito = () => {
+    if (typeof window !== "undefined") window.location.assign("/");
+  };
   const [modo, setModo] = useState<"login" | "signup">("login");
   const [fase, setFase] = useState<"credenziali" | "codice">("credenziali");
   const [nome, setNome] = useState("");
@@ -18,6 +23,8 @@ export function AuthScreen({ onAuth }: { onAuth: (u: Utente) => void }) {
   const [errore, setErrore] = useState<string | null>(null);
   const [avviso, setAvviso] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // NDA + privacy: alla CREAZIONE account va spuntato, o non si può procedere.
+  const [nda, setNda] = useState(false);
 
   const reset = () => {
     setFase("credenziali");
@@ -55,7 +62,7 @@ export function AuthScreen({ onAuth }: { onAuth: (u: Utente) => void }) {
         setFase("codice");
         return;
       }
-      onAuth(data.utente); // dispositivo fidato: entrata diretta
+      vaiAlSito(); // dispositivo fidato: torna al sito
     } catch {
       setErrore("Connessione non riuscita. Riprova.");
     } finally {
@@ -80,7 +87,7 @@ export function AuthScreen({ onAuth }: { onAuth: (u: Utente) => void }) {
         setErrore(data?.errore ?? "Codice non valido.");
         return;
       }
-      onAuth(data.utente);
+      vaiAlSito();
     } catch {
       setErrore("Connessione non riuscita. Riprova.");
     } finally {
@@ -151,10 +158,29 @@ export function AuthScreen({ onAuth }: { onAuth: (u: Utente) => void }) {
                 placeholder="Password" autoComplete={modo === "login" ? "current-password" : "new-password"} required
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-400/40"
               />
+              {modo === "signup" && (
+                <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3 text-xs leading-relaxed text-slate-400">
+                  <input
+                    type="checkbox"
+                    checked={nda}
+                    onChange={(e) => setNda(e.target.checked)}
+                    className="mt-0.5 size-4 shrink-0 accent-cyan-500"
+                  />
+                  <span>
+                    Accetto l&apos;<a href="/privacy" target="_blank" className="text-cyan-300 hover:underline">informativa privacy</a> e l&apos;accordo di
+                    riservatezza: le informazioni, il funzionamento e l&apos;architettura di ORION sono riservati — mi impegno a
+                    non copiarli, replicarli, decompilarli né diffonderli.
+                  </span>
+                </label>
+              )}
               {errore && (
                 <div className="rounded-lg border border-rose-400/30 bg-rose-400/10 px-3.5 py-2 text-sm text-rose-200">{errore}</div>
               )}
-              <button type="submit" disabled={loading} className="mt-1 rounded-xl bg-cyan-500/90 px-5 py-3 font-medium text-slate-900 transition hover:bg-cyan-400 disabled:opacity-50">
+              <button
+                type="submit"
+                disabled={loading || (modo === "signup" && !nda)}
+                className="mt-1 rounded-xl bg-cyan-500/90 px-5 py-3 font-medium text-slate-900 transition hover:bg-cyan-400 disabled:opacity-50"
+              >
                 {loading ? "Un attimo…" : modo === "login" ? "Accedi" : "Inizia con ORION"}
               </button>
             </form>
