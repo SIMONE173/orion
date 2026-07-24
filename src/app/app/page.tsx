@@ -314,6 +314,9 @@ export default function Home() {
   // ORION DEMO: account demo + binario del tutorial (fisso a lato, non un pannello).
   const [demo, setDemo] = useState(false);
   const [tutorial, setTutorial] = useState<BinarioTutorial | null>(null);
+  // Ref sempre aggiornato: serve dentro i callback (viste, sondaggi) senza dipendenze.
+  const demoRef = useRef(demo);
+  demoRef.current = demo;
   const [loading, setLoading] = useState(false);
   const [hasKey, setHasKey] = useState(true);
   const [testoInput, setTestoInput] = useState("");
@@ -466,15 +469,22 @@ export default function Home() {
         }
         if (Array.isArray(data.viste) && data.viste.length) {
           // Il binario del tutorial NON è un pannello: vive fisso a lato.
-          data.viste
-            .filter((v) => v.tipo === "tutorial")
-            .forEach((v) => setTutorial((v as Extract<Vista, { tipo: "tutorial" }>).dati));
+          const vistaTut = data.viste.find((v) => v.tipo === "tutorial");
+          if (vistaTut) {
+            setTutorial((vistaTut as Extract<Vista, { tipo: "tutorial" }>).dati);
+            // DEMO — ALTERNANZA: una vista tutorial arriva solo al cambio tappa
+            // (avvia / tappa_completata): chiudi il pannello, così torna il
+            // PALCO della nuova tappa (con transizione).
+            if (demoRef.current) setViste([]);
+          }
           const pannelli = data.viste.filter((v) => v.tipo !== "tutorial");
           const d = desktopBridge();
-          if (d?.apriVista) {
-            // Desktop: ogni vista in una finestra SEPARATA (sempre, anche coi gesti).
+          if (d?.apriVista && !demoRef.current) {
+            // Desktop (uso normale): ogni vista in una finestra SEPARATA.
             pannelli.forEach((v) => d.apriVista!(v));
           } else if (pannelli.length) {
+            // DEMO: tutto INLINE nella home, accanto alla chat, alternato col
+            // palco — niente finestre separate (scelta dell'utente per la demo).
             setViste(pannelli);
           }
           // Il mini-nucleo mostra il disegnino di cosa sta succedendo.
@@ -1302,8 +1312,6 @@ export default function Home() {
   // annunciate; quelle già in coda all'avvio le orchestra il briefing.
   // In DEMO il flusso automatico tace: le consegne le orchestra il tutorial
   // (la tappa del gestionale), non un annuncio che piomba a metà giro.
-  const demoRef = useRef(demo);
-  demoRef.current = demo;
   useEffect(() => {
     if (!autenticato) return;
     let fermo = false;
