@@ -108,11 +108,55 @@ function apriMiniNucleo() {
   nucleo.setAlwaysOnTop(true, "screen-saver");
   if (nucleo.setVisibleOnAllWorkspaces) nucleo.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   nucleo.loadURL(`${ORION_URL}/nucleo`);
+  // CORPO FISICO = SOLO il cerchio: di default la finestrella è trasparente ai
+  // clic (passano sotto), così non copre nulla. forward:true fa comunque
+  // arrivare i mousemove alla pagina, che riaccende l'interattività sul nucleo.
+  nucleo.webContents.on("did-finish-load", () => {
+    try {
+      if (!nucleo.isDestroyed()) nucleo.setIgnoreMouseEvents(true, { forward: true });
+    } catch {}
+  });
   nucleo.on("closed", () => {
+    fermaTrascinaNucleo();
     if (finestraNucleo === nucleo) finestraNucleo = null;
   });
   finestraNucleo = nucleo;
 }
+
+// La pagina /nucleo accende/spegne il "corpo solido": vero solo quando il
+// cursore è sopra il cerchio o i disegnini, così tutto il resto resta cliccabile
+// per l'app sottostante.
+ipcMain.on("os:nucleoInterattivo", (_e, interattivo) => {
+  const n = finestraNucleo;
+  if (!n || n.isDestroyed()) return;
+  try {
+    n.setIgnoreMouseEvents(!interattivo, { forward: true });
+  } catch {}
+});
+
+// Trascinamento a piacere: si afferra il cerchio e la finestrella segue il
+// cursore (main legge la posizione reale del puntatore — nessuna dipendenza dai
+// bounds lato web). Rilascio senza spostamento = clic (torna a ORION).
+let trascinaNucleo = null;
+function fermaTrascinaNucleo() {
+  if (trascinaNucleo) {
+    clearInterval(trascinaNucleo);
+    trascinaNucleo = null;
+  }
+}
+ipcMain.on("os:nucleoDragStart", () => {
+  const n = finestraNucleo;
+  if (!n || n.isDestroyed()) return;
+  fermaTrascinaNucleo();
+  const [wx, wy] = n.getPosition();
+  const c = screen.getCursorScreenPoint();
+  trascinaNucleo = setInterval(() => {
+    if (!finestraNucleo || finestraNucleo.isDestroyed()) return fermaTrascinaNucleo();
+    const p = screen.getCursorScreenPoint();
+    finestraNucleo.setPosition(wx + (p.x - c.x), wy + (p.y - c.y));
+  }, 16);
+});
+ipcMain.on("os:nucleoDragEnd", () => fermaTrascinaNucleo());
 
 function chiudiMiniNucleo() {
   try {

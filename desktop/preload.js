@@ -58,6 +58,12 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   // Riconoscimento vocale offline:
   sttPronto: () => ipcRenderer.invoke("os:sttPronto"),
   trascrivi: (pcm) => ipcRenderer.invoke("os:trascrivi", pcm),
+  // MINI-NUCLEO: il corpo "fisico" è SOLO il cerchio (+ i disegnini). Ovunque
+  // altro la finestrella è trasparente ai clic (passano all'app sotto). Il web
+  // dice quando il cursore è sopra il nucleo, e gestisce il trascinamento.
+  nucleoInterattivo: (v) => ipcRenderer.send("os:nucleoInterattivo", !!v),
+  nucleoDragStart: () => ipcRenderer.send("os:nucleoDragStart"),
+  nucleoDragEnd: () => ipcRenderer.send("os:nucleoDragEnd"),
   // Apre una vista (pannello) in una finestra separata.
   apriVista: (vista) => ipcRenderer.send("os:apriVista", vista),
   // Chiude le finestre-pannello (per tipo, o "tutto").

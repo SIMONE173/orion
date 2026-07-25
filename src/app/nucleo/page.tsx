@@ -60,10 +60,21 @@ function doodleDi(nome: string): { emoji: string; testo: string; wa?: boolean } 
   return chiave ? DOODLE[chiave] : { emoji: "✨", testo: "Al lavoro" };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function desk(): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (window as any).orionDesktop;
+}
+
 export default function MiniNucleo() {
   const [core, setCore] = useState<CoreState>("idle");
   const [doodle, setDoodle] = useState<{ emoji: string; testo: string; wa?: boolean } | null>(null);
   const timerDoodle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cerchioRef = useRef<HTMLDivElement>(null);
+  const doodleRef = useRef<HTMLDivElement>(null);
+  const interattivoRef = useRef(false);
+  const trascinaRef = useRef(false);
+  const giuRef = useRef<{ sx: number; sy: number; mosso: boolean } | null>(null);
 
   useEffect(() => {
     // Trasparenza totale: questa pagina vive in una finestra senza sfondo.
@@ -95,14 +106,70 @@ export default function MiniNucleo() {
 
   // Click sul nucleo → la finestra di ORION torna in primo piano.
   const tornaAOrion = () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const d = (window as any).orionDesktop;
-    if (d?.mostraOrion) d.mostraOrion();
+    desk()?.mostraOrion?.();
+  };
+
+  // CORPO FISICO = solo il cerchio (+ il disegnino): la finestrella è cliccabile
+  // SOLO quando il cursore è davvero sopra di essi, altrimenti i clic passano
+  // all'app sotto. Si decide qui, col cursore, e si avvisa Electron.
+  const setInterattivo = (v: boolean) => {
+    if (interattivoRef.current === v) return;
+    interattivoRef.current = v;
+    desk()?.nucleoInterattivo?.(v);
+  };
+
+  useEffect(() => {
+    const dentroCorpo = (x: number, y: number): boolean => {
+      const c = cerchioRef.current?.getBoundingClientRect();
+      if (c) {
+        const cx = c.left + c.width / 2;
+        const cy = c.top + c.height / 2;
+        const r = c.width / 2 + 3; // il cerchio vero, con un filo di tolleranza
+        if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) return true;
+      }
+      const d = doodleRef.current?.getBoundingClientRect();
+      if (d && x >= d.left - 2 && x <= d.right + 2 && y >= d.top - 2 && y <= d.bottom + 2) return true;
+      return false;
+    };
+    const onMove = (e: MouseEvent) => {
+      if (trascinaRef.current) return; // durante il trascinamento resta solido
+      setInterattivo(dentroCorpo(e.clientX, e.clientY));
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, []);
+
+  // Afferra il cerchio e trascinalo dove vuoi. Rilascio senza spostamento = clic
+  // (torna a ORION). Il movimento si misura in coordinate SCHERMO (screenX/Y):
+  // la finestra segue il cursore, quindi le coordinate relative non cambierebbero.
+  const giuNucleo = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    giuRef.current = { sx: e.screenX, sy: e.screenY, mosso: false };
+    trascinaRef.current = true;
+    desk()?.nucleoDragStart?.();
+    const onMv = (ev: PointerEvent) => {
+      const g = giuRef.current;
+      if (!g) return;
+      if (Math.abs(ev.screenX - g.sx) > 3 || Math.abs(ev.screenY - g.sy) > 3) g.mosso = true;
+    };
+    const onUp = () => {
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointermove", onMv);
+      trascinaRef.current = false;
+      desk()?.nucleoDragEnd?.();
+      const g = giuRef.current;
+      giuRef.current = null;
+      if (g && !g.mosso) tornaAOrion();
+    };
+    window.addEventListener("pointermove", onMv);
+    window.addEventListener("pointerup", onUp);
   };
 
   return (
-    // La finestrella è TRASCINABILE (drag region di Electron) — così se dà
-    // fastidio la si sposta. L'orbe resta cliccabile: un tap e ORION torna.
+    // La finestrella è trasparente ai clic OVUNQUE tranne che sul cerchio e sul
+    // disegnino (corpo fisico). Il cerchio si TRASCINA a piacere e un tap secco
+    // riporta ORION in primo piano. Niente drag-region a tutta finestra: così
+    // l'area vuota non copre più ciò che c'è sotto.
     <main
       style={
         {
@@ -115,14 +182,14 @@ export default function MiniNucleo() {
           paddingTop: 10,
           userSelect: "none",
           overflow: "hidden",
-          WebkitAppRegion: "drag",
         } as React.CSSProperties
       }
     >
       <div
-        onClick={tornaAOrion}
-        title="Torna a ORION (trascina il resto per spostarmi)"
-        style={{ cursor: "pointer", WebkitAppRegion: "no-drag" } as React.CSSProperties}
+        ref={cerchioRef}
+        onPointerDown={giuNucleo}
+        title="Trascinami dove vuoi · tap = torna a ORION"
+        style={{ cursor: "grab", touchAction: "none" } as React.CSSProperties}
       >
         <OrionCore state={core} size={104} />
       </div>
@@ -130,6 +197,7 @@ export default function MiniNucleo() {
       {/* Il disegnino di ciò che sta facendo, sotto il nucleo */}
       {doodle && (
         <div
+          ref={doodleRef}
           key={doodle.testo + doodle.emoji}
           style={{
             marginTop: 10,
