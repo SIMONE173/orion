@@ -26,14 +26,28 @@ ORION_URL=http://localhost:3000 npm start
 Le funzioni OS passano dal `preload.js` (ponte sicuro) → `main.js` (esegue
 con `shell`/`fs`). La pagina riconosce di essere nel desktop via `window.orionDesktop`.
 
-## Creare l'app scaricabile (.dmg / .exe)
+## Creare gli installer scaricabili (Mac .dmg + Windows .zip)
+
+Ogni modifica a `main.js`/`preload.js` va ricostruita in TUTTE e 4 le varianti e
+ricaricata su R2 (prefisso `download/`), perché sono quelle che `/api/scarica`
+serve. I nomi dei file DEVONO combaciare con `src/lib/download.ts`.
 
 ```bash
-npm run dist     # genera l'installer in desktop/dist/
+cd desktop
+npm run dist            # ORION full    → dist/ORION-1.0.0-arm64.dmg
+npm run dist:demo       # ORION Demo    → dist/ORION-Demo-1.0.0-arm64.dmg
+npm run dist:win        # ORION full    → dist/ORION-1.0.0-win.zip   (x64, via wine)
+npm run dist:demo:win   # ORION Demo    → dist/ORION-Demo-1.0.0-win.zip (x64, via wine)
 ```
 
+Il build Windows gira anche da Mac: electron-builder scarica e usa wine da solo
+(cache in `~/Library/Caches/electron-builder/`). Poi si caricano i 4 file nel
+bucket R2 sotto `download/` (le chiavi sono in `src/lib/download.ts`); un piccolo
+script con `@aws-sdk/lib-storage` e le `R2_*` di `.env.local` fa l'upload.
+
 Per la distribuzione pubblica servono firma/notarizzazione (Apple Developer su
-Mac, code signing su Windows): è un passo successivo, non serve per provarla.
+Mac, code signing su Windows): passo successivo. Finché è tutto NON firmato, su
+Mac si sblocca con `xattr -cr "/percorso/ORION Demo.app"`.
 
 ## Note
 - Carica `https://orion-production-5ddd.up.railway.app` (modificabile con `ORION_URL`).

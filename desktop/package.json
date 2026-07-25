@@ -9,7 +9,9 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo'"
+    "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo'",
+    "dist:win": "electron-builder --win zip --x64",
+    "dist:demo:win": "electron-builder --win zip --x64 -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.artifactName='ORION-Demo-${version}-win.${ext}'"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3"
@@ -32,7 +34,7 @@
         "NSAppleEventsUsageDescription": "ORION usa gli eventi di sistema per aprire e chiudere le app che gli chiedi."
       }
     },
-    "win": { "target": "nsis" },
+    "win": { "target": "zip", "artifactName": "${productName}-${version}-win.${ext}" },
     "linux": { "target": "AppImage" }
   }
 }
