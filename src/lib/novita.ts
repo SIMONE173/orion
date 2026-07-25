@@ -5,6 +5,9 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-25", testo: "ORION ti prepara tutto prima che serva: sul Desktop recupera e apre da solo i file, i documenti e la scheda che ti servono per il prossimo cliente o per la fattura — li trovi già davanti agli occhi, senza cercarli" },
+  { data: "2026-07-25", testo: "Un tuo imprevisto? Ne parliamo: ORION prima chiede a te come gestire gli appuntamenti saltati, poi scrive ai clienti chiedendo LORO quando gli fa comodo riprendere — niente orari imposti" },
+  { data: "2026-07-25", testo: "La segreteria WhatsApp lavora in silenzio: gli appuntamenti dei clienti li gestisce da sola senza disturbarti — ti avvisa solo per ciò che non riguarda l'agenda o per le urgenze" },
   { data: "2026-07-23", testo: "La Demo ora ha un palco: al centro una presentazione animata che spiega ogni tappa — cos'è, perché ti serve, come provarla — mentre ORION apre i pannelli veri e ti accompagna a voce" },
   { data: "2026-07-22", testo: "Nasce ORION DEMO: scarichi, e ORION in persona ti porta a fare un giro guidato del tuo futuro studio — gratis, senza carta, con lo studio di prova che si cancella da solo" },
   { data: "2026-07-21", testo: "La segretaria non chiede: di giorno ORION annuncia la modifica e la scrive da solo nel gestionale — basta un «aspetta» a voce per fermarla" },

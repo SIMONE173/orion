@@ -70,10 +70,11 @@ const TAPPA_BENVENUTO: TappaTutorial = {
     prova: "Chiedimi «chi ho oggi?» oppure «apri l'agenda» — proprio come lo diresti a voce.",
   },
   guida: `SCOPO: fargli sentire cosa vuol dire trovare la giornata già pronta.
-1) UNA frase calda di partenza: il giro è cominciato, al centro compaiono le spiegazioni tappa per tappa e a destra le tappe; può dire "avanti" o fermarsi quando vuole. Digli che gli ho preparato uno STUDIO DI PROVA su misura del suo mestiere (clienti e appuntamenti finti, tocca tutto senza rischi).
-2) Chiama lo strumento briefing e RACCONTA a voce la giornata come fai sempre (appuntamenti, da confermare, sospesi) — NON leggere il palco, aggiungi il calore.
-3) Invitalo a chiederti qualcosa a parole sue e rispondi.
-4) Quando ha visto il briefing e ha fatto una domanda (o dice avanti): chiama tutorial azione tappa_completata.`,
+1) UNA frase calda + ANNUNCIA cosa stai per mostrargli: "ora ti faccio vedere la tua giornata — te l'ho riempita con dei clienti di prova, così vedi com'è". Al centro compaiono le spiegazioni tappa per tappa, a destra le tappe; può dire "avanti" o fermarsi.
+2) CONTROLLA LA FONTE (profilo):
+   • Se NON usa un gestionale (fonte ORION): chiama lo strumento briefing e RACCONTA a voce la giornata (appuntamenti, da confermare, sospesi) — è ORION a costruirla e tenerla. Invitalo a chiederti qualcosa a parole sue.
+   • Se USA un gestionale/software: NON costruire un'agenda da zero e non insistere sui dati di prova. Spiega in UNA frase che qui la sua giornata è lo SPECCHIO del suo software (i dati restano i suoi, tenuti allineati); puoi mostrare il briefing al volo, ma il pezzo forte è la tappa «Il tuo software» dove ci lavori DENTRO davvero — accennalo e non dilungarti.
+3) Quando ha visto/chiesto (o dice avanti): chiama tutorial azione tappa_completata.`,
 };
 
 const TAPPA_WHATSAPP: TappaTutorial = {
@@ -98,15 +99,16 @@ const TAPPA_IMPREVISTO: TappaTutorial = {
   titolo: "L'imprevisto",
   icona: "🌪️",
   palco: {
-    sottotitolo: "Un imprevisto tuo? Riorganizzo tutto io",
-    cosa: "Se salta fuori un impegno e non puoi esserci, me lo dici a voce e io sposto gli appuntamenti negli orari liberi, avvisando i clienti al posto tuo.",
-    perche: "Basta telefonate a raffica per rimandare tutti. Una frase tua, e la giornata si ricompone da sola.",
-    prova: "Dimmi «domattina non ci sono, ho un impegno» e guarda come sistemo l'agenda.",
+    sottotitolo: "Un imprevisto tuo? Ne parliamo e sistemo io",
+    cosa: "Se non puoi esserci, me lo dici. Prima ti chiedo come vuoi gestire quegli appuntamenti — magari hai già in mente quando recuperarli — poi scrivo io ai clienti chiedendo loro quando gli fa comodo riprendere.",
+    perche: "Non impongo orari a caso: tratto coi tuoi clienti come una segretaria vera, con garbo. Tu dici una frase, il resto è una conversazione che porto avanti io.",
+    prova: "Dimmi «domattina non ci sono, ho un impegno» e guarda come me ne occupo.",
   },
-  guida: `SCOPO: mostrare che la segretaria lavora anche quando l'imprevisto è SUO.
+  guida: `SCOPO: mostrare che l'imprevisto è una CONVERSAZIONE umana, non un ordine sbrigativo.
 1) Proponi la scena: "dimmi come lo diresti a una segretaria — tipo domattina non ci sono".
-2) Quando te lo dice: AGISCI. Guarda l'agenda di domattina, sposta gli appuntamenti in orari liberi (agenda/sposta_appuntamento), racconta chi hai spostato e dove; i clienti riceverebbero l'avviso da soli (qui simulato: dillo).
-3) Fai notare: lui UNA frase, tu hai riorganizzato tutto, zero click. Poi tutorial azione tappa_completata.`,
+2) Quando te lo dice: NON spostare subito imponendo orari. PRIMA chiedi a LUI come vuole gestirli: ha già in mente quando recuperare quei clienti, o delle preferenze/eccezioni? (una domanda breve).
+3) Poi sistema l'agenda (agenda/sposta_appuntamento) tenendone conto, e spiega che ai clienti scriveresti chiedendo LORO quando gli fa comodo riprendere (proponendo due-tre slot liberi come opzioni), non un orario imposto — perché non sai se sono liberi quel giorno. Qui l'invio è simulato: dillo.
+4) Fai notare: lui UNA frase, e tu hai gestito tutto come una segretaria vera. Poi tutorial azione tappa_completata.`,
 };
 
 const TAPPA_GESTIONALE: TappaTutorial = {
@@ -131,14 +133,16 @@ const TAPPA_POSTA: TappaTutorial = {
   icona: "✉️",
   palco: {
     sottotitolo: "Ti disturbo solo per le mail che contano",
-    cosa: "Leggo la tua posta e capisco cosa è importante — un cliente, una scadenza. Le newsletter e le promozioni le metto a tacere e te le conto soltanto.",
+    cosa: "Leggo la tua posta e capisco cosa è importante — un cliente, una scadenza. Le newsletter e le promozioni le metto a tacere e te le conto soltanto. Quella che conta te la apro, e se vuoi rispondo io con le tue parole.",
     perche: "Basta aprire cento mail per trovarne una che serve. Ti annuncio solo quelle vere; il resto sparisce dal tuo pensiero.",
-    prova: "Ti faccio arrivare la posta di un mattino: guarda quale ti annuncio e quante ne silenzio.",
+    prova: "Ti faccio arrivare la posta di un mattino: te ne annuncio una, te ne silenzio due. Poi ti apro quella buona e, se vuoi, mi detti la risposta.",
   },
-  guida: `SCOPO: mostrare che la posta ha un cervello.
-1) Chiama tutorial azione simula_posta (3 email: 1 che conta, 2 di rumore).
-2) Spiega: l'email importante (un cliente) viene annunciata da sola tra poco; le newsletter le ho silenziate e contate — digli quante (mail_silenziate_oggi di messaggi_in_arrivo).
-3) Se apre la mail, mostragli che può rispondere dettando, con le SUE parole (qui invio simulato: dillo). Poi tutorial azione tappa_completata.`,
+  guida: `SCOPO: far VIVERE la posta intera — arriva, si apre, si risponde. Non fermarti all'annuncio.
+1) Chiama tutorial azione simula_posta (3 email: 1 che conta di Giulia Marchetti, 2 di rumore).
+2) Spiega il cervello: l'email di Giulia (una cliente) viene annunciata da sola tra poco; le due newsletter le ho silenziate e contate — digli quante (mail_silenziate_oggi di messaggi_in_arrivo).
+3) APRI TU la mail importante senza aspettare (apri_messaggio con l'id di Giulia da messaggi_in_arrivo): il corpo compare in chat. Riferiscine oggetto e senso in due frasi (chiede di anticipare di mezz'ora l'appuntamento) — NON rileggere tutto.
+4) OFFRI la risposta: "vuoi che le risponda io? dimmi cosa e la scrivo". Quando ti detta il senso, formalizza e invia con rispondi_email (parte davvero come "Re:" e resta tra le inviate — qui è simulata, dillo leggero). Se non vuole rispondere va bene lo stesso.
+5) Poi tutorial azione tappa_completata.`,
 };
 
 const TAPPA_MEMORIA: TappaTutorial = {
@@ -162,14 +166,15 @@ const TAPPA_GIORNATA_PRONTA: TappaTutorial = {
   titolo: "Tutto pronto",
   icona: "📂",
   palco: {
-    sottotitolo: "Preparo tutto prima ancora che serva",
-    cosa: "Per ogni appuntamento tiro fuori io i documenti e le note che ti servono, prima che tu li cerchi. E se vuoi, stampo.",
-    perche: "Arrivi all'appuntamento e trovi già tutto aperto sullo schermo. Nessuna corsa a cercare la scheda del cliente all'ultimo secondo.",
-    prova: "Prova a dirmi «stampami l'agenda di domani».",
+    sottotitolo: "Preparo tutto prima che serva — e apro io i file sul tuo PC",
+    cosa: "So cosa hai in agenda e uso il tuo computer: per ogni impegno recupero e apro io ciò che ti serve — la scheda del cliente, i documenti, le note. Devi fare una fattura? Preparo tutto io. Un evento con un cliente? Ti apro davanti le sue cose prima ancora che le cerchi.",
+    perche: "Non cerchi più niente all'ultimo minuto: arrivi all'appuntamento e trovi già tutto aperto sullo schermo. Io anticipo e sono sempre pronto, tu pensi solo al tuo lavoro.",
+    prova: "Prova a dirmi «stampami l'agenda di domani» — o «apri i documenti del prossimo cliente».",
   },
-  guida: `SCOPO: l'anticipazione — preparare PRIMA che serva.
-1) Guarda l'agenda di domani: c'è un appuntamento con documenti collegati (già pronti). APRI tu il documento (apri_documento) senza che lo chieda, spiegando la regola: quando nomina un impegno, ti porto davanti ciò che serve.
-2) Fagli provare la stampa: "stampami l'agenda di domani" → stampa (se non ha stampante, l'anteprima vale come prova: dillo leggero). Poi tutorial azione tappa_completata.`,
+  guida: `SCOPO: l'anticipazione + il CONTROLLO DEL PC — ORION prepara e apre tutto PRIMA che serva.
+1) Guarda l'agenda di domani: c'è un appuntamento con documenti collegati (già pronti). APRI tu il documento (apri_documento) senza che lo chieda.
+2) Spiega la regola forte, con esempi calati sul SUO mestiere: quando c'è un impegno con un cliente ti apro davanti le sue cose (scheda, documenti, note); se devi fare una fattura te la preparo; sul Desktop recupero e apro io i file e le cartelle che servono. Sono sempre pronto: tu non cerchi mai niente. (In demo lo spieghi; nella versione completa sul Desktop lo FAI davvero col controllo del computer.)
+3) Fagli provare la stampa: "stampami l'agenda di domani" → stampa (se non ha stampante, l'anteprima vale come prova: dillo leggero). Poi tutorial azione tappa_completata.`,
 };
 
 const TAPPA_NOTTE: TappaTutorial = {

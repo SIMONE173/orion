@@ -1,7 +1,8 @@
 import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
 import { db } from "./db";
-import { tenantIdCorrente } from "./tenant";
+import { tenantIdCorrente, tenantIdOpzionale } from "./tenant";
+import { tenantDemo } from "./demo";
 import { cifra, decifra } from "./crypto";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -288,6 +289,11 @@ export async function leggiMessaggiDopoUid(
 // ── SMTP: invio ──────────────────────────────────────────────────────────────
 
 export async function inviaEmail(to: string, subject: string, corpo: string): Promise<{ ok: boolean; errore?: string }> {
+  // DEMO: la posta è simulata (studio di prova) — nessuna mail vera esce mai.
+  // "non_configurato" fa scattare il ramo simulato in rispondi_email/invia_email:
+  // la risposta viene comunque registrata e mostrata come inviata (finta).
+  const tn = tenantIdOpzionale();
+  if (tn !== null && tenantDemo(tn)) return { ok: false, errore: "non_configurato" };
   const a = getEmailAccount();
   if (!a || !emailConfigurato()) return { ok: false, errore: "non_configurato" };
   try {
