@@ -1,5 +1,5 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { getProfilo, getAzienda, gestionaleFonte } from "../data";
+import { getProfilo, getAzienda, gestionaleFonte, listConnessioni } from "../data";
 import { costruisciContextPack } from "./memoria";
 import { emailDemo } from "../demo";
 import { bloccoTutorialSystem } from "./tutorial";
@@ -76,11 +76,23 @@ Operi dentro un'azienda con più persone e ruoli. Non sei un blocco note: sei un
   let bloccoOnboarding: string;
   if (onboarding) {
     const gest = desktop ? gestionaleFonte() : null;
-    const routineMattino = gest
-      ? ` ROUTINE DEL MATTINO (sei su Desktop e l'utente tiene il gestionale "${gest.nome}"): SUBITO dopo il briefing, senza che te lo chieda, APRI il suo gestionale${
-          gest.apertura ? ` (${/^https?:\/\/|\.[a-z]{2,}($|\/)/i.test(gest.apertura) ? `sito: apri con 'apri' → ${gest.apertura}` : `app: apri_app "${gest.apertura}"`})` : ` (con apri_app "${gest.nome}", o chiedigli come si apre se non parte)`
-        }, aspetta un attimo che compaia, poi usa guarda_schermo per EVIDENZIARGLI sull'agenda gli appuntamenti da confermare, le scadenze e ciò che conta, e riassumi nella scheda. È così che accoglii l'utente al mattino: gli apri e gli prepari tutto davanti agli occhi, da solo.`
-      : "";
+    // TUTTI gli strumenti registrati (Chiamata 0 e dopo), con la via d'apertura:
+    // al mattino ORION li apre LUI, e durante il giorno li richiama vivi.
+    const strumenti = desktop ? listConnessioni() : [];
+    const comeAprire = (nome: string, apertura: string | null) =>
+      apertura
+        ? /^https?:\/\/|\.[a-z]{2,}($|\/)/i.test(apertura)
+          ? `sito: apri → ${apertura}`
+          : `app: apri_app "${apertura}"`
+        : `apertura non registrata: prova apri_app "${nome}", o chiedi come si apre e salvala (collega_sistema, campo 'apertura')`;
+    const altri = strumenti.filter((s) => !gest || s.nome.toLowerCase() !== gest.nome.toLowerCase());
+    const elencoAltri = altri.map((s) => `"${s.nome}" (${s.tipo}; ${comeAprire(s.nome, s.apertura)})`).join(", ");
+    const routineMattino =
+      gest || altri.length
+        ? ` ROUTINE DEL MATTINO (sei su Desktop): SUBITO dopo il briefing, senza che te lo chieda, APRI TU davanti ai suoi occhi TUTTI gli strumenti con cui lavora ogni giorno${
+            gest ? ` — per primo il suo gestionale "${gest.nome}" (${comeAprire(gest.nome, gest.apertura)})` : ""
+          }${elencoAltri ? `${gest ? ", poi" : ":"} ${elencoAltri}` : ""}. Aspetta un attimo che compaiano, poi usa guarda_schermo${gest ? ` sull'agenda del gestionale` : ""} per EVIDENZIARGLI gli appuntamenti da confermare, le scadenze e ciò che conta, e riassumi nella scheda. Col briefing lo AGGIORNI SU TUTTO a voce mentre le sue pagine sono già aperte davanti: è così che lo accogli al mattino — tutto aperto e pronto, da solo, come una segretaria che ha già preparato la scrivania.`
+        : "";
     bloccoOnboarding = `LA GIORNATA: all'avvio di una nuova sessione saluta${saluto} e presenta il briefing operativo (strumento briefing).${
       azienda ? ` Operi nell'ambiente aziendale "${azienda.nome ?? ""}": ragiona sempre come parte di quel team.` : ""
     }${routineMattino}`;
@@ -251,6 +263,7 @@ ANTICIPAZIONE (previeni, non solo reagisci)
 - Esempio: non "Rossi ha un appuntamento domani", ma "Ho notato che Rossi ha una visita domani; l'ultima volta servivano certi documenti che non risultano ancora pronti — li preparo?". Quando l'analisi proattiva ti segnala una "preparazione per domani", proponila tu, con garbo.
 - Quando l'utente nomina un impegno (un'udienza, una visita, una consegna), porta in primo piano ciò che serve davvero: documenti importanti, aggiornamenti recenti, comunicazioni, scadenze vicine, e cosa conviene preparare prima.
 - SUL DESKTOP hai le MANI sul computer: non ti limiti a segnalare, PREPARI DAVVERO. Quando c'è un evento con un cliente, RECUPERA e APRI tu ciò che gli serve — la scheda del cliente, i suoi documenti e cartelle sul computer, le note, le comunicazioni — e mettiglielo davanti agli occhi PRIMA che lo cerchi (apri_file_locale / apri_documento / apri_app / guarda_schermo). Deve fare una fattura? Prepari tu tutto (prepara_fattura e i dati collegati). Il principio: l'utente non deve mai andare a caccia di un file — quando qualcosa sta per servire, è già aperto sullo schermo. Sei sempre pronto, in tutto. (Sul WEB spieghi che questa preparazione automatica dei file dà il massimo con ORION Desktop.)
+- CONTESTO VIVO (Desktop, per TUTTA la giornata — non solo al mattino): mentre parlate, ASCOLTA di cosa si sta parlando e metti sullo schermo, live, ciò che è utile a QUEL discorso. Se il discorso tocca qualcosa che vive in uno dei SUOI strumenti (una pratica nel gestionale, un preventivo nel CRM, un ordine, un portale, un sito) APRI TU la scheda o l'app giusta MENTRE ne parlate, senza aspettare che te lo chieda: le vie d'apertura dei suoi sistemi sono nella ROUTINE DEL MATTINO (o con mostra_sistemi); per i siti usa 'apri', per le app apri_app, e col gestionale aperto usa guarda_schermo per evidenziare il punto giusto. Annuncia in mezza frase ("Ti apro…") e PROSEGUI il discorso senza interromperlo. Se di uno strumento non conosci l'apertura, chiedila una volta e salvala (collega_sistema, campo 'apertura'): da lì in poi lo apri sempre da solo.
 
 AFFIDABILITÀ ASSOLUTA (la fiducia prima di tutto)
 - Principio guida: meglio fermarsi un secondo e chiedere una conferma che eseguire un'azione sbagliata. Il professionista deve potersi fidare di te senza ricontrollare ogni passaggio.

@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-26", testo: "Il buongiorno di ORION ora è completo: sul Desktop ti apre da solo TUTTI i tuoi strumenti — gestionale, siti, portali — e ti fa il briefing con tutto già davanti agli occhi. E durante la giornata ascolta il discorso: si parla di una pratica o di un preventivo? La scheda giusta compare da sola" },
   { data: "2026-07-25", testo: "Il mini-nucleo di ORION ora non copre più nulla: resti tu a comandare il computer sotto, lui è cliccabile solo sul cerchio — che afferri e sposti dove vuoi, e con un tocco ti riapre ORION" },
   { data: "2026-07-25", testo: "ORION ti prepara tutto prima che serva: sul Desktop recupera e apre da solo i file, i documenti e la scheda che ti servono per il prossimo cliente o per la fattura — li trovi già davanti agli occhi, senza cercarli" },
   { data: "2026-07-25", testo: "Un tuo imprevisto? Ne parliamo: ORION prima chiede a te come gestire gli appuntamenti saltati, poi scrive ai clienti chiedendo LORO quando gli fa comodo riprendere — niente orari imposti" },
