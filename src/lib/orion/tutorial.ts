@@ -629,6 +629,16 @@ const REGOLE_TUTOR = `REGOLE DEL TUTOR (valgono per tutto il giro guidato)
 // della demo. Ciò che DEVE accadere si ripete qui, in coda all'ultimo messaggio
 // dell'utente: l'ultimo posto che il modello legge prima di rispondere, e quello
 // a cui dà più peso. È effimero (non entra nello storico) e non si legge a voce.
+// «Avanti» non può dipendere dalla buona volontà del modello: se l'utente dice
+// di andare oltre, è l'APP a far scattare la tappa successiva. Così il giro non
+// si inceppa mai — nemmeno quando ORION ha una domanda in sospeso.
+const VUOLE_AVANTI =
+  /^\s*(avanti|vai(\s+avanti)?|prossim[ao]|prosegui|continua|salta|passa\s+(oltre|alla\s+prossima)|next|ok\s+(avanti|vai)|ho\s+capito,?\s*(avanti|vai)?)\s*[.!]*\s*$/i;
+
+export function utenteVuoleAvanzare(testo: string): boolean {
+  return VUOLE_AVANTI.test(testo.trim());
+}
+
 export function promemoriaTutorial(onboardingCompleto: boolean): string {
   const s = statoTutorial();
 
@@ -658,7 +668,8 @@ export function promemoriaTutorial(onboardingCompleto: boolean): string {
   return `[Sistema · IL TUO COMPITO IN QUESTO TURNO — eseguilo, non leggerlo a voce]
 TAPPA ${s.indice + 1} di ${tappe.length}: «${tappa.titolo}»
 ${tappa.guida}${bivio}
-VINCOLI DI QUESTO TURNO: una sola tappa (mai incatenarne due); AGISCI davvero (apri i pannelli veri, fai succedere le cose); poi FERMATI e aspetta che l'utente provi. Mai chiudere con un cenno secco.`;
+VINCOLI DI QUESTO TURNO: una sola tappa (mai incatenarne due); AGISCI davvero (apri i pannelli veri, fai succedere le cose); poi FERMATI e aspetta che l'utente provi. Mai chiudere con un cenno secco.
+IL COMANDO DELL'UTENTE VINCE SU TUTTO: se dice "avanti", "vai", "ok", "prossima", "salta", "ho capito" o qualsiasi cosa voglia dire "andiamo oltre", chiama SUBITO tutorial azione tappa_completata e presenta la tappa NUOVA in questo stesso turno. NON ripetere la tappa che ha appena visto: ripetersi è l'errore più grave del giro.`;
 }
 
 // Il blocco da iniettare nel system prompt (parte VOLATILE), per gli account demo.

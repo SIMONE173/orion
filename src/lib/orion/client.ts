@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, dispatch, type TurnoContext } from "./tools";
 import { buildSystem, DIRETTIVA_AVVIO, regoleDoro } from "./system";
-import { promemoriaTutorial } from "./tutorial";
+import { promemoriaTutorial, utenteVuoleAvanzare, avanzaTutorial, statoTutorial } from "./tutorial";
 import { consolidaSeNecessario } from "./memoria";
 import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
 import { salvaMessaggio } from "../data";
@@ -159,8 +159,32 @@ export async function runConversation(
   // legge prima di rispondere. Effimero — non viene salvato nello storico.
   {
     const inDemo = Boolean(utente && emailDemo(utente.email));
+
+    // «AVANTI» LO ESEGUE L'APP. Se l'utente dice di andare oltre, la tappa
+    // scatta QUI: il giro non può incepparsi nemmeno se ORION ha una domanda
+    // in sospeso. (Prima capitava: ripeteva la stessa tappa all'infinito.)
+    let appenaAvanzato = false;
+    if (inDemo && !avvio && storico.length) {
+      const ultimo = storico[storico.length - 1];
+      const st = statoTutorial();
+      if (
+        ultimo.role === "user" &&
+        typeof ultimo.content === "string" &&
+        utenteVuoleAvanzare(ultimo.content) &&
+        st.percorso &&
+        !st.finito
+      ) {
+        avanzaTutorial();
+        appenaAvanzato = true;
+        ctx.tappaGiaAvanzata = true;
+      }
+    }
+
     const coda = [
       inDemo ? promemoriaTutorial(onboardingCompleto) : "",
+      appenaAvanzato
+        ? "[Sistema] L'utente ha detto di andare avanti e la tappa è GIÀ scattata: sei sulla tappa NUOVA qui sopra. Presentala adesso — non ripetere quella di prima e non richiamare tappa_completata."
+        : "",
       regoleDoro(desktop),
     ]
       .filter(Boolean)

@@ -126,7 +126,14 @@ import { inviaMessaggioWhatsApp } from "../whatsapp";
 // Contesto del turno: dati extra disponibili agli strumenti (es. immagine
 // allegata) e identità dell'UTENTE che parla (per onboarding/preferenze/azienda
 // che sono per-utente, non per-tenant).
-export type TurnoContext = { allegato?: { dataUrl: string }; utenteId?: number };
+export type TurnoContext = {
+  allegato?: { dataUrl: string };
+  utenteId?: number;
+  // Vero quando è stata l'APP a far scattare la tappa (l'utente ha detto
+  // "avanti"): in quel turno tappa_completata non deve avanzare una seconda
+  // volta, o si salterebbe una tappa intera.
+  tappaGiaAvanzata?: boolean;
+};
 
 // Normalizza un array di voci di memoria provenienti dal modello.
 function leggiVoci(input: unknown): VoceMemoria[] {
@@ -4487,7 +4494,7 @@ const handlers: Record<string, Handler> = {
   }),
 
   // ── ORION DEMO: il timone del giro guidato ────────────────────────────────
-  tutorial: (input) => {
+  tutorial: (input, ctx) => {
     if (!tenantDemo(tenantIdCorrente())) {
       return { result: { ok: false, errore: "Il tutorial esiste solo nella demo di ORION." } };
     }
@@ -4517,6 +4524,11 @@ const handlers: Record<string, Handler> = {
           { nota: "Studio di prova pronto. Il palco al centro mostra la prima tappa: seguila e accompagnala." }
         );
       case "tappa_completata":
+        if (ctx?.tappaGiaAvanzata) {
+          // La tappa è GIÀ scattata in questo turno (l'utente ha detto "avanti"):
+          // non avanzare di nuovo, o si salta una tappa.
+          return conBinario(statoTutorial(), { nota: "La tappa era già stata chiusa in questo turno: sei sulla tappa corrente qui sopra. Presentala e basta." });
+        }
         return conBinario(avanzaTutorial(), { nota: "Tappa chiusa. Prosegui con la guida della nuova tappa (se il giro è finito, saluta secondo la tappa finale)." });
       case "apri_telefono":
         return {
