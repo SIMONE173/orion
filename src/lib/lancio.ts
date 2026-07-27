@@ -27,6 +27,7 @@ export function lanciato(): boolean {
 // questi indirizzi, decisi dal titolare. Si aggiungono qui o via env.
 const ACCESSI_GRATIS_PERMANENTI = new Set<string>([
   "luca.lorito07@gmail.com", // amico del fondatore — accesso a vita a tutte le versioni
+  "lorenzograziani@grazianiweb.it", // amico del fondatore — accesso a vita a tutte le versioni
 ]);
 
 export function accessoGratuitoPermanente(email?: string | null): boolean {
