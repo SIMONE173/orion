@@ -38,6 +38,11 @@ export type StatoTutorial = {
   completate: string[];
   finito: boolean;
   feedback?: { piaciuto?: boolean; utile?: boolean };
+  // Quante volte l'utente aveva parlato quando questa tappa è diventata
+  // corrente: serve a garantire che OGNI tappa viva almeno un turno, invece di
+  // essere presentata e chiusa nello stesso respiro (il giro andava fuori sync
+  // e le richieste dell'utente cadevano nel vuoto).
+  daBattute?: number;
 };
 
 // Ciò che serve al client: il binario + il PALCO della tappa corrente.
@@ -400,6 +405,21 @@ export function avviaTutorial(prestazione?: string, durataMin?: number): StatoTu
   return s;
 }
 
+// Quante battute ha detto finora l'utente in questa demo.
+export function battuteUtente(): number {
+  const r = db()
+    .prepare("SELECT COUNT(*) AS n FROM messaggi WHERE tenant_id = ? AND ruolo = 'user'")
+    .get(T()) as { n: number } | undefined;
+  return r?.n ?? 0;
+}
+
+// La tappa corrente è appena stata presentata? (l'utente non ha ancora parlato)
+export function tappaAppenaPresentata(): boolean {
+  const s = statoTutorial();
+  if (s.daBattute == null) return false;
+  return battuteUtente() <= s.daBattute;
+}
+
 export function avanzaTutorial(): StatoTutorial {
   const s = statoTutorial();
   const corrente = tappaCorrente(s);
@@ -407,6 +427,7 @@ export function avanzaTutorial(): StatoTutorial {
   s.completate = [...s.completate.filter((id) => id !== corrente.id), corrente.id];
   s.indice += 1;
   if (!s.percorso || s.indice >= TAPPE[s.percorso].length) s.finito = true;
+  s.daBattute = battuteUtente(); // la tappa nuova nasce adesso
   salvaStatoTutorial(s);
   // La tappa APPENA diventata corrente può avere bisogno di scenografia.
   const nuova = tappaCorrente(s);
@@ -662,14 +683,15 @@ export function promemoriaTutorial(onboardingCompleto: boolean): string {
     tappa.id === "benvenuto"
       ? gest
         ? `\nDECISO DAL SISTEMA — l'utente USA il gestionale «${gest.nome}»: NON costruire un'agenda di prova e non insistere sui dati finti. Una frase per dire che qui la giornata è lo SPECCHIO di ${gest.nome}, poi rimanda alla tappa «Il tuo software» dove ci lavori DENTRO. Non dilungarti.`
-        : `\nDECISO DAL SISTEMA — l'utente NON ha un gestionale: ANNUNCIA prima cosa stai per fargli vedere ("ora ti faccio vedere la tua giornata, l'ho riempita con clienti di prova"), POI chiama davvero lo strumento briefing e raccontagliela a voce.`
+        : `\nDECISO DAL SISTEMA — l'utente NON ha un gestionale. LA TUA PRIMISSIMA FRASE di questo turno deve ANNUNCIARE cosa stai per mostrare, con parole tue ma questo senso esatto: «Ti faccio vedere la tua giornata — te l'ho riempita io con dei clienti di prova, così vedi com'è.» SOLO DOPO chiami briefing e la racconti. Aprire l'agenda senza aver prima detto che sono clienti di PROVA è un errore: chi guarda deve sapere che non sono dati suoi.`
       : "";
 
   return `[Sistema · IL TUO COMPITO IN QUESTO TURNO — eseguilo, non leggerlo a voce]
 TAPPA ${s.indice + 1} di ${tappe.length}: «${tappa.titolo}»
 ${tappa.guida}${bivio}
 VINCOLI DI QUESTO TURNO: una sola tappa (mai incatenarne due); AGISCI davvero (apri i pannelli veri, fai succedere le cose); poi FERMATI e aspetta che l'utente provi. Mai chiudere con un cenno secco.
-IL COMANDO DELL'UTENTE VINCE SU TUTTO: se dice "avanti", "vai", "ok", "prossima", "salta", "ho capito" o qualsiasi cosa voglia dire "andiamo oltre", chiama SUBITO tutorial azione tappa_completata e presenta la tappa NUOVA in questo stesso turno. NON ripetere la tappa che ha appena visto: ripetersi è l'errore più grave del giro.`;
+IL COMANDO DELL'UTENTE VINCE SU TUTTO: se dice "avanti", "vai", "ok", "prossima", "salta", "ho capito" o qualsiasi cosa voglia dire "andiamo oltre", chiama SUBITO tutorial azione tappa_completata e presenta la tappa NUOVA in questo stesso turno. NON ripetere la tappa che ha appena visto: ripetersi è l'errore più grave del giro.
+SE TI CHIEDE QUALCOSA, FALLA — PRIMA DI TUTTO IL RESTO: se ti dice di rispondere a un messaggio, spostare, stampare, scrivere o qualsiasi altra cosa, ESEGUILA in questo turno con lo strumento giusto e digli com'è andata. Solo dopo, se ha senso, si va avanti. Tirare dritto alla tappa successiva lasciando in sospeso una cosa che ti ha chiesto è la figuraccia peggiore: sembra che non lo ascolti.`;
 }
 
 // Il blocco da iniettare nel system prompt (parte VOLATILE), per gli account demo.

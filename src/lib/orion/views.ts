@@ -38,6 +38,9 @@ export type Vista =
         // Fonte di verità dei dati: se ORION è lo specchio di un gestionale,
         // mostra "aggiornato alle … da <sistema>".
         fonte?: { modo: string; sistema: string | null; aggiornato_at: string | null };
+        // Nella DEMO i clienti sono di esempio: il pannello lo dichiara a
+        // schermo, così chi guarda lo sa anche se ORION non lo dicesse.
+        studioDiProva?: boolean;
       };
     }
   | {

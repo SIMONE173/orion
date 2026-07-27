@@ -2623,7 +2623,23 @@ export function statoAbbonamento(email?: string | null): StatoAbbonamento {
 
 // ── Briefing + analisi proattiva ────────────────────────────────────────────
 
-export function briefingOggi() {
+export type BriefingOggi = {
+  data: string;
+  appuntamenti: ReturnType<typeof listAppuntamenti>;
+  totaleAppuntamenti: number;
+  daConfermare: number;
+  messaggiRicevutiOggi: number;
+  pagamentiInSospeso: number;
+  importoInSospeso: number;
+  clientiInattivi: number;
+  promemoriaAttivi: number;
+  inAttesa: number;
+  fonte?: { modo: string; sistema: string | null; aggiornato_at: string | null };
+  // DEMO: i clienti sono di esempio (il pannello lo dichiara a schermo).
+  studioDiProva?: boolean;
+};
+
+export function briefingOggi(): BriefingOggi {
   const t = T();
   const oggi = new Date().toISOString().slice(0, 10);
   const appuntamenti = listAppuntamenti(oggi, oggi);

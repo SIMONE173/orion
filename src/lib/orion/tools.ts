@@ -6,6 +6,7 @@ import { tenantDemo } from "../demo";
 import {
   type StatoTutorial,
   statoTutorial,
+  tappaAppenaPresentata,
   salvaStatoTutorial,
   tappaCorrente,
   tappeDi,
@@ -133,7 +134,25 @@ export type TurnoContext = {
   // "avanti"): in quel turno tappa_completata non deve avanzare una seconda
   // volta, o si salterebbe una tappa intera.
   tappaGiaAvanzata?: boolean;
+  // L'ultima cosa detta dall'utente e gli strumenti già usati in questo turno:
+  // servono a impedire che il giro avanzi lasciando in sospeso una richiesta.
+  ultimaRichiesta?: string;
+  strumentiUsati?: string[];
 };
+
+// «Rispondile tu», «spostalo», «stampa»: quando l'utente CHIEDE un'azione, il
+// giro non può andare avanti prima di averla fatta — sembrerebbe che ORION non
+// lo ascolti. Riconosce la richiesta operativa dall'imperativo.
+const RE_RICHIESTA_OPERATIVA =
+  /\b(rispondi(le|gli|te)?|scrivi(le|gli)?|mandal[ae]|invia|manda|spost[aa]|sposta(lo|la)|disdic|cancella|conferma|prenota|segna|stampa(mi)?|apri(mi)?|fissa|chiama|ricordami|preparami|fammi|crea|aggiungi)\b/i;
+// Gli strumenti che "eseguono" davvero qualcosa per l'utente.
+const STRUMENTI_OPERATIVI = new Set([
+  "rispondi_email", "rispondi_whatsapp", "invia_email", "invia_whatsapp", "agenda",
+  "sposta_appuntamento", "crea_appuntamento", "elimina_appuntamento", "conferma_appuntamento",
+  "stampa", "apri_documento", "apri_file_locale", "apri_app", "apri", "crea_cliente",
+  "aggiorna_cliente", "creaPromemoria", "crea_promemoria", "prepara_fattura", "prepara_email",
+  "impara", "mostra_consegne", "usa_computer", "guarda_schermo", "personalizza_aspetto",
+]);
 
 // Normalizza un array di voci di memoria provenienti dal modello.
 function leggiVoci(input: unknown): VoceMemoria[] {
@@ -3186,6 +3205,18 @@ const handlers: Record<string, Handler> = {
 
   briefing: (_input, ctx) => {
     let dati = briefingOggi();
+    // DEMO: i clienti sono di esempio. Il pannello lo dichiara a schermo (badge),
+    // e QUI dentro al risultato c'è l'ordine di dirlo anche a voce — letto
+    // nell'istante in cui ORION apre l'agenda, quindi molto più difficile da
+    // ignorare di una riga persa nel prompt di sistema.
+    const inDemo = tenantDemo(tenantIdCorrente());
+    if (inDemo) dati = { ...dati, studioDiProva: true };
+    const notaDemo = inDemo
+      ? {
+          nota_studio_di_prova:
+            "APRI LA FRASE DICENDOLO: questa giornata l'hai riempita TU con clienti di PROVA, non sono suoi. Esempio: «Ti faccio vedere la tua giornata — te l'ho riempita con dei clienti di prova, così vedi com'è.» Poi racconta gli appuntamenti. Se non lo dici, chi guarda crede che siano dati veri: è un errore.",
+        }
+      : {};
     // IL MATTINO DELLA SEGRETARIA: le modifiche accumulate (notte/PC spento)
     // per il gestionale entrano nel briefing (solo per il modello: il pannello
     // resta invariato) — su Desktop le allinea LEI, subito, con la Mano.
@@ -3223,6 +3254,7 @@ const handlers: Record<string, Handler> = {
         result: {
           ...dati,
           ...extra,
+          ...notaDemo,
           azienda: az,
           messaggi_team: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
           approvazioni_da_decidere: daApprovare.map((a) => ({ id: a.id, da: a.da_nome, richiesta: a.richiesta, urgente: a.urgente === 1 })),
@@ -3237,7 +3269,7 @@ const handlers: Record<string, Handler> = {
         vista: { tipo: "briefing", dati },
       };
     }
-    return { result: { ...dati, ...extra }, vista: { tipo: "briefing", dati } };
+    return { result: { ...dati, ...extra, ...notaDemo }, vista: { tipo: "briefing", dati } };
   },
 
   analisi_proattiva: (_input, ctx) => {
@@ -4524,6 +4556,30 @@ const handlers: Record<string, Handler> = {
           { nota: "Studio di prova pronto. Il palco al centro mostra la prima tappa: seguila e accompagnala." }
         );
       case "tappa_completata":
+        if (!ctx?.tappaGiaAvanzata && tappaAppenaPresentata()) {
+          // La tappa è stata presentata in QUESTO turno: non si chiude subito,
+          // o il giro va fuori sincrono e l'utente non riesce mai a provarla.
+          return {
+            result: {
+              ok: false,
+              errore: "tappa_appena_iniziata",
+              nota: "Questa tappa l'hai appena presentata: lascia che l'utente la provi. Fermati qui e aspetta la sua reazione — la chiuderai al prossimo turno (o scatterà da sola se dice «avanti»).",
+            },
+          };
+        }
+        {
+          const chiesto = ctx?.ultimaRichiesta ?? "";
+          const fatto = (ctx?.strumentiUsati ?? []).some((n) => STRUMENTI_OPERATIVI.has(n));
+          if (chiesto && RE_RICHIESTA_OPERATIVA.test(chiesto) && !fatto) {
+            return {
+              result: {
+                ok: false,
+                errore: "richiesta_in_sospeso",
+                nota: `Un momento: l'utente ti ha appena chiesto «${chiesto.slice(0, 120)}». PRIMA fai quello che ti ha chiesto (con lo strumento giusto) e digli com'è andata. Il giro va avanti dopo — lasciarlo a metà sembra non ascoltarlo.`,
+              },
+            };
+          }
+        }
         if (ctx?.tappaGiaAvanzata) {
           // La tappa è GIÀ scattata in questo turno (l'utente ha detto "avanti"):
           // non avanzare di nuovo, o si salta una tappa.
@@ -4674,6 +4730,7 @@ export async function dispatch(
 ): Promise<Esito> {
   const h = handlers[name];
   if (!h) return { result: { ok: false, errore: `Strumento sconosciuto: ${name}` } };
+  if (ctx.strumentiUsati) ctx.strumentiUsati.push(name);
   if (SPENTI_IN_DEMO.has(name) && tenantDemo(tenantIdCorrente())) {
     return {
       result: {

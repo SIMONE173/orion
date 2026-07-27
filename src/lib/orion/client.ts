@@ -115,7 +115,13 @@ export async function runConversation(
   }
 
   // Se c'è un'immagine (fotocamera/documento), la collego all'ultimo turno utente per la lettura (vision).
-  const ctx: TurnoContext = { utenteId: utente?.id };
+  const ctx: TurnoContext = { utenteId: utente?.id, strumentiUsati: [] };
+  // Cosa ha chiesto l'utente in questo turno: serve a non far avanzare il giro
+  // lasciando in sospeso una sua richiesta.
+  {
+    const ult = storico.length ? storico[storico.length - 1] : null;
+    if (ult && ult.role === "user" && typeof ult.content === "string") ctx.ultimaRichiesta = ult.content;
+  }
   if (allegato?.dataUrl) {
     const m = allegato.dataUrl.match(/^data:(.+?);base64,(.*)$/);
     if (m) {

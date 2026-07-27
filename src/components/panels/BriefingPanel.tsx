@@ -14,6 +14,14 @@ export function BriefingPanel({ dati }: { dati: Dati }) {
         Briefing della giornata
       </h2>
 
+      {/* DEMO: si dichiara a schermo che i clienti sono di esempio. */}
+      {dati.studioDiProva ? (
+        <p className="mb-3 inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-200">
+          <span className="size-1.5 rounded-full bg-amber-300" />
+          STUDIO DI PROVA · clienti di esempio
+        </p>
+      ) : null}
+
       {dati.fonte?.modo === "gestionale" && dati.fonte.sistema ? (
         <p className="mb-4 flex items-center gap-1.5 text-xs text-slate-400">
           <span className="size-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px] shadow-emerald-400" />
