@@ -348,5 +348,23 @@ CONTESTO TEMPORALE: oggi è ${dataOggi}. Sono le ${oraOra}. Data ISO di oggi: ${
   ];
 }
 
+// ── LE REGOLE D'ORO ──────────────────────────────────────────────────────────
+// Poche cose non possono MAI sbagliarsi. Vivono già nel corpo del prompt, ma là
+// dentro (~28k token) una regola si perde: qui si ripetono in coda al turno,
+// l'ultimo posto che il modello legge prima di rispondere. Corte apposta: se si
+// allungano tornano a diluirsi. Effimere: non entrano nello storico.
+export function regoleDoro(desktop: boolean): string {
+  const righe = [
+    "WHATSAPP: i messaggi dei clienti che riguardano APPUNTAMENTI (prenotare, spostare, disdire, chiedere orari) li gestisci TU, da solo e in SILENZIO: NON usare prendi_messaggio e NON avvisare il titolare. Lo avvisi SOLO se il messaggio non riguarda appuntamenti, oppure se è urgente.",
+    "IMPREVISTO SUO (non c'è un giorno): prima CHIEDI A LUI come vuole gestire quegli appuntamenti e se ha preferenze; poi scrivi ai clienti CHIEDENDO quando gli fa comodo riprendere (al massimo proponi due-tre slot come opzioni). Mai imporre giorni e orari.",
+  ];
+  if (desktop) {
+    righe.push(
+      "HAI LE MANI SUL COMPUTER: non limitarti a dire le cose, FALLE. Quando c'è un impegno con un cliente apri tu la sua scheda, i suoi documenti e i file che servono, PRIMA che li cerchi; se serve una fattura la prepari tu. E se il discorso tocca qualcosa che vive in un suo software, aprigli la scheda giusta mentre ne parlate."
+    );
+  }
+  return `[Sistema · REGOLE D'ORO — valgono in questo turno, non leggerle a voce]\n${righe.map((r, i) => `${i + 1}. ${r}`).join("\n")}`;
+}
+
 export const DIRETTIVA_AVVIO =
   "[Sistema] È iniziata una nuova sessione. Saluta l'utente. Se l'onboarding non è completo, conduci tu il colloquio iniziale partendo dalla prima domanda (una sola). Se è completo, presenta il briefing della giornata usando lo strumento briefing. Se il briefing porta consegne_gestionale e sei su Desktop: da vera segretaria, annuncia che ora allinei TU il gestionale e avvia subito la Mano (usa_computer) con quelle modifiche — senza aspettare che te lo chiedano.";

@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { tenantIdCorrente } from "../tenant";
-import { getProfilo, setRisponditore, creaPromemoria, aggiungiAttesa, creaDocumento, attivaPonteManuale } from "../data";
+import { getProfilo, gestionaleFonte, setRisponditore, creaPromemoria, aggiungiAttesa, creaDocumento, attivaPonteManuale } from "../data";
 import { processaEmailInArrivo } from "../posta";
 
 // ── IL TUTORIAL DELLA DEMO ───────────────────────────────────────────────────
@@ -438,9 +438,9 @@ function allestisciTappa(id: string): void {
 // La posta del mattino: 1 email che conta + 2 di rumore. Passa dalla STESSA
 // pipeline vera (classificatore + digest): l'app annuncerà da sola quella
 // importante al prossimo giro di sondaggio.
-export function simulaPostaDemo(): { importanti: number; silenziate: number } {
+export function simulaPostaDemo(): { importanti: number; silenziate: number; importante_id: number | null } {
   const base = Date.now() % 100000;
-  processaEmailInArrivo({
+  const cheConta = processaEmailInArrivo({
     uid: 900001 + base,
     daNome: "Giulia Marchetti",
     daIndirizzo: "giulia.marchetti@esempio.it",
@@ -467,7 +467,9 @@ export function simulaPostaDemo(): { importanti: number; silenziate: number } {
     corpo: "Ecco la newsletter della settimana con tutte le novità. Unsubscribe in fondo.",
     bulk: true,
   });
-  return { importanti: 1, silenziate: 2 };
+  // L'id della mail che CONTA: l'app la apre da sola in chat, così la scena si
+  // vive per intero senza dipendere dal fatto che il modello chiami apri_messaggio.
+  return { importanti: 1, silenziate: 2, importante_id: cheConta?.id ?? null };
 }
 
 // ── LO STUDIO DI PROVA ───────────────────────────────────────────────────────
@@ -620,6 +622,44 @@ const REGOLE_TUTOR = `REGOLE DEL TUTOR (valgono per tutto il giro guidato)
 - Niente P.IVA, carta o collegamenti reali nella demo: se li chiede, spiega che vivono nella versione completa.
 - ANTI-STALLO: ogni tuo turno fa SEMPRE la mossa successiva. MAI un cenno secco ("Bene", "Grazie") e fermarti: il giro non si ferma mai da solo.
 - Obiettivo emotivo: deve pensare "questa è la segretaria che non ho mai potuto permettermi". Ogni tappa un momento così.`;
+
+// ── IL PROMEMORIA DI CODA ────────────────────────────────────────────────────
+// Il system prompt di ORION è enorme (~28k token): una regola scritta lì dentro
+// può passare inosservata — è esattamente quello che succedeva alle correzioni
+// della demo. Ciò che DEVE accadere si ripete qui, in coda all'ultimo messaggio
+// dell'utente: l'ultimo posto che il modello legge prima di rispondere, e quello
+// a cui dà più peso. È effimero (non entra nello storico) e non si legge a voce.
+export function promemoriaTutorial(onboardingCompleto: boolean): string {
+  const s = statoTutorial();
+
+  if (!s.percorso) {
+    if (onboardingCompleto) {
+      return `[Sistema · ADESSO] Il giro guidato non è ancora partito: chiama SUBITO lo strumento tutorial con azione "avvia" e comincia dalla prima tappa.`;
+    }
+    return `[Sistema · ADESSO — eseguilo, non leggerlo a voce] Sei nella CHIAMATA 0 della demo: colloquio SNELLO (5-6 domande), UNA domanda per turno, niente dati fiscali. La domanda sul software gestionale è l'ULTIMA: appena arriva la risposta, NELLO STESSO TURNO salva tutto, metti onboarding_completo=1 e chiama tutorial azione "avvia" (con 'prestazione' e 'durata_min' del suo mestiere). Non fermarti mai con un cenno secco.`;
+  }
+
+  if (s.finito) return "";
+
+  const tappe = TAPPE[s.percorso];
+  const tappa = tappe[s.indice];
+
+  // I BIVI LI RISOLVE IL CODICE. Una guida che dice «se usa un gestionale fai A,
+  // altrimenti fai B» lascia al modello una scelta che può sbagliare: qui la
+  // decisione è già presa, e ORION riceve UNA istruzione sola.
+  const gest = gestionaleFonte();
+  const bivio =
+    tappa.id === "benvenuto"
+      ? gest
+        ? `\nDECISO DAL SISTEMA — l'utente USA il gestionale «${gest.nome}»: NON costruire un'agenda di prova e non insistere sui dati finti. Una frase per dire che qui la giornata è lo SPECCHIO di ${gest.nome}, poi rimanda alla tappa «Il tuo software» dove ci lavori DENTRO. Non dilungarti.`
+        : `\nDECISO DAL SISTEMA — l'utente NON ha un gestionale: ANNUNCIA prima cosa stai per fargli vedere ("ora ti faccio vedere la tua giornata, l'ho riempita con clienti di prova"), POI chiama davvero lo strumento briefing e raccontagliela a voce.`
+      : "";
+
+  return `[Sistema · IL TUO COMPITO IN QUESTO TURNO — eseguilo, non leggerlo a voce]
+TAPPA ${s.indice + 1} di ${tappe.length}: «${tappa.titolo}»
+${tappa.guida}${bivio}
+VINCOLI DI QUESTO TURNO: una sola tappa (mai incatenarne due); AGISCI davvero (apri i pannelli veri, fai succedere le cose); poi FERMATI e aspetta che l'utente provi. Mai chiudere con un cenno secco.`;
+}
 
 // Il blocco da iniettare nel system prompt (parte VOLATILE), per gli account demo.
 export function bloccoTutorialSystem(onboardingCompleto: boolean): string {

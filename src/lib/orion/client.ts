@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { TOOLS, dispatch, type TurnoContext } from "./tools";
-import { buildSystem, DIRETTIVA_AVVIO } from "./system";
+import { buildSystem, DIRETTIVA_AVVIO, regoleDoro } from "./system";
+import { promemoriaTutorial } from "./tutorial";
 import { consolidaSeNecessario } from "./memoria";
 import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
 import { salvaMessaggio } from "../data";
@@ -149,6 +150,34 @@ export async function runConversation(
   let testo = "";
 
   const onboardingCompleto = utente ? utente.onboarding_completo === 1 : true;
+
+  // ── IL PROMEMORIA DI CODA ──────────────────────────────────────────────
+  // Il system prompt pesa ~28k token: una regola scritta là dentro può passare
+  // inosservata (è quello che succedeva alle correzioni della demo, scritte e
+  // poi ignorate dal vivo). Le poche cose che DEVONO accadere si ripetono qui,
+  // agganciate all'ultimo messaggio dell'utente: l'ultimo posto che il modello
+  // legge prima di rispondere. Effimero — non viene salvato nello storico.
+  {
+    const inDemo = Boolean(utente && emailDemo(utente.email));
+    const coda = [
+      inDemo ? promemoriaTutorial(onboardingCompleto) : "",
+      regoleDoro(desktop),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (coda) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.role !== "user") continue;
+        if (typeof m.content === "string") {
+          messages[i] = { role: "user", content: `${m.content}\n\n${coda}` };
+        } else if (Array.isArray(m.content)) {
+          messages[i] = { role: "user", content: [...m.content, { type: "text", text: coda }] };
+        }
+        break;
+      }
+    }
+  }
   // ORION DEMO: tutto il giro recita sul motore demo (qualità alta, spesa
   // da centesimi) — il routing normale riguarda solo gli account veri.
   const demo = Boolean(utente && emailDemo(utente.email));

@@ -4543,6 +4543,38 @@ const handlers: Record<string, Handler> = {
       }
       case "simula_posta": {
         const esito = simulaPostaDemo();
+        // La mail che conta si APRE DA SOLA in chat (col corpo intero): la scena
+        // della posta si vive per intero — arriva, si apre, si può rispondere —
+        // senza dipendere dal fatto che il modello ricordi di chiamare apri_messaggio.
+        const com = esito.importante_id ? getComunicazione(esito.importante_id) : undefined;
+        if (com) {
+          segnaComunicazioniLette([com.id]);
+          return {
+            result: {
+              ok: true,
+              ...esito,
+              aperta: { da: com.cliente_nome ?? com.mittente, oggetto: com.oggetto },
+              nota: "Le email sono arrivate e quella che CONTA è già aperta in chat (l'app l'ha mostrata da sola). Ora: di' in due frasi di chi è e cosa chiede, di' quante ne hai silenziate, e OFFRIGLI di rispondere tu ('vuoi che le risponda io?'). Se detta la risposta, usa rispondi_email (invio simulato: dillo leggero).",
+            },
+            azione: {
+              tipo: "apri_messaggio",
+              arrivo: {
+                id: com.id,
+                canale: "email" as const,
+                cliente: com.cliente_nome ?? null,
+                cliente_id: com.cliente_id,
+                telefono: com.telefono ?? null,
+                mittente: com.mittente ?? null,
+                oggetto: com.oggetto ?? null,
+                tipo: com.tipo,
+                contenuto: com.contenuto,
+                allegato_url: com.allegato_url,
+                allegato_nome: com.allegato_nome,
+                quando: com.created_at,
+              },
+            },
+          };
+        }
         return {
           result: {
             ok: true,
