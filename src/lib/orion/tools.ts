@@ -4721,7 +4721,20 @@ const AREA_DI_TOOL: Record<string, AreaPermessi> = {
 
 // ORION DEMO: gli strumenti che toccano account e dati VERI restano spenti
 // nello studio di prova (il prompt non li propone; questo è il paletto duro).
-const SPENTI_IN_DEMO = new Set(["collega_whatsapp", "collega_email", "collega_calendario", "importa_dati", "esegui_import"]);
+// Spenti in DEMO. Oltre ai collegamenti veri, qui dentro ci sono gli strumenti
+// che TOCCANO il computer di chi prova: nella demo ORION sta su una macchina
+// altrui (spesso di un potenziale cliente) e non deve MAI minimizzarsi e mettersi
+// a cliccare da solo, né lanciare app, né cestinare file. La Mano è la funzione
+// più potente che abbiamo: si mostra nella versione completa, guidati, con lo
+// STOP a portata di mano — non a sorpresa sul portatile di un ospite.
+const SPENTI_IN_DEMO = new Set([
+  "collega_whatsapp", "collega_email", "collega_calendario", "importa_dati", "esegui_import",
+  // ── mani e occhi sul computer altrui ──
+  "usa_computer", "esegui_comando", "guarda_schermo",
+  "apri_app", "chiudi_app", "chiudi_finestra",
+  "apri_file_locale", "crea_file_locale", "rinomina_file_locale", "elimina_file_locale",
+  "scrivi_file", "leggi_file", "stampa", "attiva_gesti",
+]);
 
 export async function dispatch(
   name: string,
@@ -4736,7 +4749,8 @@ export async function dispatch(
       result: {
         ok: false,
         errore: "non_disponibile_in_demo",
-        nota: "Nella demo i collegamenti e i dati VERI restano fuori (questo è uno studio di prova). Spiegalo con leggerezza: nella versione completa si collega tutto in pochi minuti.",
+        nota:
+          "Nella demo non tocco il computer di chi sta provando (né file, né app, né clic) e i collegamenti veri restano fuori: questo è uno studio di prova. Spiegalo con leggerezza e RACCONTA cosa faresti nella versione completa — dove le mani sul computer ci sono davvero, guidati e con lo stop sempre a portata di mano.",
       },
     };
   }

@@ -860,6 +860,7 @@ export default function Home() {
       await d.riduciOrion?.();
       await attesa(900);
 
+      let falliteDiFila = 0;
       for (let passo = 1; passo <= 25; passo++) {
         if (manoStopRef.current) {
           esitoFinale = "fermata dall'utente";
@@ -885,7 +886,10 @@ export default function Home() {
         if (az.spiegazione) alNucleo(az.spiegazione);
 
         if (az.tipo === "fatto") {
-          esitoFinale = `FATTO E VERIFICATO: ${az.esito_finale || "obiettivo completato"}`;
+          // Onestà: questo è ciò che ORION VEDE sullo schermo, non una prova
+          // certificata. Dirlo com'è evita di spacciare per garantito ciò che è
+          // un giudizio a occhio — e ORION lo riferirà con la stessa cautela.
+          esitoFinale = `finito — a schermo risulta: ${az.esito_finale || "obiettivo completato"} (controllo a vista, dai un'occhiata anche tu)`;
           break;
         }
         if (az.tipo === "aiuto") {
@@ -913,6 +917,14 @@ export default function Home() {
         passi.push({ spiegazione: az.spiegazione ?? az.tipo, esito: ok ? undefined : `FALLITA: ${err}` });
         if (!ok && err === "accessibilita") {
           esitoFinale = "mi manca il permesso Accessibilità: Impostazioni di Sistema → Privacy e Sicurezza → Accessibilità → attiva ORION";
+          break;
+        }
+        // NON INSISTERE AL BUIO: se le azioni falliscono non si continua a
+        // martellare il computer di qualcun altro. Due tentativi andati a vuoto
+        // di fila e ci si ferma, dicendo la verità invece di far finta.
+        falliteDiFila = ok ? 0 : falliteDiFila + 1;
+        if (falliteDiFila >= 2) {
+          esitoFinale = `mi sono fermata: due mosse di fila non hanno funzionato (${err || "nessuna risposta dal computer"}). Meglio non insistere alla cieca — finiamola insieme`;
           break;
         }
         await attesa(700);
