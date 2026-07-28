@@ -2,13 +2,15 @@ import { S3Client } from "@aws-sdk/client-s3";
 
 // Gli installer della vetrina vivono nel bucket R2 privato (prefisso
 // download/): i link per gli utenti sono FIRMATI e temporanei.
+// Windows: installer .exe vero (si apre, installa, mette il collegamento sul
+// desktop e parte da solo) — non più uno zip da scompattare a mano.
 
 export const FILE_DOWNLOAD: Record<string, string> = {
   mac: "download/ORION-1.0.0-arm64.dmg",
-  win: "download/ORION-1.0.0-win.zip",
+  win: "download/ORION-1.0.0-win.exe",
   // ORION DEMO: l'assaggio scaricabile — LIBERO anche a lancio chiuso.
   demo_mac: "download/ORION-Demo-1.0.0-arm64.dmg",
-  demo_win: "download/ORION-Demo-1.0.0-win.zip",
+  demo_win: "download/ORION-Demo-1.0.0-win.exe",
 };
 
 // Le varianti demo non passano dal lucchetto del lancio.

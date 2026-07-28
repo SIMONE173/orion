@@ -5,6 +5,10 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-28", testo: "Windows si installa come si deve: al posto dello zip da scompattare a mano c'è un installer vero — apri, avanti, fatto: ORION finisce nel menu Start, col collegamento sul desktop, e si avvia da solo" },
+  { data: "2026-07-28", testo: "Riaccendi il computer e ORION ha già rimesso in ordine i tuoi programmi: quello che è successo mentre eri via viene riportato nel gestionale — e le cose prese e disdette durante la notte le salta, perché lì dentro non sono mai esistite" },
+  { data: "2026-07-28", testo: "Mentre parli, ORION ha già aperto la persona di cui stai parlando — e sa già quanto ti deve, quanti documenti ha, quando è venuta l'ultima volta. Nomina un cliente e la sua scheda è lì, senza chiederla" },
+  { data: "2026-07-28", testo: "Il buongiorno sul Desktop apparecchia la scrivania: i tuoi programmi si aprono e si dispongono ORDINATI, ognuno nel suo riquadro, mai uno sopra l'altro — e ORION racconta la giornata con tutto già davanti" },
   { data: "2026-07-27", testo: "ORION ora esegue le sue regole d'oro senza scampo: le istruzioni che contano arrivano in coda a ogni turno invece di perdersi nel mare del suo cervello — la giornata annunciata, l'imprevisto trattato da persona, la posta che si apre davvero, le mani sul computer" },
   { data: "2026-07-26", testo: "Il buongiorno di ORION ora è completo: sul Desktop ti apre da solo TUTTI i tuoi strumenti — gestionale, siti, portali — e ti fa il briefing con tutto già davanti agli occhi. E durante la giornata ascolta il discorso: si parla di una pratica o di un preventivo? La scheda giusta compare da sola" },
   { data: "2026-07-25", testo: "Il mini-nucleo di ORION ora non copre più nulla: resti tu a comandare il computer sotto, lui è cliccabile solo sul cerchio — che afferri e sposti dove vuoi, e con un tocco ti riapre ORION" },

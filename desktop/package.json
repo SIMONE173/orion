@@ -10,8 +10,8 @@
     "start": "electron .",
     "dist": "electron-builder",
     "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo'",
-    "dist:win": "electron-builder --win zip --x64",
-    "dist:demo:win": "electron-builder --win zip --x64 -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.artifactName='ORION-Demo-${version}-win.${ext}'"
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:demo:win": "electron-builder --win nsis --x64 -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.artifactName='ORION-Demo-${version}-win.${ext}' -c.nsis.shortcutName='ORION Demo'"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3"
@@ -23,8 +23,15 @@
   "build": {
     "appId": "app.orion.desktop",
     "productName": "ORION",
-    "files": ["main.js", "preload.js", "whisper.js", "gesti-ax.js"],
-    "asarUnpack": ["gesti-ax.js"],
+    "files": [
+      "main.js",
+      "preload.js",
+      "whisper.js",
+      "gesti-ax.js"
+    ],
+    "asarUnpack": [
+      "gesti-ax.js"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "target": "dmg",
@@ -34,7 +41,26 @@
         "NSAppleEventsUsageDescription": "ORION usa gli eventi di sistema per aprire e chiudere le app che gli chiedi."
       }
     },
-    "win": { "target": "zip", "artifactName": "${productName}-${version}-win.${ext}" },
-    "linux": { "target": "AppImage" }
+    "win": {
+      "target": "nsis",
+      "artifactName": "${productName}-${version}-win.${ext}"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ORION",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": [
+        "it_IT"
+      ],
+      "language": "1040"
+    }
   }
 }

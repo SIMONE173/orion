@@ -100,9 +100,15 @@ export default function DemoPage() {
                 className="rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-5 py-4 font-semibold text-cyan-50 transition hover:bg-cyan-400/20"
               >
                 ⊞ Scarica per Windows
-                <div className="mt-0.5 text-[11px] font-normal text-slate-400">Windows 10/11 · gratis</div>
+                <div className="mt-0.5 text-[11px] font-normal text-slate-400">Windows 10/11 · installer · gratis</div>
               </a>
             </div>
+            {/* ORION non è ancora firmato digitalmente: il sistema avvisa. Meglio
+                dirlo prima con semplicità che lasciare qualcuno spaventato a metà. */}
+            <p className="mx-auto mt-4 max-w-md text-[11px] leading-relaxed text-slate-500">
+              La prima volta il computer chiede conferma perché ORION è nuovo: su Windows premi
+              «Ulteriori informazioni → Esegui comunque», su Mac tasto destro sull'app → «Apri». È normale.
+            </p>
             <div className="mx-auto mt-6 flex max-w-md flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-slate-500">
               <span>✓ Senza carta</span>
               <span>✓ Senza registrazione</span>
