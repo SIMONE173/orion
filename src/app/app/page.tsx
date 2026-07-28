@@ -270,6 +270,7 @@ type OrionDesktop = {
   // IL BUONGIORNO: apre gli strumenti del professionista e li dispone ordinati
   // sullo schermo, ciascuno nel suo riquadro (Mac e Windows).
   appAperte?: () => Promise<{ ok: boolean; app?: string[] }>;
+  onRisveglio?: (cb: (d: { motivo: string; minuti: number; da: string; a: string }) => void) => void;
   tornaComeEra?: () => Promise<{ ok: boolean; errore?: string }>;
   scrivaniaOrdinata?: (d: { strumenti: { nome: string; apertura: string }[]; spazioOrion?: boolean }) => Promise<{
     ok: boolean;
@@ -1387,6 +1388,86 @@ export default function Home() {
       setMessages((m) => [...m, { role: "assistant", content: "Connessione interrotta: la risposta non è partita." }]);
     }
   }, []);
+
+  // ══ LA SINCRONIA AL RISVEGLIO ═════════════════════════════════════════
+  // Il computer è tornato vivo dopo un'assenza. ORION non aspetta che glielo
+  // si chieda: va a vedere cos'è successo mentre era spento e riporta tutto
+  // nei programmi del professionista. Il modello non decide niente — decide il
+  // piano, che è aritmetica; il modello al massimo lo racconta.
+  const risveglioFattoRef = useRef(false);
+  const sincronizzaAlRisveglio = useCallback(async (info?: { motivo?: string; minuti?: number }) => {
+    if (risveglioFattoRef.current || demoRef.current) return;
+    risveglioFattoRef.current = true;
+    try {
+      const r = await fetch("/api/sincronia/piano");
+      if (!r.ok) return;
+      const p: {
+        daFare?: number;
+        sistemi?: string[];
+        indietroDa?: string;
+        saltate?: number;
+        obiettivi?: { sistema: string; obiettivo: string }[];
+        voci?: { azione: string; riga: string; ids: number[] }[];
+      } = await r.json();
+      if (!p?.daFare && !p?.saltate) return;
+
+      const quanto = info?.minuti && info.minuti > 90 ? `${Math.round(info.minuti / 60)} ore` : info?.minuti ? `${info.minuti} minuti` : (p.indietroDa ?? "");
+      const saltate = p.saltate
+        ? ` ${p.saltate} cos${p.saltate === 1 ? "a è nata e morta" : "e sono nate e morte"} mentre eri via: nel gestionale non ${p.saltate === 1 ? "è" : "sono"} mai esistit${p.saltate === 1 ? "a" : "e"}, non tocco niente.`
+        : "";
+
+      if (!p.daFare) {
+        inviaAOrionRef.current?.(
+          `[Sistema · RISVEGLIO] Il computer è stato via ${quanto}. Non c'è niente da riportare nei suoi programmi.${saltate} Dillo in UNA frase tranquilla e passa al resto.`,
+          false, undefined, true);
+        return;
+      }
+
+      const d = desktopBridge();
+      const troppo = (p.daFare ?? 0) > 15;
+      if (!d?.manoClic || troppo) {
+        // Niente Mano (web), o troppa roba per farla partire da sola: si mostra
+        // e si chiede. Muovere quindici cose senza permesso non si fa.
+        inviaAOrionRef.current?.(
+          `[Sistema · RISVEGLIO] Il computer è stato via ${quanto}. Ci sono ${p.daFare} modifiche da riportare in ${(p.sistemi ?? []).join(" e ")}: ` +
+            (p.voci ?? []).filter((v) => v.azione !== "niente").map((v) => "· " + v.riga).join("\n") +
+            `.${saltate} ${troppo ? "Sono tante: CHIEDIGLI se vuoi che le riporti tu adesso, non partire da solo." : "Qui non puoi usare il computer: apri il pannello con mostra_consegne e diglielo con garbo."}`,
+          false, undefined, true);
+        return;
+      }
+
+      // Desktop: si riporta davvero, un programma alla volta, davanti a lui.
+      speakRef.current?.(
+        `Bentornato. Mentre eri via sono successe ${p.daFare} cose: te le riporto ${(p.sistemi ?? []).length > 1 ? "nei tuoi programmi" : "in " + (p.sistemi ?? [])[0]} adesso.`
+      );
+      for (const o of p.obiettivi ?? []) {
+        if (!o.obiettivo) continue;
+        const ids = (p.voci ?? []).filter((v) => v.azione !== "niente").flatMap((v) => v.ids);
+        await avviaManoRef.current?.({ obiettivo: o.obiettivo, app: o.sistema });
+        // Spuntate SOLO dopo che la Mano ha finito il giro su quel programma.
+        try {
+          await fetch("/api/sincronia/piano", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ ids }),
+          });
+        } catch {
+          /* restano in coda: meglio rifarle che perderle */
+        }
+      }
+    } catch {
+      /* il risveglio non deve mai rompere l'avvio: al peggio non sincronizza */
+    }
+  }, []);
+
+  useEffect(() => {
+    const d = desktopBridge();
+    if (d?.onRisveglio) d.onRisveglio((info) => void sincronizzaAlRisveglio(info));
+    // Rete di sicurezza: app desktop non aggiornata, o versione web. Dopo 8
+    // secondi si chiede lo stesso — la sincronia non deve dipendere dall'IPC.
+    const t = setTimeout(() => void sincronizzaAlRisveglio(), 8000);
+    return () => clearTimeout(t);
+  }, [sincronizzaAlRisveglio]);
 
   // ── LA SEGRETARIA LIVE: la consegna appare, lei la scrive (o apre il pannello) ──
   const consegneViveRef = useRef(consegneVive);

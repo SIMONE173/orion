@@ -2026,11 +2026,24 @@ export function registraPagamento(p: {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(T(), p.cliente_id ?? null, p.importo, p.metodo, p.stato ?? "incassato", data, p.descrizione ?? null, nowISO());
-  return db()
+  const pagamento = db()
     .prepare(
       `SELECT p.*, c.nome AS cliente_nome FROM pagamenti p LEFT JOIN clienti c ON c.id = p.cliente_id WHERE p.id = ?`
     )
     .get(Number(r.lastInsertRowid)) as Pagamento;
+  // Verso il gestionale: un incasso registrato mentre il PC era spento deve
+  // ritrovarsi nel software del professionista al risveglio.
+  emettiEventoUscita("pagamento_registrato", {
+    orion_id: pagamento.id,
+    cliente_id: pagamento.cliente_id,
+    cliente_nome: pagamento.cliente_nome ?? null,
+    importo: pagamento.importo,
+    metodo: pagamento.metodo,
+    stato: pagamento.stato,
+    data: pagamento.data,
+    descrizione: pagamento.descrizione ?? null,
+  });
+  return pagamento;
 }
 
 export function listPagamenti(dataDa: string, dataA: string): Pagamento[] {
@@ -2232,7 +2245,18 @@ export function creaFattura(f: {
       T(), f.cliente_id, numero, f.importo, f.descrizione ?? null, f.stato ?? "emessa", data,
       f.xml ?? null, f.stato_sdi ?? null, f.bollo ?? null, nowISO()
     );
-  return db().prepare("SELECT * FROM fatture WHERE id = ?").get(Number(r.lastInsertRowid)) as Fattura;
+  const fattura = db().prepare("SELECT * FROM fatture WHERE id = ?").get(Number(r.lastInsertRowid)) as Fattura;
+  // Verso il gestionale: la fattura emessa mentre eri via si riporta al risveglio.
+  emettiEventoUscita("fattura_emessa", {
+    orion_id: fattura.id,
+    numero: fattura.numero,
+    cliente_id: fattura.cliente_id,
+    importo: fattura.importo,
+    descrizione: fattura.descrizione ?? null,
+    stato: fattura.stato,
+    data: fattura.data,
+  });
+  return fattura;
 }
 
 export function getFattura(id: number): Fattura | undefined {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, session, screen, globalShortcut, systemPreferences, desktopCapturer } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, session, screen, globalShortcut, systemPreferences, desktopCapturer, powerMonitor } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -975,6 +975,74 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
 
 // «RIMETTI LA FINESTRA COM'ERA» — dopo il buongiorno ORION resta stretto nella
 // sua colonna: questo lo riporta alla misura di prima, senza chiudere l'app.
+// ═══════════════════════════════════════════════════════════════════════════
+// LA SENTINELLA — quanto tempo è stato via il computer.
+// Un battito scritto su disco ogni 30 secondi (e quando l'app si chiude, si
+// sospende o lo schermo si blocca). Al ritorno, la distanza fra l'ultimo
+// battito e adesso È l'assenza: nessuna congettura, nessun orologio di sistema
+// da interpretare. Funziona identica su Mac e su Windows.
+// ═══════════════════════════════════════════════════════════════════════════
+const FILE_PRESENZA = () => path.join(app.getPath("userData"), "presenza.json");
+let battitoTimer = null;
+
+function scriviBattito(chiusura) {
+  try {
+    fs.writeFileSync(
+      FILE_PRESENZA(),
+      JSON.stringify({ ultimoBattito: new Date().toISOString(), chiusura: chiusura || null })
+    );
+  } catch {}
+}
+
+function leggiBattito() {
+  try {
+    const d = JSON.parse(fs.readFileSync(FILE_PRESENZA(), "utf8"));
+    return d && d.ultimoBattito ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+// Sotto i 20 minuti non è un risveglio: è un riavvio veloce, e svegliare
+// l'utente con un resoconto sarebbe fastidioso.
+const ASSENZA_MINIMA = 20;
+
+function annunciaRisveglio(motivoPredefinito) {
+  const prima = leggiBattito();
+  if (!prima) return; // primo avvio in assoluto: niente da recuperare
+  const minuti = Math.round((Date.now() - new Date(prima.ultimoBattito).getTime()) / 60000);
+  if (!Number.isFinite(minuti) || minuti < ASSENZA_MINIMA) return;
+  const motivo = prima.chiusura === "sospensione" ? "sospeso" : prima.chiusura === "uscita" ? "app_chiusa" : motivoPredefinito;
+  try {
+    if (finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+      finestraPrincipale.webContents.send("orion:risveglio", {
+        motivo,
+        minuti,
+        da: prima.ultimoBattito,
+        a: new Date().toISOString(),
+      });
+    }
+  } catch {}
+}
+
+function avviaSentinella() {
+  // L'annuncio parte a pagina pronta, non prima: altrimenti l'IPC si perde.
+  try {
+    if (finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+      finestraPrincipale.webContents.once("did-finish-load", () => setTimeout(() => annunciaRisveglio("pc_spento"), 2500));
+    }
+  } catch {}
+  scriviBattito(null);
+  if (battitoTimer) clearInterval(battitoTimer);
+  battitoTimer = setInterval(() => scriviBattito(null), 30000);
+  try {
+    powerMonitor.on("suspend", () => scriviBattito("sospensione"));
+    powerMonitor.on("lock-screen", () => scriviBattito(null));
+    powerMonitor.on("resume", () => setTimeout(() => annunciaRisveglio("sospeso"), 1500));
+  } catch {}
+  app.on("will-quit", () => scriviBattito("uscita"));
+}
+
 // QUALI PROGRAMMI SONO APERTI ADESSO. Serve all'anticipazione: ORION non deve
 // riaprire ciò che il professionista ha già davanti. Funziona su Mac e Windows.
 ipcMain.handle("os:appAperte", async () => {
@@ -1158,6 +1226,8 @@ ipcMain.on("os:chiudiVista", (_e, vista) => {
 
 app.whenReady().then(() => {
   creaFinestra();
+  // LA SENTINELLA: da qui in poi ORION sa sempre da quanto è stato via.
+  avviaSentinella();
   // Pre-carica (e scarica, la prima volta) il modello vocale in background, così
   // quando l'utente parla è già pronto. Non blocca l'avvio.
   whisper

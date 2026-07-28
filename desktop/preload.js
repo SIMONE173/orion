@@ -69,6 +69,9 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   scrivaniaOrdinata: (dati) => ipcRenderer.invoke("os:scrivaniaOrdinata", dati),
   // Quali programmi sono aperti adesso (per non riaprire ciò che c'è già).
   appAperte: () => ipcRenderer.invoke("os:appAperte"),
+  // IL RISVEGLIO: il computer è tornato vivo dopo un'assenza. L'app lo dice
+  // alla pagina, che va a chiedere cosa c'è da riportare nei gestionali.
+  onRisveglio: (cb) => ipcRenderer.on("orion:risveglio", (_e, d) => cb(d)),
   // Rimette la finestra di ORION com'era prima del buongiorno.
   tornaComeEra: () => ipcRenderer.invoke("os:tornaComeEra"),
   // Apre una vista (pannello) in una finestra separata.
