@@ -14,6 +14,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
+import { PONTE_MANUALE } from "./data";
 
 export type VoceSincronia = {
   /** Cosa bisogna fare davvero nel programma dell'utente. */
@@ -70,7 +71,10 @@ function quando(p: Record<string, unknown>): string {
 }
 
 /**
- * IL PIANO. Legge tutto ciò che non è ancora stato riportato e lo riduce
+ * IL PIANO. Riguarda SOLO i sistemi da riportare a mano: quelli con un canale
+ * automatico si consegnano da soli (src/lib/uscita.ts), e farli riscrivere
+ * anche alla Mano vorrebbe dire inserire tutto DUE VOLTE nel gestionale.
+ * Legge tutto ciò che non è ancora stato riportato e lo riduce
  * all'osso: una voce per cosa vera, con l'azione giusta e i dati finali.
  */
 export function pianoSincronia(limite = 60): PianoSincronia {
@@ -78,10 +82,10 @@ export function pianoSincronia(limite = 60): PianoSincronia {
     .prepare(
       `SELECT e.id, e.evento, e.payload, e.created_at, c.nome AS sistema
        FROM eventi_uscita e JOIN connessioni c ON c.id = e.connessione_id
-       WHERE e.tenant_id = ? AND e.consegnato = 0
+       WHERE e.tenant_id = ? AND e.consegnato = 0 AND c.webhook_uscita = ?
        ORDER BY e.id ASC LIMIT ?`
     )
-    .all(tenantIdCorrente(), limite) as { id: number; evento: string; payload: string; created_at: string; sistema: string }[];
+    .all(tenantIdCorrente(), PONTE_MANUALE, limite) as { id: number; evento: string; payload: string; created_at: string; sistema: string }[];
 
   if (!righe.length) return { voci: [], daSpuntareSubito: [], daFare: 0, sistemi: [], piuVecchio: null };
 
@@ -176,9 +180,10 @@ export function spuntaRighe(ids: number[]): number {
   return db()
     .prepare(
       `UPDATE eventi_uscita SET consegnato = 1, consegnato_at = ?
-       WHERE tenant_id = ? AND consegnato = 0 AND id IN (${segnaposto})`
+       WHERE tenant_id = ? AND consegnato = 0 AND id IN (${segnaposto})
+         AND connessione_id IN (SELECT id FROM connessioni WHERE tenant_id = ? AND webhook_uscita = ?)`
     )
-    .run(new Date().toISOString(), tenantIdCorrente(), ...ids).changes;
+    .run(new Date().toISOString(), tenantIdCorrente(), ...ids, tenantIdCorrente(), PONTE_MANUALE).changes;
 }
 
 /** L'obiettivo da dare alla Mano: una riga per cosa, in ordine, senza fronzoli. */
