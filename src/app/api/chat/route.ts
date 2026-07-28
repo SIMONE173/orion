@@ -15,6 +15,16 @@ export async function POST(req: NextRequest) {
     const allegato =
       typeof body?.allegato?.dataUrl === "string" ? { dataUrl: body.allegato.dataUrl } : undefined;
     const desktop = body?.desktop === true;
+    // LA FOTOGRAFIA DELLO SCHERMO: cosa ha GIÀ davanti. Senza questa, ogni
+    // anticipazione diventa invadenza (riaprire ciò che è già aperto).
+    const schermo =
+      body?.schermo && typeof body.schermo === "object"
+        ? {
+            pannelli: Array.isArray(body.schermo.pannelli) ? body.schermo.pannelli.slice(0, 12).map(String) : [],
+            app: Array.isArray(body.schermo.app) ? body.schermo.app.slice(0, 20).map(String) : [],
+            manoInCorso: body.schermo.manoInCorso === true,
+          }
+        : undefined;
 
     // Lucchetto del lancio: vale anche per sessioni già aperte (tranne
     // eccezioni e DEMO — la demo è proprio la porta d'assaggio pre-lancio).
@@ -33,7 +43,7 @@ export async function POST(req: NextRequest) {
           errore: "demo_esaurita",
         };
       }
-      return runConversation(storico, avvio, allegato, desktop, utente);
+      return runConversation(storico, avvio, allegato, desktop, utente, schermo);
     });
     if (!r.ok) {
       return NextResponse.json(

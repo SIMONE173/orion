@@ -269,6 +269,8 @@ type OrionDesktop = {
   apriApp: (n: string) => Promise<EsitoOS>;
   // IL BUONGIORNO: apre gli strumenti del professionista e li dispone ordinati
   // sullo schermo, ciascuno nel suo riquadro (Mac e Windows).
+  appAperte?: () => Promise<{ ok: boolean; app?: string[] }>;
+  tornaComeEra?: () => Promise<{ ok: boolean; errore?: string }>;
   scrivaniaOrdinata?: (d: { strumenti: { nome: string; apertura: string }[]; spazioOrion?: boolean }) => Promise<{
     ok: boolean;
     aperti?: number;
@@ -462,6 +464,14 @@ export default function Home() {
             avvio,
             allegato: allegato ? { dataUrl: allegato } : undefined,
             desktop: !!desktopBridge(),
+            // COSA HA GIÀ DAVANTI. Serve a ORION per anticipare senza essere
+            // invadente: non riapre ciò che è già a schermo, e sta fermo mentre
+            // la Mano sta guidando il computer.
+            schermo: {
+              pannelli: visteRef.current.map((v) => v.tipo),
+              app: appAperteRef.current,
+              manoInCorso: manoAttivaRef.current,
+            },
           }),
         });
         const data: { testo: string; viste: Vista[]; azioni?: Azione[]; suggerimenti?: string[]; errore?: string } =
@@ -534,6 +544,25 @@ export default function Home() {
   // Tieni i riferimenti aggiornati per evitare closure stantie nel callback vocale.
   const messagesRef = useRef<Msg[]>(messages);
   messagesRef.current = messages;
+  // I pannelli aperti in questo istante, e i programmi aperti sul computer:
+  // è la «fotografia dello schermo» che viaggia con ogni richiesta.
+  const visteRef = useRef<Vista[]>(viste);
+  visteRef.current = viste;
+  const appAperteRef = useRef<string[]>([]);
+  useEffect(() => {
+    const d = desktopBridge();
+    if (!d?.appAperte) return;
+    const leggi = () => {
+      d.appAperte!()
+        .then((r) => {
+          if (r?.ok && Array.isArray(r.app)) appAperteRef.current = r.app;
+        })
+        .catch(() => {});
+    };
+    leggi();
+    const t = setInterval(leggi, 30000);
+    return () => clearInterval(t);
+  }, []);
   const appuntiRef = useRef(appunti);
   appuntiRef.current = appunti;
   // Router della voce: in modalità appunti la dettatura va agli appunti, altrimenti a ORION.

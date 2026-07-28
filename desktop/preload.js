@@ -67,6 +67,10 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   // IL BUONGIORNO: apre gli strumenti del professionista e li dispone a griglia,
   // ciascuno nel suo riquadro (Mac e Windows), dicendo la verità su ognuno.
   scrivaniaOrdinata: (dati) => ipcRenderer.invoke("os:scrivaniaOrdinata", dati),
+  // Quali programmi sono aperti adesso (per non riaprire ciò che c'è già).
+  appAperte: () => ipcRenderer.invoke("os:appAperte"),
+  // Rimette la finestra di ORION com'era prima del buongiorno.
+  tornaComeEra: () => ipcRenderer.invoke("os:tornaComeEra"),
   // Apre una vista (pannello) in una finestra separata.
   apriVista: (vista) => ipcRenderer.send("os:apriVista", vista),
   // Chiude le finestre-pannello (per tipo, o "tutto").

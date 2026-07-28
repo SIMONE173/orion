@@ -975,6 +975,36 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
 
 // «RIMETTI LA FINESTRA COM'ERA» — dopo il buongiorno ORION resta stretto nella
 // sua colonna: questo lo riporta alla misura di prima, senza chiudere l'app.
+// QUALI PROGRAMMI SONO APERTI ADESSO. Serve all'anticipazione: ORION non deve
+// riaprire ciò che il professionista ha già davanti. Funziona su Mac e Windows.
+ipcMain.handle("os:appAperte", async () => {
+  try {
+    if (process.platform === "darwin") {
+      const r = await lanciaEAspetta(
+        "osascript",
+        ["-e", 'tell application "System Events" to return name of every application process whose background only is false'],
+        5000
+      );
+      if (!r.ok) return { ok: false, app: [] };
+      const app = String(r.stdout || "")
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      return { ok: true, app };
+    }
+    if (process.platform === "win32") {
+      const f = await finestreWindows();
+      const visti = new Set();
+      for (const w of f || []) {
+        const n = String(w.processo || "").trim();
+        if (n) visti.add(n);
+      }
+      return { ok: true, app: Array.from(visti) };
+    }
+  } catch {}
+  return { ok: false, app: [] };
+});
+
 ipcMain.handle("os:tornaComeEra", () => {
   if (!boundsPrimaDelBuongiorno || !finestraPrincipale || finestraPrincipale.isDestroyed()) {
     return { ok: false, errore: "non c'è una misura precedente da ripristinare" };

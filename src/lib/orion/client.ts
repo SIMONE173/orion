@@ -8,6 +8,7 @@ import { salvaMessaggio } from "../data";
 import { tenantIdCorrente } from "../tenant";
 import { registraConsumo } from "../consumi";
 import { emailDemo } from "../demo";
+import { anticipa, type Schermo } from "./anticipo";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
 
@@ -52,7 +53,8 @@ export async function runConversation(
   avvio = false,
   allegato?: Allegato,
   desktop = false,
-  utente?: Utente
+  utente?: Utente,
+  schermo?: Schermo
 ): Promise<RisultatoConversazione> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -153,6 +155,7 @@ export async function runConversation(
 
   const viste: Vista[] = [];
   const azioni: Azione[] = [];
+  let anticipoNota = "";
   let testo = "";
 
   const onboardingCompleto = utente ? utente.onboarding_completo === 1 : true;
@@ -186,7 +189,33 @@ export async function runConversation(
       }
     }
 
+    // ── L'ANTICIPAZIONE ──────────────────────────────────────────────
+    // Gira PRIMA di chiamare l'AI: se nella frase c'è un cliente, un impegno o
+    // un suo programma, le cose si aprono DA SOLE e a ORION arriva il fatto
+    // compiuto (più i dati di quella persona, così non deve andarli a cercare).
+    // Se il modello ignorasse tutto, le aperture partono lo stesso: sono già
+    // dentro la risposta.
+    if (!inDemo && !avvio && ctx.ultimaRichiesta) {
+      try {
+        const a = await anticipa(ctx.ultimaRichiesta, {
+          desktop,
+          inDemo,
+          onboardingCompleto,
+          schermo,
+          utenteId: utente?.id,
+        });
+        if (a) {
+          anticipoNota = a.nota;
+          viste.push(...a.viste);
+          azioni.push(...a.azioni);
+        }
+      } catch {
+        /* l'anticipazione non deve MAI far cadere un turno: al peggio non anticipa */
+      }
+    }
+
     const coda = [
+      anticipoNota,
       inDemo ? promemoriaTutorial(onboardingCompleto) : "",
       appenaAvanzato
         ? "[Sistema] L'utente ha detto di andare avanti e la tappa è GIÀ scattata: sei sulla tappa NUOVA qui sopra. Presentala adesso — non ripetere quella di prima e non richiamare tappa_completata."
