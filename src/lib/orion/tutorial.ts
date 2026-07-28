@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { tenantIdCorrente } from "../tenant";
-import { getProfilo, gestionaleFonte, setRisponditore, creaPromemoria, aggiungiAttesa, creaDocumento, attivaPonteManuale } from "../data";
+import { getProfilo, gestionaleFonte, setRisponditore, creaPromemoria, aggiungiAttesa, creaDocumento, attivaPonteManuale, oggiRoma,} from "../data";
 import { processaEmailInArrivo } from "../posta";
 
 // ── IL TUTORIAL DELLA DEMO ───────────────────────────────────────────────────
@@ -624,7 +624,7 @@ function registraPagamentoDemo(clienteId: number, importo: number): void {
     .prepare(
       "INSERT INTO pagamenti (tenant_id, cliente_id, importo, metodo, stato, data, descrizione, created_at) VALUES (?, ?, ?, 'contanti', 'in_sospeso', ?, 'Saldo prestazione', ?)"
     )
-    .run(T(), clienteId, importo, new Date().toISOString().slice(0, 10), new Date().toISOString());
+    .run(T(), clienteId, importo, oggiRoma(), new Date().toISOString());
 }
 
 // ── IL BLOCCO DI SYSTEM PROMPT ───────────────────────────────────────────────

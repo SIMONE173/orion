@@ -109,6 +109,7 @@ import {
   type EntitaEsterna,
   giaFattoOggi,
   segnaFattoOggi,
+  oggiRoma,
 } from "../data";
 import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti, segnaConsegnaManuale } from "../data";
 import { arriviNonLetti, segnaComunicazioniLette, getComunicazione } from "../data";
@@ -192,7 +193,7 @@ function addMinutes(iso: string, min: number): string {
 }
 
 function oggi(): string {
-  return new Date().toISOString().slice(0, 10);
+  return oggiRoma(); // il giorno di CHI USA ORION (Italia), non quello del server
 }
 
 type ClienteLite = { id: number; nome: string };
@@ -4519,7 +4520,7 @@ const handlers: Record<string, Handler> = {
           `${a.cliente_nome && !a.titolo.includes(a.cliente_nome) ? ` · ${a.cliente_nome}` : ""}` +
           `${a.stato === "da_confermare" ? "   (da confermare)" : ""}`
       );
-      const giorno = String(input.data ?? new Date().toISOString().slice(0, 10));
+      const giorno = String(input.data ?? oggiRoma());
       const fine = String(input.data_a ?? giorno);
       const titolo = fine !== giorno ? `Agenda ${giorno} → ${fine}` : `Agenda di ${giorno}`;
       return {

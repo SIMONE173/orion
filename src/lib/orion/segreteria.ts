@@ -15,8 +15,7 @@ import {
   logEvento,
   logAudit,
   prossimoAppuntamentoDiCliente,
-  type Cliente,
-} from "../data";
+  type Cliente, oggiRoma,} from "../data";
 import { inviaMessaggioWhatsApp } from "../whatsapp";
 import { inviaPushATutti } from "../push";
 import { avviaOffertaSlot, processaRispostaOfferta } from "../slots";
@@ -90,7 +89,7 @@ async function copionePromemoria(cliente: Cliente, testo: string, livello: strin
     cliente_id: cliente.id,
     testo: `Richiamare ${cliente.nome}: chiede di spostare/disdire l'appuntamento di ${quandoLeggibile(app.inizio)}`,
     categoria: "richiamo",
-    scadenza: new Date().toISOString().slice(0, 10),
+    scadenza: oggiRoma(),
   });
   logEvento({
     tipo: "richiesta_disdetta",
@@ -323,7 +322,7 @@ function eseguiAttrezzo(nome: string, input: any, cliente: Cliente | undefined, 
           cliente_id: cliente?.id ?? null,
           testo: `${urgente ? "🚨 URGENTE — " : ""}Richiamare ${chi}: ${msg}`,
           categoria: "richiamo",
-          scadenza: new Date().toISOString().slice(0, 10),
+          scadenza: oggiRoma(),
         });
         logEvento({ tipo: "messaggio_cliente", soggetto: chi, cliente_id: cliente?.id ?? null, descrizione: `Segreteria: ${chi} — ${msg}` });
         // Il titolare deve VEDERE questo messaggio: lo si annuncia nella posta in

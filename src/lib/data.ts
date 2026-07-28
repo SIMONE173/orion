@@ -714,7 +714,7 @@ export function aggiornaOrganico(m: Record<string, unknown> & { nome: string }):
 // ── Compiti (attività assegnate) ──────────────────────────────────────────────
 
 function arricchisciCompito(c: Compito): Compito {
-  const oggiData = new Date().toISOString().slice(0, 10);
+  const oggiData = oggiRoma();
   c.in_ritardo = c.stato !== "completato" && c.stato !== "annullato" && !!c.scadenza && c.scadenza.slice(0, 10) < oggiData;
   return c;
 }
@@ -1160,7 +1160,7 @@ export function giornaleDiBordo(giorno?: string) {
 
 // Briefing intelligente SCOPED sul ruolo/reparto di chi apre ORION in azienda.
 export function briefingAzienda(ruolo?: string | null, reparto?: string | null) {
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   const classe = classeRuolo(ruolo);
   const appuntamenti = listAppuntamenti(oggi, oggi);
   const daSeguire = compitiDaSeguire();
@@ -1188,7 +1188,7 @@ export function briefingAzienda(ruolo?: string | null, reparto?: string | null) 
 // Triage: aggrega i pendenti in fasce di urgenza (urgente|importante|normale).
 export function triagePriorita() {
   const t = T();
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   const tra3 = new Date();
   tra3.setDate(tra3.getDate() + 3);
   const a3 = tra3.toISOString().slice(0, 10);
@@ -1267,7 +1267,7 @@ function generaTokenIngest(): string {
 // riavvii del server e ai rilasci (prima viveva in RAM: dopo ogni aggiornamento
 // il buongiorno ripartiva e rimescolava le finestre anche di pomeriggio).
 export function giaFattoOggi(chiave: string, utenteId?: string | number): boolean {
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   const r = db()
     .prepare("SELECT giorno FROM fatto_oggi WHERE tenant_id = ? AND utente_id = ? AND chiave = ?")
     .get(tenantIdCorrente(), String(utenteId ?? "-"), chiave) as { giorno?: string } | undefined;
@@ -1275,13 +1275,23 @@ export function giaFattoOggi(chiave: string, utenteId?: string | number): boolea
 }
 
 export function segnaFattoOggi(chiave: string, utenteId?: string | number): void {
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   db()
     .prepare(
       "INSERT INTO fatto_oggi (tenant_id, utente_id, chiave, giorno) VALUES (?, ?, ?, ?) " +
         "ON CONFLICT(tenant_id, utente_id, chiave) DO UPDATE SET giorno = excluded.giorno"
     )
     .run(tenantIdCorrente(), String(utenteId ?? "-"), chiave, oggi);
+}
+
+// ── CHE GIORNO È OGGI (per chi usa ORION, non per il server) ────────────────
+// ORION vive su un server che ragiona in UTC; i suoi utenti vivono in Italia.
+// Fra mezzanotte e le due, «oggi» in UTC è ancora IERI: l'agenda del giorno
+// risultava vuota, i promemoria di stamattina non scattavano, e una fattura
+// emessa a mezzanotte e mezza portava la data del giorno prima.
+// Da qui in avanti «oggi» è sempre il giorno italiano.
+export function oggiRoma(): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Rome" }).format(new Date());
 }
 
 export function listConnessioni(): Connessione[] {
@@ -2019,7 +2029,7 @@ export function registraPagamento(p: {
   data?: string;
   descrizione?: string | null;
 }): Pagamento {
-  const data = p.data ?? new Date().toISOString().slice(0, 10);
+  const data = p.data ?? oggiRoma();
   const r = db()
     .prepare(
       `INSERT INTO pagamenti (tenant_id, cliente_id, importo, metodo, stato, data, descrizione, created_at)
@@ -2235,7 +2245,7 @@ export function creaFattura(f: {
   bollo?: number | null;
 }): Fattura {
   const numero = prossimoNumeroFattura();
-  const data = new Date().toISOString().slice(0, 10);
+  const data = oggiRoma();
   const r = db()
     .prepare(
       `INSERT INTO fatture (tenant_id, cliente_id, numero, importo, descrizione, stato, data, xml, stato_sdi, bollo, created_at)
@@ -2308,7 +2318,7 @@ export function completaPromemoria(id: number): boolean {
 }
 
 export function promemoriaDaNotificare(): Promemoria[] {
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   return db()
     .prepare(
       `SELECT pr.*, c.nome AS cliente_nome FROM promemoria pr LEFT JOIN clienti c ON c.id = pr.cliente_id
@@ -2686,7 +2696,7 @@ export type BriefingOggi = {
 
 export function briefingOggi(): BriefingOggi {
   const t = T();
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   const appuntamenti = listAppuntamenti(oggi, oggi);
   const daConfermare = appuntamenti.filter((a) => a.stato === "da_confermare");
   const msg = db()
@@ -2722,7 +2732,7 @@ export function briefingOggi(): BriefingOggi {
 export function analisiProattiva(): { segnalazioni: Segnalazione[] } {
   const t = T();
   const segnalazioni: Segnalazione[] = [];
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   const tra7 = new Date();
   tra7.setDate(tra7.getDate() + 7);
   const a7 = tra7.toISOString().slice(0, 10);
@@ -3012,7 +3022,7 @@ export function rimuoviCalendarAccount(): boolean {
 
 // Appuntamenti da spingere su Google: nuovi (gcal_id NULL) o modificati (dirty).
 export function appuntamentiDaSpingere(limite = 25): Appuntamento[] {
-  const oggiISO = new Date().toISOString().slice(0, 10);
+  const oggiISO = oggiRoma();
   return db()
     .prepare(
       `${APP_JOIN} WHERE a.tenant_id = ? AND a.stato != 'cancellato'

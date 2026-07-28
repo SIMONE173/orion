@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { tenantIdCorrente } from "./tenant";
 import { emailConfigurato, leggiMessaggiDopoUid, type EmailNuova } from "./email";
-import { getClienteByEmail, logCommunication, logEvento, type Comunicazione } from "./data";
+import { getClienteByEmail, logCommunication, logEvento, type Comunicazione, oggiRoma,} from "./data";
 import { inviaPushATutti } from "./push";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ function salvaSync(s: Partial<StatoSync>) {
 // Il digest del silenzio: quante mail inutili ORION ti ha tolto di torno oggi.
 export function silenziateOggi(): number {
   const s = statoSync();
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   return s && s.giorno === oggi ? s.silenziate_oggi : 0;
 }
 
@@ -172,7 +172,7 @@ export function processaEmailInArrivo(m: EmailNuova): Comunicazione {
       url: "/app",
     }).catch(() => {});
   } else if (importanza === "rumore") {
-    const oggi = new Date().toISOString().slice(0, 10);
+    const oggi = oggiRoma();
     const s = statoSync();
     salvaSync({ silenziate_oggi: (s?.giorno === oggi ? s.silenziate_oggi : 0) + 1, giorno: oggi });
   }

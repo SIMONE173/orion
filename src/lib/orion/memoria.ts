@@ -18,8 +18,7 @@ import {
   listConnessioni,
   listEntitaEsterne,
   type Memoria,
-  type Compito,
-} from "../data";
+  type Compito, oggiRoma,} from "../data";
 
 // ════════════════════════════════════════════════════════════════════════════
 // Assemblaggio del CONTEXT PACK (la leva d'intelligenza) e CONSOLIDAZIONE
@@ -139,7 +138,7 @@ export function costruisciContextPack(opts: { ruolo?: string | null; reparto?: s
 // + memoria attuale in: (a) un diario "dove eravamo rimasti", (b) nuove intuizioni,
 // (c) intuizioni superate. Usa il modello economico e fa UNA chiamata.
 export async function consolidaSeNecessario(): Promise<void> {
-  const oggi = new Date().toISOString().slice(0, 10);
+  const oggi = oggiRoma();
   if (ultimaConsolidazione() === oggi) return; // già fatta oggi
 
   const apiKey = process.env.ANTHROPIC_API_KEY;

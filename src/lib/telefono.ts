@@ -15,8 +15,7 @@ import {
   logEvento,
   logAudit,
   logCommunication,
-  type Chiamata,
-} from "./data";
+  type Chiamata, oggiRoma,} from "./data";
 import { inviaMessaggioWhatsApp } from "./whatsapp";
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -196,7 +195,7 @@ export async function cervelloTelefono(callSid: string, daNumero: string, testoC
     const risposta = "La ringrazio per la pazienza: per non farla attendere oltre, lo studio la richiamerà al più presto. Buona giornata!";
     turni.push({ chi: "orion", testo: risposta });
     aggiornaChiamata(chiamata.id, { trascrizione: JSON.stringify(turni), stato: "conclusa", esito: chiamata.esito ?? "Chiamata lunga: passata a richiamo" });
-    creaPromemoria({ cliente_id: clienteNoto?.id ?? null, testo: `Richiamare il numero ${daNumero} (chiamata non conclusa dal centralino)`, categoria: "richiamo", scadenza: new Date().toISOString().slice(0, 10) });
+    creaPromemoria({ cliente_id: clienteNoto?.id ?? null, testo: `Richiamare il numero ${daNumero} (chiamata non conclusa dal centralino)`, categoria: "richiamo", scadenza: oggiRoma() });
     return { risposta, fine: true };
   }
 
@@ -243,7 +242,7 @@ export async function cervelloTelefono(callSid: string, daNumero: string, testoC
               cliente_id: clienteNoto?.id ?? null,
               testo: `${input.urgente ? "URGENTE — " : ""}Messaggio telefonico da ${nome}: ${input.messaggio}`,
               categoria: "richiamo",
-              scadenza: new Date().toISOString().slice(0, 10),
+              scadenza: oggiRoma(),
             });
             creaNota({ cliente_id: clienteNoto?.id ?? null, titolo: `Telefonata da ${nome}`, contenuto: String(input.messaggio) });
             logAudit({ canale: "telefono", azione: "messaggio_preso", dettaglio: `${nome}: ${String(input.messaggio).slice(0, 120)}` });
@@ -272,7 +271,7 @@ export async function cervelloTelefono(callSid: string, daNumero: string, testoC
     console.error("[telefono] errore AI:", e);
     risposta = "Mi scusi, ho avuto un problema tecnico. Lo studio la richiamerà al più presto. Buona giornata!";
     fine = true;
-    creaPromemoria({ cliente_id: clienteNoto?.id ?? null, testo: `Richiamare il numero ${daNumero} (errore tecnico del centralino durante la chiamata)`, categoria: "richiamo", scadenza: new Date().toISOString().slice(0, 10) });
+    creaPromemoria({ cliente_id: clienteNoto?.id ?? null, testo: `Richiamare il numero ${daNumero} (errore tecnico del centralino durante la chiamata)`, categoria: "richiamo", scadenza: oggiRoma() });
   }
 
   if (!risposta) risposta = "Mi scusi, non ho capito bene. Può ripetere?";
