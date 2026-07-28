@@ -293,6 +293,8 @@ export type Azione =
       titolo: string;
       testo?: string;
       documento?: Extract<Vista, { tipo: "documento" }>["dati"]["documento"];
+      /** Nella demo esce l'anteprima: il PDF si apre, la stampante non parte. */
+      anteprima?: boolean;
     }
   | { tipo: "stampa_file"; query: string }
   // Creative Workspace (solo Desktop): lavorare DENTRO i software.

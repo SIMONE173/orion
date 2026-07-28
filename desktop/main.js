@@ -1203,6 +1203,12 @@ ipcMain.handle("os:stampaDati", async (_e, d) => {
     const nome = String((d && d.nome) || "documento").replace(/[^\w.\-]+/g, "_").slice(0, 60);
     const percorso = path.join(os.tmpdir(), `orion-stampa-${Date.now()}-${nome}.pdf`);
     fs.writeFileSync(percorso, Buffer.from(base64, "base64"));
+    // ANTEPRIMA (demo): il PDF si apre e basta — nessun foglio esce davvero
+    // dalla stampante di chi sta solo provando ORION sul proprio computer.
+    if (d && d.anteprima) {
+      const err = await shell.openPath(percorso);
+      return err ? { ok: false, errore: err } : { ok: true, nome, anteprima: true };
+    }
     const esito = await stampaConSistema(percorso);
     // Pulizia dopo lo spool (la coda di stampa legge il file subito).
     setTimeout(() => {

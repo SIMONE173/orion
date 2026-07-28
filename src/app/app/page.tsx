@@ -290,7 +290,7 @@ type OrionDesktop = {
   // Chiude una finestra del computer o una scheda del browser (Accessibility).
   chiudiFinestra?: (d: { app?: string; scheda?: boolean }) => Promise<{ ok: boolean; errore?: string }>;
   // Stampa alla stampante di sistema: PDF generato da ORION, oppure file per nome.
-  stampaDati?: (d: { base64: string; nome?: string }) => Promise<{ ok: boolean; nome?: string; errore?: string }>;
+  stampaDati?: (d: { base64: string; nome?: string; anteprima?: boolean }) => Promise<{ ok: boolean; nome?: string; anteprima?: boolean; errore?: string }>;
   stampaFile?: (query: string) => Promise<{ ok: boolean; nome?: string; errore?: string }>;
   // Solo desktop: apre una vista (pannello) in una FINESTRA separata.
   apriVista?: (v: Vista) => void;
@@ -764,8 +764,8 @@ export default function Home() {
           if (d?.stampaDati) {
             let bin = "";
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-            const r = await d.stampaDati({ base64: btoa(bin), nome: a.titolo });
-            if (r.ok) speakRef.current?.("In stampa.");
+            const r = await d.stampaDati({ base64: btoa(bin), nome: a.titolo, anteprima: a.anteprima });
+            if (r.ok) speakRef.current?.(a.anteprima ? "Ecco l'anteprima di stampa." : "In stampa.");
             else if (r.errore === "nessuna_stampante") speakRef.current?.("Non trovo una stampante configurata sul Mac.");
             else speakRef.current?.("La stampa non è partita.");
           } else {

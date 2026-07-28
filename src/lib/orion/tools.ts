@@ -1762,6 +1762,23 @@ export const TOOLS: Anthropic.Tool[] = [
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
+// IL BUONGIORNO — una volta sola. La scrivania si apparecchia all'inizio della
+// giornata; se durante il giorno si richiede di nuovo il briefing, le finestre
+// restano dove l'utente le ha messe (rimescolargliele sarebbe una prepotenza).
+const buongiornoDato = new Map<string, string>();
+function scrivaniaDelMattino(ctx: TurnoContext, inDemo: boolean): { nome: string; apertura: string }[] {
+  if (!ctx.desktop || inDemo) return [];
+  const chiave = `${tenantIdCorrente() ?? "-"}:${ctx.utenteId ?? "-"}`;
+  const oggi = new Date().toISOString().slice(0, 10);
+  if (buongiornoDato.get(chiave) === oggi) return [];
+  const strumenti = listConnessioni()
+    .filter((c) => c.attivo)
+    .slice(0, 4)
+    .map((c) => ({ nome: c.nome, apertura: c.apertura || c.nome }));
+  if (strumenti.length) buongiornoDato.set(chiave, oggi);
+  return strumenti;
+}
+
 const handlers: Record<string, Handler> = {
   aggiorna_profilo: (input, ctx) => {
     let profilo = aggiornaProfilo(input);
@@ -3233,6 +3250,21 @@ const handlers: Record<string, Handler> = {
           "SU DESKTOP: da vera segretaria, nel briefing annuncia in UNA frase che ora allinei TU il gestionale e AVVIA SUBITO usa_computer (obiettivo = le modifiche dell'elenco, una per riga, chiare e complete) senza aspettare l'ordine; quando l'esito [Sistema] conferma, chiama segna_consegne_fatte e dillo in una frase. SU WEB (niente Mano): annuncia le consegne e apri il pannello con mostra_consegne. Se l'utente dice di fermarti, fermati senza discutere.",
       };
     }
+    // IL BUONGIORNO: su Desktop la scrivania si apparecchia DA SOLA insieme al
+    // primo briefing del giorno — vale anche per gli account azienda.
+    const strumentiScrivania = scrivaniaDelMattino(ctx, inDemo);
+    const nota_scrivania = strumentiScrivania.length
+      ? {
+          scrivania:
+            "STO GIÀ APRENDO i suoi strumenti e li sto disponendo ordinati sullo schermo (" +
+            strumentiScrivania.map((x) => x.nome).join(", ") +
+            "). Diglielo in mezza frase («ti ho aperto tutto, guarda») e RACCONTA la giornata: l'esito preciso di ogni apertura ti arriverà come messaggio [Sistema] — se qualcosa non si è aperto lo dirai allora, con sincerità.",
+        }
+      : {};
+    const azione_scrivania = strumentiScrivania.length
+      ? { azione: { tipo: "scrivania" as const, strumenti: strumentiScrivania } }
+      : {};
+
     // In azienda il briefing PARLATO è role-aware (operatore/responsabile/titolare/
     // amministrativo): aggiungo i dati scoped al result, il pannello resta generico.
     const azienda = getAzienda();
@@ -3267,8 +3299,10 @@ const handlers: Record<string, Handler> = {
                   "All'inizio del briefing consegna a voce, in quest'ordine: gli esiti_mie_richieste ('Il titolare ha approvato…'), i messaggi_team ('Marco ti ha lasciato detto che…', prima gli urgenti), e le approvazioni_da_decidere ('C'è una richiesta di Laura che aspetta il tuo ok…').",
               }
             : {}),
+          ...nota_scrivania,
         },
         vista: { tipo: "briefing", dati },
+        ...azione_scrivania,
       };
     }
     // ── IL BUONGIORNO ───────────────────────────────────────────────────
@@ -3276,26 +3310,11 @@ const handlers: Record<string, Handler> = {
     // dipende dal fatto che il modello si ricordi di aprire i programmi. L'app
     // apre gli strumenti registrati e li dispone a griglia, ciascuno nel suo
     // riquadro; poi ORION racconta la giornata con tutto già davanti.
-    const strumentiScrivania =
-      ctx.desktop && !inDemo
-        ? listConnessioni()
-            .filter((c) => c.attivo)
-            .slice(0, 4)
-            .map((c) => ({ nome: c.nome, apertura: c.apertura || c.nome }))
-        : [];
     if (strumentiScrivania.length) {
       return {
-        result: {
-          ...dati,
-          ...extra,
-          ...notaDemo,
-          scrivania:
-            "STO GIÀ APRENDO i suoi strumenti e li sto disponendo ordinati sullo schermo (" +
-            strumentiScrivania.map((s) => s.nome).join(", ") +
-            "). Diglielo in mezza frase («ti ho aperto tutto, guarda») e RACCONTA la giornata: l'esito preciso di ogni apertura ti arriverà come messaggio [Sistema] — se qualcosa non si è aperto lo dirai allora, con sincerità.",
-        },
+        result: { ...dati, ...extra, ...notaDemo, ...nota_scrivania },
         vista: { tipo: "briefing", dati },
-        azione: { tipo: "scrivania", strumenti: strumentiScrivania },
+        ...azione_scrivania,
       };
     }
     return { result: { ...dati, ...extra, ...notaDemo }, vista: { tipo: "briefing", dati } };
@@ -4469,10 +4488,22 @@ const handlers: Record<string, Handler> = {
   // recuperare il contenuto: documento → visore, agenda → mostra_agenda.
   stampa: async (input, ctx) => {
     const cosa = String(input.cosa ?? "").toLowerCase();
+    // DEMO: stampare si può (la prova della stampa è una tappa del tutorial), ma
+    // esce l'ANTEPRIMA, non la carta — e i file del computer non si toccano.
+    const anteprimaDemo = tenantDemo(tenantIdCorrente());
 
     if (cosa === "file") {
       const nome = String(input.nome ?? "").trim();
       if (!nome) return { result: { ok: false, errore: "serve il nome del file da stampare" } };
+      if (anteprimaDemo) {
+        return {
+          result: {
+            ok: false,
+            errore: "non_disponibile_in_demo",
+            nota: "Nella prova non tocco i file del suo computer: dillo con leggerezza e offri di stampare l'agenda o un documento tuo.",
+          },
+        };
+      }
       return {
         result: { ok: true, invio: "stampante", nota: "Sto mandando il file alla stampante; se qualcosa non va lo dico a voce." },
         azione: { tipo: "stampa_file", query: nome },
@@ -4493,8 +4524,13 @@ const handlers: Record<string, Handler> = {
       const fine = String(input.data_a ?? giorno);
       const titolo = fine !== giorno ? `Agenda ${giorno} → ${fine}` : `Agenda di ${giorno}`;
       return {
-        result: { ok: true, appuntamenti: righe.length, invio: "stampante" },
-        azione: { tipo: "stampa_contenuto", titolo, testo: righe.length ? righe.join("\n") : "Nessun appuntamento." },
+        result: { ok: true, appuntamenti: righe.length, invio: anteprimaDemo ? "anteprima" : "stampante" },
+        azione: {
+          tipo: "stampa_contenuto",
+          titolo,
+          testo: righe.length ? righe.join("\n") : "Nessun appuntamento.",
+          ...(anteprimaDemo ? { anteprima: true } : {}),
+        },
       };
     }
 
@@ -4504,8 +4540,8 @@ const handlers: Record<string, Handler> = {
       if (!esito.vista || esito.vista.tipo !== "documento") return { result: esito.result };
       const documento = (esito.vista.dati as Extract<Vista, { tipo: "documento" }>["dati"]).documento;
       return {
-        result: { ok: true, stampa: documento.titolo, invio: "stampante" },
-        azione: { tipo: "stampa_contenuto", titolo: documento.titolo, documento },
+        result: { ok: true, stampa: documento.titolo, invio: anteprimaDemo ? "anteprima" : "stampante" },
+        azione: { tipo: "stampa_contenuto", titolo: documento.titolo, documento, ...(anteprimaDemo ? { anteprima: true } : {}) },
       };
     }
 
@@ -4513,8 +4549,13 @@ const handlers: Record<string, Handler> = {
     const testo = String(input.testo ?? "").trim();
     if (!testo) return { result: { ok: false, errore: "serve il testo da stampare (o indica cosa: documento/agenda/file)" } };
     return {
-      result: { ok: true, invio: "stampante" },
-      azione: { tipo: "stampa_contenuto", titolo: String(input.titolo ?? "Documento ORION"), testo },
+      result: { ok: true, invio: anteprimaDemo ? "anteprima" : "stampante" },
+      azione: {
+        tipo: "stampa_contenuto",
+        titolo: String(input.titolo ?? "Documento ORION"),
+        testo,
+        ...(anteprimaDemo ? { anteprima: true } : {}),
+      },
     };
   },
 
@@ -4762,7 +4803,7 @@ const SPENTI_IN_DEMO = new Set([
   "usa_computer", "esegui_comando", "guarda_schermo",
   "apri_app", "chiudi_app", "chiudi_finestra",
   "apri_file_locale", "crea_file_locale", "rinomina_file_locale", "elimina_file_locale",
-  "scrivi_file", "leggi_file", "stampa", "attiva_gesti",
+  "scrivi_file", "attiva_gesti",
 ]);
 
 export async function dispatch(
