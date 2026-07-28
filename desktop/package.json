@@ -1,6 +1,6 @@
 {
   "name": "orion-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ORION Desktop — il tuo assistente, con le mani sul computer",
   "main": "main.js",
   "author": "ORION",
@@ -8,13 +8,14 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder",
-    "dist:demo": "electron-builder -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo'",
-    "dist:win": "electron-builder --win nsis --x64",
-    "dist:demo:win": "electron-builder --win nsis --x64 -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.artifactName='ORION-Demo-${version}-win.${ext}' -c.nsis.shortcutName='ORION Demo'"
+    "dist": "electron-builder --publish never",
+    "dist:demo": "electron-builder --publish never -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo' -c.publish.url=https://orionvision.it/api/aggiorna/demo",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:demo:win": "electron-builder --win nsis --x64 --publish never -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.win.artifactName='ORION-Demo-${version}-win.${ext}' -c.nsis.shortcutName='ORION Demo' -c.publish.url=https://orionvision.it/api/aggiorna/demo"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.3.3"
+    "@huggingface/transformers": "^3.3.3",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^33.2.0",
@@ -61,6 +62,13 @@
         "it_IT"
       ],
       "language": "1040"
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://orionvision.it/api/aggiorna",
+        "channel": "latest"
+      }
+    ]
   }
 }

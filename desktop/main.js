@@ -976,6 +976,98 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
 // «RIMETTI LA FINESTRA COM'ERA» — dopo il buongiorno ORION resta stretto nella
 // sua colonna: questo lo riporta alla misura di prima, senza chiudere l'app.
 // ═══════════════════════════════════════════════════════════════════════════
+// GLI AGGIORNAMENTI — ORION si tiene aggiornato da solo.
+//
+// Windows: scarica in silenzio e installa alla chiusura. Non si chiede niente
+// a nessuno e non si interrompe il lavoro: la prossima volta che apri ORION è
+// già la versione nuova.
+//
+// Mac: l'aggiornamento silenzioso di macOS ESIGE che l'app sia firmata da
+// Apple. ORION non lo è ancora, e un aggiornatore che fallisce in silenzio è
+// peggio di nessun aggiornatore: qui si CONTROLLA la versione e si AVVISA,
+// con il link per scaricare. Il giorno in cui l'app sarà firmata, questa parte
+// diventa automatica cambiando una riga.
+// ═══════════════════════════════════════════════════════════════════════════
+const URL_AGGIORNAMENTI = `${ORION_URL}/api/aggiorna${DEMO ? "/demo" : ""}`;
+
+function versionePiuNuova(a, b) {
+  const p = (v) => String(v || "0").split(/[.-]/).map((x) => parseInt(x, 10) || 0);
+  const [x, y] = [p(a), p(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] || 0) > (y[i] || 0)) return true;
+    if ((x[i] || 0) < (y[i] || 0)) return false;
+  }
+  return false;
+}
+
+// Legge il bollettino delle versioni (lo stesso file che usa l'aggiornatore).
+async function ultimaVersionePubblicata() {
+  const nome = process.platform === "darwin" ? "latest-mac.yml" : "latest.yml";
+  try {
+    const r = await fetch(`${URL_AGGIORNAMENTI}/${nome}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const testo = await r.text();
+    const m = testo.match(/^version:\s*(.+)$/m);
+    return m ? m[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function avvisaSeCèDiNuovo() {
+  const nuova = await ultimaVersionePubblicata();
+  if (!nuova || !versionePiuNuova(nuova, app.getVersion())) return;
+  try {
+    if (finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+      finestraPrincipale.webContents.send("orion:aggiornamento", {
+        versione: nuova,
+        attuale: app.getVersion(),
+        automatico: false,
+        dove: `${ORION_URL}${DEMO ? "/demo" : ""}`,
+      });
+    }
+  } catch {}
+}
+
+function avviaAggiornamenti() {
+  // Un attimo di respiro all'avvio: prima si apre ORION, poi si pensa a questo.
+  const fraPoco = (f) => setTimeout(f, 12000);
+
+  if (process.platform === "win32") {
+    let updater = null;
+    try {
+      updater = require("electron-updater").autoUpdater;
+    } catch {
+      return; // aggiornatore assente: si va avanti senza, mai un errore in faccia
+    }
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true; // si installa alla chiusura: zero interruzioni
+    updater.on("update-downloaded", (info) => {
+      try {
+        if (finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+          finestraPrincipale.webContents.send("orion:aggiornamento", {
+            versione: info && info.version,
+            attuale: app.getVersion(),
+            automatico: true,
+          });
+        }
+      } catch {}
+    });
+    updater.on("error", () => {
+      /* rete assente o deposito irraggiungibile: si riprova al prossimo avvio */
+    });
+    fraPoco(() => updater.checkForUpdates().catch(() => {}));
+    // E poi una volta ogni sei ore, per chi tiene ORION sempre aperto.
+    setInterval(() => updater.checkForUpdates().catch(() => {}), 6 * 3600 * 1000);
+    return;
+  }
+
+  // Mac (e tutto il resto): controllo onesto + avviso.
+  fraPoco(() => void avvisaSeCèDiNuovo());
+  setInterval(() => void avvisaSeCèDiNuovo(), 6 * 3600 * 1000);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // LA SENTINELLA — quanto tempo è stato via il computer.
 // Un battito scritto su disco ogni 30 secondi (e quando l'app si chiude, si
 // sospende o lo schermo si blocca). Al ritorno, la distanza fra l'ultimo
@@ -1228,6 +1320,8 @@ app.whenReady().then(() => {
   creaFinestra();
   // LA SENTINELLA: da qui in poi ORION sa sempre da quanto è stato via.
   avviaSentinella();
+  // E ORION si tiene aggiornato da solo, senza che nessuno debba pensarci.
+  avviaAggiornamenti();
   // Pre-carica (e scarica, la prima volta) il modello vocale in background, così
   // quando l'utente parla è già pronto. Non blocca l'avvio.
   whisper

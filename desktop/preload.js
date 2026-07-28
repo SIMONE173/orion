@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   // IL RISVEGLIO: il computer è tornato vivo dopo un'assenza. L'app lo dice
   // alla pagina, che va a chiedere cosa c'è da riportare nei gestionali.
   onRisveglio: (cb) => ipcRenderer.on("orion:risveglio", (_e, d) => cb(d)),
+  // C'è una versione nuova di ORION: installata da sola (Windows) o pronta da
+  // scaricare (Mac, finché l'app non è firmata da Apple).
+  onAggiornamento: (cb) => ipcRenderer.on("orion:aggiornamento", (_e, d) => cb(d)),
   // Rimette la finestra di ORION com'era prima del buongiorno.
   tornaComeEra: () => ipcRenderer.invoke("os:tornaComeEra"),
   // Apre una vista (pannello) in una finestra separata.

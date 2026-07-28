@@ -271,6 +271,7 @@ type OrionDesktop = {
   // sullo schermo, ciascuno nel suo riquadro (Mac e Windows).
   appAperte?: () => Promise<{ ok: boolean; app?: string[] }>;
   onRisveglio?: (cb: (d: { motivo: string; minuti: number; da: string; a: string }) => void) => void;
+  onAggiornamento?: (cb: (d: { versione?: string; attuale?: string; automatico?: boolean; dove?: string }) => void) => void;
   tornaComeEra?: () => Promise<{ ok: boolean; errore?: string }>;
   scrivaniaOrdinata?: (d: { strumenti: { nome: string; apertura: string }[]; spazioOrion?: boolean }) => Promise<{
     ok: boolean;
@@ -1389,6 +1390,17 @@ export default function Home() {
     }
   }, []);
 
+  // ── C'È UNA VERSIONE NUOVA ────────────────────────────────────────────
+  // Su Windows si è già installata da sola (basta dirlo). Su Mac ORION non è
+  // ancora firmato da Apple, quindi l'aggiornamento silenzioso non è possibile:
+  // meglio un avviso onesto col link, che un aggiornatore che fallisce zitto.
+  const [aggiornamento, setAggiornamento] = useState<{ versione?: string; automatico?: boolean; dove?: string } | null>(null);
+  useEffect(() => {
+    const d = desktopBridge();
+    if (!d?.onAggiornamento) return;
+    d.onAggiornamento((info) => setAggiornamento(info));
+  }, []);
+
   // ══ LA SINCRONIA AL RISVEGLIO ═════════════════════════════════════════
   // Il computer è tornato vivo dopo un'assenza. ORION non aspetta che glielo
   // si chieda: va a vedere cos'è successo mentre era spento e riporta tutto
@@ -2222,6 +2234,39 @@ export default function Home() {
           )}
         </div>
       </footer>
+
+      {/* C'è una versione nuova di ORION. Discreto, in alto, si chiude e basta. */}
+      {aggiornamento && (
+        <div className="fade-in fixed left-1/2 top-4 z-50 flex max-w-[92vw] -translate-x-1/2 items-center gap-3 rounded-2xl border border-cyan-400/40 bg-[#0a141c]/95 px-4 py-2.5 shadow-2xl backdrop-blur">
+          <span className="text-base">✨</span>
+          <div className="min-w-0 text-sm text-slate-200">
+            {aggiornamento.automatico ? (
+              <>
+                ORION <b>{aggiornamento.versione}</b> è pronto: si installa da solo quando chiudi.
+              </>
+            ) : (
+              <>
+                C&apos;è ORION <b>{aggiornamento.versione}</b>, con le novità più recenti.{" "}
+                <a
+                  href={aggiornamento.dove ?? "https://orionvision.it"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-cyan-300 underline underline-offset-2"
+                >
+                  Scaricalo
+                </a>
+              </>
+            )}
+          </div>
+          <button
+            onClick={() => setAggiornamento(null)}
+            className="ml-1 rounded-lg border border-white/15 px-2 py-1 text-xs text-slate-400 hover:bg-white/5"
+            aria-label="Chiudi"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Storico conversazione (overlay) */}
       {/* La Mano al lavoro: stato + STOP (visibile quando ORION è in finestra) */}

@@ -5,6 +5,7 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-28", testo: "ORION si aggiorna da solo: su Windows scarica la versione nuova in silenzio e la installa quando chiudi — la riapri ed è già aggiornato, senza fare niente. Su Mac ti avvisa che c'è del nuovo, col link pronto" },
   { data: "2026-07-28", testo: "Windows si installa come si deve: al posto dello zip da scompattare a mano c'è un installer vero — apri, avanti, fatto: ORION finisce nel menu Start, col collegamento sul desktop, e si avvia da solo" },
   { data: "2026-07-28", testo: "Riaccendi il computer e ORION ha già rimesso in ordine i tuoi programmi: quello che è successo mentre eri via viene riportato nel gestionale — e le cose prese e disdette durante la notte le salta, perché lì dentro non sono mai esistite" },
   { data: "2026-07-28", testo: "Mentre parli, ORION ha già aperto la persona di cui stai parlando — e sa già quanto ti deve, quanti documenti ha, quando è venuta l'ultima volta. Nomina un cliente e la sua scheda è lì, senza chiederla" },
