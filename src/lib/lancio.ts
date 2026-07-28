@@ -30,6 +30,27 @@ const ACCESSI_GRATIS_PERMANENTI = new Set<string>([
   "lorenzograziani@grazianiweb.it", // amico del fondatore — accesso a vita a tutte le versioni
 ]);
 
+// ── OSPITI INVITATI (dimostrazioni prima dell'apertura) ──────────────────────
+// Persone che il titolare fa provare ORION COMPLETO prima del lancio: una
+// chiamata con un potenziale cliente, una prova sul campo. Scaricano ed entrano
+// come se il lancio fosse aperto, e usano tutto senza carta.
+// NON è un regalo a vita (per quello c'è ACCESSI_GRATIS_PERMANENTI): quando il
+// lancio apre, questa corsia si chiude da sola e tornano utenti normali.
+const OSPITI_INVITATI = new Set<string>([
+  "andrea.porce@gmail.com", // prova della versione completa su Windows — 28/07/2026
+]);
+
+export function ospiteInvitato(email?: string | null): boolean {
+  const e = (email || "").trim().toLowerCase();
+  if (!e) return false;
+  if (OSPITI_INVITATI.has(e)) return true;
+  return (process.env.ORION_OSPITI || "")
+    .split(",")
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean)
+    .includes(e);
+}
+
 export function accessoGratuitoPermanente(email?: string | null): boolean {
   const e = (email || "").trim().toLowerCase();
   if (!e) return false;
@@ -49,6 +70,7 @@ export function eccezioneLancio(email?: string | null): boolean {
   const admin = (process.env.ORION_ADMIN_EMAIL || "").trim().toLowerCase();
   if (admin && e === admin) return true;
   if (accessoGratuitoPermanente(e)) return true;
+  if (ospiteInvitato(e)) return true;
   return (process.env.ORION_LANCIO_ECCEZIONI || "")
     .split(",")
     .map((x) => x.trim().toLowerCase())
