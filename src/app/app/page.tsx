@@ -436,7 +436,10 @@ export default function Home() {
   const inviaAOrion = useCallback(
     async (testo?: string, avvio = false, allegato?: string, quiet = false) => {
       setLoading(true);
-      cancelSpeakRef.current?.();
+      // I messaggi [Sistema] silenziosi (esito della scrivania, della Mano…)
+      // NON devono tappare la bocca a ORION mentre sta parlando: prima tagliavano
+      // il briefing del mattino a metà frase.
+      if (!quiet) cancelSpeakRef.current?.();
       // Le pillole del turno precedente spariscono appena parte una nuova richiesta.
       setSuggerimenti([]);
 
@@ -544,8 +547,19 @@ export default function Home() {
     if (listening || interim) setSuggerimenti([]);
   }, [listening, interim]);
 
+  // ORION parla del computer di chi lo ascolta: dire «sul Mac» a chi usa
+  // Windows (e citargli le Impostazioni di Sistema di macOS) è una figuraccia.
+  const suMac = typeof window !== "undefined" && (window as { orionDesktop?: { piattaforma?: string } }).orionDesktop?.piattaforma !== "win32";
+  const stradaPermessi = suMac
+    ? "Impostazioni di Sistema, Privacy e Sicurezza, Accessibilità, e attiva ORION"
+    : "le Impostazioni di Windows, Accessibilità, e consenti a ORION di controllare il computer";
+
   const speakRef = useRef(speak);
   speakRef.current = speak;
+  // ORION sta parlando in questo momento? Serve a chi deve riferire qualcosa
+  // senza interromperlo (es. l'esito della scrivania durante il briefing).
+  const parlandoRef = useRef(false);
+  parlandoRef.current = speaking;
   const cancelSpeakRef = useRef(cancelSpeak);
   cancelSpeakRef.current = cancelSpeak;
 
@@ -675,7 +689,22 @@ export default function Home() {
       // racconta con sincerità invece di dare per scontato che sia filato tutto.
       case "scrivania": {
         const d = desktopBridge();
-        if (!d?.scrivaniaOrdinata) break;
+        // Aspetta che ORION finisca di raccontare la giornata, poi riferisce:
+        // interromperlo a metà briefing sarebbe la cosa peggiore.
+        const aspettaIlTurno = async () => {
+          for (let i = 0; i < 300 && parlandoRef.current; i++) await new Promise((r) => setTimeout(r, 300));
+        };
+        if (!d?.scrivaniaOrdinata) {
+          // App desktop non aggiornata (il ponte non ha ancora questa capacità):
+          // meglio dirlo che far credere a ORION di aver aperto tutto.
+          void (async () => {
+            await aspettaIlTurno();
+            inviaAOrionRef.current?.(
+              "[Sistema] Non ho potuto apparecchiare la scrivania: questa versione dell'app desktop non lo sa ancora fare. NON dire di aver aperto niente. Dillo in una frase semplice e invita ad aggiornare ORION dal sito.",
+              false, undefined, true);
+          })();
+          break;
+        }
         void (async () => {
           try {
             const r = await d.scrivaniaOrdinata!({ strumenti: a.strumenti, spazioOrion: true });
@@ -688,9 +717,11 @@ export default function Home() {
                     : `${e.nome}: aperto (non sono riuscito a sistemarlo nella griglia)`
               )
               .join("; ");
+            await aspettaIlTurno();
             inviaAOrionRef.current?.(
               `[Sistema] Scrivania del mattino: ${r.aperti ?? 0} strumenti aperti su ${r.totale ?? 0}, ${r.sistemate ?? 0} disposti ordinati. Dettaglio — ${dett}. Riferisci in UNA frase con verità: se qualcosa non si è aperto dillo e proponi di sistemarlo (magari il nome dell'app è diverso: chiediglielo e lo salvo).`, false, undefined, true);
           } catch {
+            await aspettaIlTurno();
             inviaAOrionRef.current?.("[Sistema] Non sono riuscito ad apparecchiare la scrivania. Dillo con semplicità e vai avanti col briefing.", false, undefined, true);
           }
         })();
@@ -733,7 +764,7 @@ export default function Home() {
           if (r.ok) return;
           if (r.errore === "accessibilita")
             speakRef.current?.(
-              "Per chiudere le finestre mi serve il permesso Accessibilità: Impostazioni di Sistema, Privacy e Sicurezza, Accessibilità, e attiva ORION."
+              `Per chiudere le finestre mi serve il permesso di controllare il computer: ${stradaPermessi}.`
             );
           else if (r.errore === "quale_app") speakRef.current?.("Dimmi di quale app devo chiudere la finestra.");
           else speakRef.current?.("Non sono riuscito a chiudere la finestra.");
@@ -749,7 +780,7 @@ export default function Home() {
         d.stampaFile(a.query).then((r) => {
           if (r.ok) speakRef.current?.(`In stampa: ${r.nome ?? "il file"}.`);
           else if (r.errore === "non trovato") speakRef.current?.(`Non ho trovato "${a.query}" sul computer.`);
-          else if (r.errore === "nessuna_stampante") speakRef.current?.("Non trovo una stampante configurata sul Mac.");
+          else if (r.errore === "nessuna_stampante") speakRef.current?.(`Non trovo una stampante configurata ${suMac ? "sul Mac" : "sul computer"}.`);
           else speakRef.current?.("La stampa non è partita.");
         });
         break;
@@ -766,7 +797,7 @@ export default function Home() {
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const r = await d.stampaDati({ base64: btoa(bin), nome: a.titolo, anteprima: a.anteprima });
             if (r.ok) speakRef.current?.(a.anteprima ? "Ecco l'anteprima di stampa." : "In stampa.");
-            else if (r.errore === "nessuna_stampante") speakRef.current?.("Non trovo una stampante configurata sul Mac.");
+            else if (r.errore === "nessuna_stampante") speakRef.current?.(`Non trovo una stampante configurata ${suMac ? "sul Mac" : "sul computer"}.`);
             else speakRef.current?.("La stampa non è partita.");
           } else {
             const blob = new Blob([bytes as unknown as BlobPart], { type: "application/pdf" });
@@ -953,7 +984,7 @@ export default function Home() {
         }
         passi.push({ spiegazione: az.spiegazione ?? az.tipo, esito: ok ? undefined : `FALLITA: ${err}` });
         if (!ok && err === "accessibilita") {
-          esitoFinale = "mi manca il permesso Accessibilità: Impostazioni di Sistema → Privacy e Sicurezza → Accessibilità → attiva ORION";
+          esitoFinale = `mi manca il permesso di controllare il computer: ${stradaPermessi}`;
           break;
         }
         // NON INSISTERE AL BUIO: se le azioni falliscono non si continua a

@@ -107,6 +107,8 @@ import {
   type VoceMemoria,
   type Compito,
   type EntitaEsterna,
+  giaFattoOggi,
+  segnaFattoOggi,
 } from "../data";
 import { getRisponditore, setRisponditore, attivaPonteManuale, consegneManualiPendenti, segnaConsegnaManuale } from "../data";
 import { arriviNonLetti, segnaComunicazioniLette, getComunicazione } from "../data";
@@ -1765,17 +1767,14 @@ export const TOOLS: Anthropic.Tool[] = [
 // IL BUONGIORNO — una volta sola. La scrivania si apparecchia all'inizio della
 // giornata; se durante il giorno si richiede di nuovo il briefing, le finestre
 // restano dove l'utente le ha messe (rimescolargliele sarebbe una prepotenza).
-const buongiornoDato = new Map<string, string>();
 function scrivaniaDelMattino(ctx: TurnoContext, inDemo: boolean): { nome: string; apertura: string }[] {
   if (!ctx.desktop || inDemo) return [];
-  const chiave = `${tenantIdCorrente() ?? "-"}:${ctx.utenteId ?? "-"}`;
-  const oggi = new Date().toISOString().slice(0, 10);
-  if (buongiornoDato.get(chiave) === oggi) return [];
+  if (giaFattoOggi("buongiorno", ctx.utenteId)) return [];
   const strumenti = listConnessioni()
     .filter((c) => c.attivo)
     .slice(0, 4)
     .map((c) => ({ nome: c.nome, apertura: c.apertura || c.nome }));
-  if (strumenti.length) buongiornoDato.set(chiave, oggi);
+  if (strumenti.length) segnaFattoOggi("buongiorno", ctx.utenteId);
   return strumenti;
 }
 

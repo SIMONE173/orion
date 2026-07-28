@@ -1263,6 +1263,27 @@ function generaTokenIngest(): string {
   return t;
 }
 
+// «L'HO GIÀ FATTO OGGI?» — memoria di una volta al giorno che sopravvive ai
+// riavvii del server e ai rilasci (prima viveva in RAM: dopo ogni aggiornamento
+// il buongiorno ripartiva e rimescolava le finestre anche di pomeriggio).
+export function giaFattoOggi(chiave: string, utenteId?: string | number): boolean {
+  const oggi = new Date().toISOString().slice(0, 10);
+  const r = db()
+    .prepare("SELECT giorno FROM fatto_oggi WHERE tenant_id = ? AND utente_id = ? AND chiave = ?")
+    .get(tenantIdCorrente(), String(utenteId ?? "-"), chiave) as { giorno?: string } | undefined;
+  return r?.giorno === oggi;
+}
+
+export function segnaFattoOggi(chiave: string, utenteId?: string | number): void {
+  const oggi = new Date().toISOString().slice(0, 10);
+  db()
+    .prepare(
+      "INSERT INTO fatto_oggi (tenant_id, utente_id, chiave, giorno) VALUES (?, ?, ?, ?) " +
+        "ON CONFLICT(tenant_id, utente_id, chiave) DO UPDATE SET giorno = excluded.giorno"
+    )
+    .run(tenantIdCorrente(), String(utenteId ?? "-"), chiave, oggi);
+}
+
 export function listConnessioni(): Connessione[] {
   return db()
     .prepare("SELECT * FROM connessioni WHERE tenant_id = ? AND attivo = 1 ORDER BY tipo, nome COLLATE NOCASE")

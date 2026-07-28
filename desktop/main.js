@@ -633,10 +633,10 @@ $cb = [OrionWin+EnumWindowsProc]{
       [void][OrionWin]::GetWindowText($h, $sb, $sb.Capacity)
       $r = New-Object OrionWin+RECT
       [void][OrionWin]::GetWindowRect($h, [ref]$r)
-      $pid = 0
-      [void][OrionWin]::GetWindowThreadProcessId($h, [ref]$pid)
+      $procId = 0
+      [void][OrionWin]::GetWindowThreadProcessId($h, [ref]$procId)
       $nome = ""
-      try { $nome = (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch {}
+      try { $nome = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {}
       $w = $r.Right - $r.Left
       $hh = $r.Bottom - $r.Top
       if ($w -gt 120 -and $hh -gt 80) {
@@ -844,32 +844,51 @@ async function metti(app, r) {
   return { ok: false, errore: "piattaforma" };
 }
 
+// La misura della finestra di ORION prima del buongiorno, per poterla ridare.
+let boundsPrimaDelBuongiorno = null;
+
+// CHI È DAVANTI ADESSO. Dopo aver aperto un sito, la finestra da sistemare è
+// quella del browser PREDEFINITO dell'utente — che non è detto sia Safari o
+// Chrome. Invece di indovinare, si guarda quale app è appena venuta davanti.
+async function appDavanti() {
+  try {
+    if (process.platform === "darwin") {
+      const r = await lanciaEAspetta(
+        "osascript",
+        ["-e", 'tell application "System Events" to return name of first application process whose frontmost is true'],
+        4000
+      );
+      const nome = String(r.stdout || "").trim();
+      return r.ok && nome ? nome : null;
+    }
+    if (process.platform === "win32") {
+      const f = await finestraDavantiWindows();
+      return f && f.titolo ? String(f.titolo) : null;
+    }
+  } catch {}
+  return null;
+}
+
 // IL BUONGIORNO: apre gli strumenti e li apparecchia.
 //   d.strumenti = [{ nome, apertura }]  (apertura = nome app o URL; opzionale)
 //   d.spazioOrion = true → ORION si tiene una colonna a sinistra
 ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
   const strumenti = Array.isArray(d?.strumenti) ? d.strumenti.slice(0, 6) : [];
-  if (!strumenti.length) return { ok: false, errore: "nessuno strumento da aprire" };
+  const totale = strumenti.length;
+  if (!totale) return { ok: false, errore: "nessuno strumento da aprire", aperti: 0, sistemate: 0, totale: 0, esiti: [] };
 
-  const display = screen.getPrimaryDisplay();
+  // Lo schermo giusto è QUELLO DOVE STA ORION, non per forza il principale:
+  // chi lavora su due monitor non deve vedersi tutto scaraventato sul primo.
+  const suo = finestraPrincipale && !finestraPrincipale.isDestroyed() ? finestraPrincipale.getBounds() : null;
+  const display = suo ? screen.getDisplayMatching(suo) : screen.getPrimaryDisplay();
   const area = { ...display.workArea };
-
-  // ORION resta a sinistra, gli strumenti si dividono il resto: così il
-  // professionista vede la sua segretaria E i suoi programmi, senza sovrapposizioni.
-  const conOrion = d?.spazioOrion !== false;
-  if (conOrion && finestraPrincipale && !finestraPrincipale.isDestroyed()) {
-    const larghOrion = Math.round(area.width * 0.34);
-    try {
-      finestraPrincipale.setBounds({ x: area.x, y: area.y, width: larghOrion, height: area.height }, false);
-    } catch {}
-    area.x += larghOrion;
-    area.width -= larghOrion;
-  }
 
   const esiti = [];
   const aperti = [];
+  const siti = [];
 
-  // 1) APERTURA — una per volta, con verifica vera.
+  // 1) APERTURA — una per volta, con verifica vera. NIENTE si tocca sullo
+  //    schermo finché non si è aperto davvero qualcosa.
   for (const st of strumenti) {
     const nome = String(st?.nome ?? "").trim();
     const apertura = String(st?.apertura ?? "").trim() || nome;
@@ -877,10 +896,8 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
     try {
       if (SEMBRA_URL(apertura)) {
         await shell.openExternal(/^https?:/i.test(apertura) ? apertura : `https://${apertura}`);
-        // Il sito si apre nel browser: la finestra da sistemare è quella del browser.
-        const browser = process.platform === "win32" ? "chrome" : "Safari";
         esiti.push({ nome, aperto: true, come: "sito" });
-        aperti.push({ nome, bersaglio: browser });
+        siti.push(nome);
       } else {
         const r = await lanciaEAspetta(
           process.platform === "darwin" ? "open" : "powershell",
@@ -901,17 +918,49 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
     }
   }
 
-  if (!aperti.length) return { ok: false, errore: "non sono riuscito ad aprire nulla", esiti };
+  // I SITI stanno tutti nello STESSO browser, a schede: è UNA finestra sola, e
+  // prende UNA cella. (Prima ne prendevano una a testa e la stessa finestra
+  // veniva spostata più volte lasciando celle vuote.)
+  if (siti.length) {
+    await new Promise((r) => setTimeout(r, 900));
+    const browser = await appDavanti();
+    if (browser) aperti.push({ nome: siti.join(" + "), bersaglio: browser, siti: siti.length });
+    else for (const nome of siti) {
+      const e = esiti.find((x) => x.nome === nome);
+      if (e) { e.sistemata = false; e.motivo_posizione = "non ho capito in quale browser si è aperto"; }
+    }
+  }
 
-  // 2) SISTEMAZIONE — le finestre prendono posto nella griglia.
+  const bene = esiti.filter((e) => e.aperto).length;
+  if (!aperti.length) {
+    return { ok: false, errore: "non sono riuscito ad aprire nulla", aperti: bene, sistemate: 0, totale, esiti };
+  }
+
+  // 2) ORION SI FA DA PARTE — solo ORA che c'è davvero qualcosa da mettere.
+  //    La misura di prima si ricorda, così si può tornare com'era.
+  const conOrion = d?.spazioOrion !== false;
+  if (conOrion && finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+    const largh = Math.round(area.width * 0.34);
+    try {
+      if (suo) boundsPrimaDelBuongiorno = { ...suo };
+      finestraPrincipale.setBounds({ x: area.x, y: area.y, width: largh, height: area.height }, false);
+      area.x += largh;
+      area.width -= largh;
+    } catch {}
+  }
+
+  // 3) SISTEMAZIONE — ogni finestra prende posto nella griglia.
   await new Promise((r) => setTimeout(r, 1200)); // le app finiscono di disegnarsi
   const celle = riquadri(aperti.length, area);
   for (let i = 0; i < aperti.length; i++) {
     const r = await metti(aperti[i].bersaglio, celle[i]);
-    const e = esiti.find((x) => x.nome === aperti[i].nome);
-    if (e) {
-      e.sistemata = r.ok;
-      if (!r.ok) e.motivo_posizione = r.errore;
+    const nomi = aperti[i].siti ? String(aperti[i].nome).split(" + ") : [aperti[i].nome];
+    for (const nn of nomi) {
+      const e = esiti.find((x) => x.nome === nn);
+      if (e) {
+        e.sistemata = r.ok;
+        if (!r.ok) e.motivo_posizione = r.errore;
+      }
     }
   }
 
@@ -920,9 +969,23 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
     if (finestraPrincipale && !finestraPrincipale.isDestroyed()) finestraPrincipale.showInactive();
   } catch {}
 
-  const bene = esiti.filter((e) => e.aperto).length;
   const sistemate = esiti.filter((e) => e.sistemata).length;
-  return { ok: bene > 0, aperti: bene, sistemate, totale: strumenti.length, esiti };
+  return { ok: bene > 0, aperti: bene, sistemate, totale, esiti };
+});
+
+// «RIMETTI LA FINESTRA COM'ERA» — dopo il buongiorno ORION resta stretto nella
+// sua colonna: questo lo riporta alla misura di prima, senza chiudere l'app.
+ipcMain.handle("os:tornaComeEra", () => {
+  if (!boundsPrimaDelBuongiorno || !finestraPrincipale || finestraPrincipale.isDestroyed()) {
+    return { ok: false, errore: "non c'è una misura precedente da ripristinare" };
+  }
+  try {
+    finestraPrincipale.setBounds(boundsPrimaDelBuongiorno, true);
+    boundsPrimaDelBuongiorno = null;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, errore: String(e?.message ?? e) };
+  }
 });
 
 ipcMain.on("os:gestiOn", () => apriOverlayGesti());
@@ -1138,13 +1201,13 @@ const cercaFile = (q, limite = 1) => trovaVoci(q, { cartelle: false, limite });
 // Risolve "dove" creare qualcosa: parole note (scrivania/documenti…) o una cartella per nome.
 function cartellaBase(posizione) {
   const p = String(posizione || "").toLowerCase().trim();
-  if (!p || /scrivania|desktop/.test(p)) return path.join(os.homedir(), "Desktop");
+  if (!p || /scrivania|desktop/.test(p)) return scrivaniaVera();
   if (/documenti|documents/.test(p)) return path.join(os.homedir(), "Documents");
   if (/download/.test(p)) return path.join(os.homedir(), "Downloads");
   if (/immagini|pictures|foto/.test(p)) return path.join(os.homedir(), "Pictures");
   if (/home|utente|principale/.test(p)) return os.homedir();
   const [cartella] = trovaVoci(p, { file: false, limite: 1 });
-  return cartella || path.join(os.homedir(), "Desktop");
+  return cartella || scrivaniaVera();
 }
 
 // Apri un file/cartella trovato per nome.
@@ -1330,11 +1393,13 @@ function lanciaEAspetta(cmd, args, timeoutMs = 9000) {
 async function appInEsecuzione(nome) {
   const n = nome.replace(/["'`$]/g, "");
   if (process.platform === "darwin") {
+    // ATTENZIONE: osascript esce con codice 0 anche quando l'`if` non scatta.
+    // L'unico modo onesto di sapere se l'app c'è è CONTARE e leggere il numero.
     const r = await lanciaEAspetta("osascript", [
       "-e",
-      `tell application "System Events" to if (exists (first process whose name contains "${n}")) then return 0`,
+      `tell application "System Events" to return (count of (every process whose name contains "${n}"))`,
     ], 4000);
-    return r.ok;
+    return r.ok && Number(String(r.stdout || "").trim()) > 0;
   }
   if (process.platform === "win32") {
     // Processo attivo con quel nome O con quel titolo di finestra.
@@ -1405,6 +1470,27 @@ ipcMain.handle("os:apriApp", async (_e, nome) => {
 });
 
 // Chiude (esce da) un'app per nome.
+// LA SCRIVANIA VERA. Su Windows con OneDrive attivo (default su moltissimi PC)
+// la cartella Desktop è dentro OneDrive: scrivere in ~/Desktop crea una cartella
+// fantasma che l'utente non vedrà mai. Qui si sceglie quella giusta.
+function scrivaniaVera() {
+  const casa = os.homedir();
+  const candidate = [];
+  if (process.platform === "win32") {
+    if (process.env.OneDriveCommercial) candidate.push(path.join(process.env.OneDriveCommercial, "Desktop"));
+    if (process.env.OneDrive) candidate.push(path.join(process.env.OneDrive, "Desktop"));
+    if (process.env.OneDriveConsumer) candidate.push(path.join(process.env.OneDriveConsumer, "Desktop"));
+  }
+  candidate.push(path.join(casa, "Desktop"));
+  candidate.push(path.join(casa, "Scrivania"));
+  for (const c of candidate) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {}
+  }
+  return path.join(casa, "Desktop");
+}
+
 ipcMain.handle("os:chiudiApp", async (_e, nome) => {
   const n = String(nome || "").trim();
   if (!n) return { ok: false, errore: "nome mancante" };
@@ -1415,7 +1501,14 @@ ipcMain.handle("os:chiudiApp", async (_e, nome) => {
       // Robusto: chiude per nome-processo O per titolo della finestra (così
       // "Google Chrome" chiude chrome.exe, "Word" chiude winword, ecc.).
       const safe = n.replace(/[^\w .\-]/g, "");
-      const ps = `Get-Process | Where-Object { $_.ProcessName -like '*${safe}*' -or ($_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*') } | Stop-Process -Force -ErrorAction SilentlyContinue`;
+      // MAI ammazzare un programma: si chiede di chiudere (CloseMainWindow), così
+      // Word/Excel mostrano «vuoi salvare?». Solo se dopo 6s è ancora lì — cioè
+      // non ha una finestra da chiudere — si insiste. Il lavoro non si perde.
+      const ps =
+        `$p = Get-Process | Where-Object { $_.ProcessName -like '*${safe}*' -or ($_.MainWindowTitle -and $_.MainWindowTitle -like '*${safe}*') }; ` +
+        `foreach ($x in $p) { try { [void]$x.CloseMainWindow() } catch {} }; ` +
+        `Start-Sleep -Seconds 6; ` +
+        `foreach ($x in $p) { try { if (-not $x.HasExited -and -not $x.MainWindowHandle) { Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue } } catch {} }`;
       spawn("powershell", ["-NoProfile", "-Command", ps], { detached: true, stdio: "ignore" }).unref();
     } else {
       spawn("pkill", ["-i", n], { detached: true, stdio: "ignore" }).unref();

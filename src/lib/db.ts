@@ -261,6 +261,14 @@ function migrate(d: Database.Database) {
     -- Livello 1: memoria VIVA. Intuizioni che evolvono nel tempo, con il PERCHÉ,
     -- la confidenza e il rinforzo (più volte osservata → più certa). soggetto è
     -- libero (es. "paziente Rossi") o NULL=generale. stato='superato' = evoluta.
+    CREATE TABLE IF NOT EXISTS fatto_oggi (
+      tenant_id INTEGER NOT NULL,
+      utente_id TEXT NOT NULL DEFAULT '-',
+      chiave TEXT NOT NULL,
+      giorno TEXT NOT NULL,
+      PRIMARY KEY (tenant_id, utente_id, chiave)
+    );
+
     CREATE TABLE IF NOT EXISTS memoria (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tenant_id INTEGER NOT NULL,
