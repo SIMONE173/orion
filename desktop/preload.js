@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld("orionDesktop", {
   nucleoInterattivo: (v) => ipcRenderer.send("os:nucleoInterattivo", !!v),
   nucleoDragStart: () => ipcRenderer.send("os:nucleoDragStart"),
   nucleoDragEnd: () => ipcRenderer.send("os:nucleoDragEnd"),
+  // IL BUONGIORNO: apre gli strumenti del professionista e li dispone a griglia,
+  // ciascuno nel suo riquadro (Mac e Windows), dicendo la verità su ognuno.
+  scrivaniaOrdinata: (dati) => ipcRenderer.invoke("os:scrivaniaOrdinata", dati),
   // Apre una vista (pannello) in una finestra separata.
   apriVista: (vista) => ipcRenderer.send("os:apriVista", vista),
   // Chiude le finestre-pannello (per tipo, o "tutto").

@@ -115,7 +115,7 @@ export async function runConversation(
   }
 
   // Se c'è un'immagine (fotocamera/documento), la collego all'ultimo turno utente per la lettura (vision).
-  const ctx: TurnoContext = { utenteId: utente?.id, strumentiUsati: [] };
+  const ctx: TurnoContext = { utenteId: utente?.id, strumentiUsati: [], desktop };
   // Cosa ha chiesto l'utente in questo turno: serve a non far avanzare il giro
   // lasciando in sospeso una sua richiesta.
   {

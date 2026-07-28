@@ -545,6 +545,150 @@ let axProc = null;
 let axCoda = []; // una risposta per comando, in ordine (FIFO)
 let axBuf = "";
 
+// ════════════════════════════════════════════════════════════════════════════
+//  LE FINESTRE DEL COMPUTER — parità Mac / Windows
+//  Su Mac le finestre delle altre app si leggono e si muovono col daemon JXA
+//  (Accessibilità). Su Windows non c'era NULLA: qui sotto ci sono le primitive
+//  native (EnumWindows / SetWindowPos / WM_CLOSE via P/Invoke in PowerShell),
+//  così ORION può elencare, affiancare e chiudere le finestre anche là.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Un solo blocco P/Invoke, riusato da tutte le funzioni: evita di ricompilare
+// il tipo a ogni chiamata dentro la stessa sessione PowerShell.
+const WIN_API = `
+Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public class OrionWin {
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+}
+"@ -ErrorAction SilentlyContinue
+`;
+
+// PowerShell che restituisce JSON. Riceve solo script fidato (scritto qui).
+function psJson(script, timeoutMs = 9000) {
+  return new Promise((resolve) => {
+    let out = "";
+    let chiuso = false;
+    try {
+      const p = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      const t = setTimeout(() => {
+        if (chiuso) return;
+        chiuso = true;
+        try { p.kill(); } catch {}
+        resolve({ ok: false, errore: "timeout" });
+      }, timeoutMs);
+      p.stdout.on("data", (d) => { out += String(d); });
+      p.on("exit", () => {
+        if (chiuso) return;
+        chiuso = true;
+        clearTimeout(t);
+        const testo = out.trim();
+        if (!testo) return resolve({ ok: true, dati: [] });
+        try {
+          const j = JSON.parse(testo);
+          resolve({ ok: true, dati: Array.isArray(j) ? j : [j] });
+        } catch {
+          resolve({ ok: false, errore: "risposta illeggibile" });
+        }
+      });
+      p.on("error", (e) => {
+        if (chiuso) return;
+        chiuso = true;
+        clearTimeout(t);
+        resolve({ ok: false, errore: String(e?.message ?? e) });
+      });
+    } catch (e) {
+      resolve({ ok: false, errore: String(e?.message ?? e) });
+    }
+  });
+}
+
+// Elenco delle finestre VISIBILI e con titolo, con posizione e processo.
+async function finestreWindows() {
+  const script = `${WIN_API}
+$out = New-Object System.Collections.ArrayList
+$cb = [OrionWin+EnumWindowsProc]{
+  param($h, $l)
+  if ([OrionWin]::IsWindowVisible($h)) {
+    $len = [OrionWin]::GetWindowTextLength($h)
+    if ($len -gt 0) {
+      $sb = New-Object System.Text.StringBuilder ($len + 1)
+      [void][OrionWin]::GetWindowText($h, $sb, $sb.Capacity)
+      $r = New-Object OrionWin+RECT
+      [void][OrionWin]::GetWindowRect($h, [ref]$r)
+      $pid = 0
+      [void][OrionWin]::GetWindowThreadProcessId($h, [ref]$pid)
+      $nome = ""
+      try { $nome = (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch {}
+      $w = $r.Right - $r.Left
+      $hh = $r.Bottom - $r.Top
+      if ($w -gt 120 -and $hh -gt 80) {
+        [void]$out.Add([pscustomobject]@{
+          hwnd = [int64]$h; titolo = $sb.ToString(); processo = $nome;
+          x = $r.Left; y = $r.Top; w = $w; h = $hh;
+          ridotta = [OrionWin]::IsIconic($h)
+        })
+      }
+    }
+  }
+  return $true
+}
+[void][OrionWin]::EnumWindows($cb, [IntPtr]::Zero)
+$out | ConvertTo-Json -Compress -Depth 3`;
+  const r = await psJson(script);
+  return r.ok ? r.dati : [];
+}
+
+// Sposta/ridimensiona una finestra (per hwnd). SWP_NOZORDER|SWP_NOACTIVATE.
+async function spostaFinestraWindows(hwnd, x, y, w, h) {
+  const script = `${WIN_API}
+$h = [IntPtr]::new([int64]${Number(hwnd)})
+[void][OrionWin]::ShowWindow($h, 9)   # SW_RESTORE: se era ridotta a icona
+$ok = [OrionWin]::SetWindowPos($h, [IntPtr]::Zero, ${Math.round(x)}, ${Math.round(y)}, ${Math.round(w)}, ${Math.round(h)}, 0x0014)
+[pscustomobject]@{ ok = $ok } | ConvertTo-Json -Compress`;
+  const r = await psJson(script, 6000);
+  return { ok: Boolean(r.ok && r.dati?.[0]?.ok) };
+}
+
+// Chiude UNA finestra con garbo (WM_CLOSE: l'app può chiedere di salvare).
+async function chiudiFinestraWindows(hwnd) {
+  const script = `${WIN_API}
+$h = [IntPtr]::new([int64]${Number(hwnd)})
+[void][OrionWin]::SendMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+[pscustomobject]@{ ok = $true } | ConvertTo-Json -Compress`;
+  const r = await psJson(script, 6000);
+  return { ok: Boolean(r.ok) };
+}
+
+// La finestra in primo piano (per "chiudi QUESTA finestra").
+async function finestraDavantiWindows() {
+  const script = `${WIN_API}
+$h = [OrionWin]::GetForegroundWindow()
+$len = [OrionWin]::GetWindowTextLength($h)
+$sb = New-Object System.Text.StringBuilder ($len + 1)
+[void][OrionWin]::GetWindowText($h, $sb, $sb.Capacity)
+[pscustomobject]@{ hwnd = [int64]$h; titolo = $sb.ToString() } | ConvertTo-Json -Compress`;
+  const r = await psJson(script, 6000);
+  return r.ok ? r.dati?.[0] ?? null : null;
+}
+
 function accessibilitaOk(prompt) {
   if (process.platform !== "darwin") return false;
   try {
@@ -644,6 +788,143 @@ function finestreEsterne() {
   return axCacheFin.finestre;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+//  LA SCRIVANIA ORDINATA — il buongiorno di ORION
+//  Apre gli strumenti del professionista e li DISPONE a griglia, ciascuno nel
+//  suo riquadro: non una finestra sopra l'altra, ma una scrivania apparecchiata.
+//  Funziona identico su Mac (daemon Accessibilità) e Windows (SetWindowPos).
+//  Ogni passo dice la VERITÀ: se un'app non si apre, lo si sa e lo si dice.
+// ════════════════════════════════════════════════════════════════════════════
+
+// La griglia: dove va la finestra i-esima di n, dentro l'area utile.
+function riquadri(n, area, margine = 8) {
+  const { x, y, width: W, height: H } = area;
+  const box = (cx, cy, cw, ch) => ({
+    x: Math.round(x + cx + margine / 2),
+    y: Math.round(y + cy + margine / 2),
+    w: Math.round(cw - margine),
+    h: Math.round(ch - margine),
+  });
+  if (n <= 1) return [box(0, 0, W, H)];
+  if (n === 2) return [box(0, 0, W / 2, H), box(W / 2, 0, W / 2, H)];
+  if (n === 3) {
+    // Una grande a sinistra (quella che conta di più) + due impilate a destra.
+    return [box(0, 0, W / 2, H), box(W / 2, 0, W / 2, H / 2), box(W / 2, H / 2, W / 2, H / 2)];
+  }
+  // 4 e oltre: griglia a due colonne, righe quante servono.
+  const righe = Math.ceil(n / 2);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % 2;
+    const rig = Math.floor(i / 2);
+    out.push(box((col * W) / 2, (rig * H) / righe, W / 2, H / righe));
+  }
+  return out;
+}
+
+// Sposta la finestra di un'app dove diciamo noi. Ritorna { ok, errore? }.
+async function metti(app, r) {
+  if (process.platform === "win32") {
+    const tutte = await finestreWindows();
+    const q = String(app).toLowerCase();
+    const f = tutte.find(
+      (w) => String(w.processo || "").toLowerCase().includes(q) ||
+             String(w.titolo || "").toLowerCase().includes(q)
+    );
+    if (!f) return { ok: false, errore: "finestra non trovata" };
+    return spostaFinestraWindows(f.hwnd, r.x, r.y, r.w, r.h);
+  }
+  if (process.platform === "darwin") {
+    // Prima la posizione, poi la dimensione (alcune app rifiutano l'ordine opposto).
+    const m = await axComando(`MOVE|${app}|1|${r.x}|${r.y}`, 4000);
+    const s = await axComando(`SIZE|${app}|1|${r.w}|${r.h}`, 4000);
+    if (m?.ok || s?.ok) return { ok: true };
+    return { ok: false, errore: m?.errore || s?.errore || "non spostata" };
+  }
+  return { ok: false, errore: "piattaforma" };
+}
+
+// IL BUONGIORNO: apre gli strumenti e li apparecchia.
+//   d.strumenti = [{ nome, apertura }]  (apertura = nome app o URL; opzionale)
+//   d.spazioOrion = true → ORION si tiene una colonna a sinistra
+ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
+  const strumenti = Array.isArray(d?.strumenti) ? d.strumenti.slice(0, 6) : [];
+  if (!strumenti.length) return { ok: false, errore: "nessuno strumento da aprire" };
+
+  const display = screen.getPrimaryDisplay();
+  const area = { ...display.workArea };
+
+  // ORION resta a sinistra, gli strumenti si dividono il resto: così il
+  // professionista vede la sua segretaria E i suoi programmi, senza sovrapposizioni.
+  const conOrion = d?.spazioOrion !== false;
+  if (conOrion && finestraPrincipale && !finestraPrincipale.isDestroyed()) {
+    const larghOrion = Math.round(area.width * 0.34);
+    try {
+      finestraPrincipale.setBounds({ x: area.x, y: area.y, width: larghOrion, height: area.height }, false);
+    } catch {}
+    area.x += larghOrion;
+    area.width -= larghOrion;
+  }
+
+  const esiti = [];
+  const aperti = [];
+
+  // 1) APERTURA — una per volta, con verifica vera.
+  for (const st of strumenti) {
+    const nome = String(st?.nome ?? "").trim();
+    const apertura = String(st?.apertura ?? "").trim() || nome;
+    if (!apertura) continue;
+    try {
+      if (SEMBRA_URL(apertura)) {
+        await shell.openExternal(/^https?:/i.test(apertura) ? apertura : `https://${apertura}`);
+        // Il sito si apre nel browser: la finestra da sistemare è quella del browser.
+        const browser = process.platform === "win32" ? "chrome" : "Safari";
+        esiti.push({ nome, aperto: true, come: "sito" });
+        aperti.push({ nome, bersaglio: browser });
+      } else {
+        const r = await lanciaEAspetta(
+          process.platform === "darwin" ? "open" : "powershell",
+          process.platform === "darwin"
+            ? ["-a", apertura]
+            : ["-NoProfile", "-Command", `$ErrorActionPreference='Stop'; Start-Process "${apertura.replace(/["'`$]/g, "")}"`]
+        );
+        if (!r.ok) {
+          esiti.push({ nome, aperto: false, motivo: "non l'ho trovata sul computer" });
+          continue;
+        }
+        const viva = await attendiApp(apertura, 8000);
+        esiti.push({ nome, aperto: true, confermata: viva });
+        aperti.push({ nome, bersaglio: apertura });
+      }
+    } catch (e) {
+      esiti.push({ nome, aperto: false, motivo: String(e?.message ?? e) });
+    }
+  }
+
+  if (!aperti.length) return { ok: false, errore: "non sono riuscito ad aprire nulla", esiti };
+
+  // 2) SISTEMAZIONE — le finestre prendono posto nella griglia.
+  await new Promise((r) => setTimeout(r, 1200)); // le app finiscono di disegnarsi
+  const celle = riquadri(aperti.length, area);
+  for (let i = 0; i < aperti.length; i++) {
+    const r = await metti(aperti[i].bersaglio, celle[i]);
+    const e = esiti.find((x) => x.nome === aperti[i].nome);
+    if (e) {
+      e.sistemata = r.ok;
+      if (!r.ok) e.motivo_posizione = r.errore;
+    }
+  }
+
+  // ORION torna davanti: è lui che parla.
+  try {
+    if (finestraPrincipale && !finestraPrincipale.isDestroyed()) finestraPrincipale.showInactive();
+  } catch {}
+
+  const bene = esiti.filter((e) => e.aperto).length;
+  const sistemate = esiti.filter((e) => e.sistemata).length;
+  return { ok: bene > 0, aperti: bene, sistemate, totale: strumenti.length, esiti };
+});
+
 ipcMain.on("os:gestiOn", () => apriOverlayGesti());
 ipcMain.on("os:gestiOff", () => chiudiOverlayGesti());
 ipcMain.handle("os:gestiFinestre", () => {
@@ -687,6 +968,29 @@ ipcMain.handle("os:gestiEsterna", (_e, d) => {
 // Comando vocale: chiude una finestra (pulsante rosso) o la scheda del browser
 // (Cmd+W). Senza app → quella in primo piano (mai ORION stesso).
 ipcMain.handle("os:chiudiFinestra", async (_e, d) => {
+  // WINDOWS: chiusura garbata della finestra vera (WM_CLOSE), o Ctrl+W per la scheda.
+  if (process.platform === "win32") {
+    const scheda = !!(d && d.scheda);
+    if (scheda) {
+      const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("^w")`;
+      const r = await manoShell("powershell", ["-NoProfile", "-Command", ps]);
+      return r.ok ? { ok: true, chiuso: "scheda" } : { ok: false, errore: r.errore };
+    }
+    const nome = pulisciNomeApp(d && d.app);
+    if (nome) {
+      const tutte = await finestreWindows();
+      const bersaglio = tutte.find(
+        (f) => String(f.titolo || "").toLowerCase().includes(nome.toLowerCase()) ||
+               String(f.processo || "").toLowerCase().includes(nome.toLowerCase())
+      );
+      if (!bersaglio) return { ok: false, errore: "finestra_non_trovata", dettaglio: nome };
+      return chiudiFinestraWindows(bersaglio.hwnd);
+    }
+    const davanti = await finestraDavantiWindows();
+    if (!davanti?.hwnd) return { ok: false, errore: "quale_app" };
+    if (/ORION|Electron/i.test(String(davanti.titolo || ""))) return { ok: false, errore: "quale_app" };
+    return chiudiFinestraWindows(davanti.hwnd);
+  }
   if (!accessibilitaOk(true)) return { ok: false, errore: "accessibilita" };
   const scheda = !!(d && d.scheda);
   let appNome = pulisciNomeApp(d && d.app);
@@ -983,32 +1287,112 @@ function cercaScorciatoiaWin(nome) {
 const SEMBRA_URL = (s) => /^https?:\/\//i.test(s) || /^[\w-]+\.(com|it|net|org|io|app|dev|co|eu|info|tv)$/i.test(s);
 
 // Lancia un'app installata per nome (o apre un sito, se il nome è un indirizzo).
+// Lancia un comando e ASPETTA l'esito (niente detached: vogliamo sapere com'è
+// andata). Ritorna { ok, codice, stderr }.
+function lanciaEAspetta(cmd, args, timeoutMs = 9000) {
+  return new Promise((resolve) => {
+    let err = "";
+    let chiuso = false;
+    try {
+      const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
+      const t = setTimeout(() => {
+        if (chiuso) return;
+        chiuso = true;
+        try { p.kill(); } catch {}
+        resolve({ ok: false, codice: -1, stderr: "timeout" });
+      }, timeoutMs);
+      p.stderr?.on("data", (d) => { err += String(d).slice(0, 400); });
+      p.on("exit", (code) => {
+        if (chiuso) return;
+        chiuso = true;
+        clearTimeout(t);
+        resolve({ ok: code === 0, codice: code ?? -1, stderr: err.trim() });
+      });
+      p.on("error", (e) => {
+        if (chiuso) return;
+        chiuso = true;
+        clearTimeout(t);
+        resolve({ ok: false, codice: -1, stderr: String(e?.message ?? e) });
+      });
+    } catch (e) {
+      resolve({ ok: false, codice: -1, stderr: String(e?.message ?? e) });
+    }
+  });
+}
+
+// L'app è DAVVERO in esecuzione? (per non dire "aperta" a vuoto)
+async function appInEsecuzione(nome) {
+  const n = nome.replace(/["'`$]/g, "");
+  if (process.platform === "darwin") {
+    const r = await lanciaEAspetta("osascript", [
+      "-e",
+      `tell application "System Events" to if (exists (first process whose name contains "${n}")) then return 0`,
+    ], 4000);
+    return r.ok;
+  }
+  if (process.platform === "win32") {
+    // Processo attivo con quel nome O con quel titolo di finestra.
+    const ps = `if (Get-Process | Where-Object { $_.ProcessName -like '*${n}*' -or ($_.MainWindowTitle -and $_.MainWindowTitle -like '*${n}*') }) { exit 0 } else { exit 1 }`;
+    const r = await lanciaEAspetta("powershell", ["-NoProfile", "-Command", ps], 6000);
+    return r.ok;
+  }
+  return true; // altrove non sappiamo verificare: non mentiamo né allarmiamo
+}
+
+// Aspetta fino a `attesaMs` che l'app compaia davvero.
+async function attendiApp(nome, attesaMs = 7000) {
+  const fine = Date.now() + attesaMs;
+  while (Date.now() < fine) {
+    if (await appInEsecuzione(nome)) return true;
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  return false;
+}
+
+// APRE un'app — e VERIFICA che si sia aperta davvero. Se non ci riesce lo DICE:
+// ORION non deve mai raccontare di aver aperto qualcosa che non è sullo schermo.
 ipcMain.handle("os:apriApp", async (_e, nome) => {
   const n = String(nome || "").trim();
   if (!n) return { ok: false, errore: "nome mancante" };
   try {
     if (SEMBRA_URL(n)) {
       await shell.openExternal(/^https?:/i.test(n) ? n : `https://${n}`);
-      return { ok: true, app: n };
+      return { ok: true, app: n, confermata: true, come: "sito" };
     }
+
     if (process.platform === "darwin") {
-      spawn("open", ["-a", n], { detached: true, stdio: "ignore" }).unref();
-      return { ok: true, app: n };
+      // `open -a` esce con codice ≠ 0 se l'app non esiste: è già una verità.
+      const r = await lanciaEAspetta("open", ["-a", n]);
+      if (!r.ok) {
+        return { ok: false, app: n, errore: "app_non_trovata", dettaglio: r.stderr || `uscita ${r.codice}` };
+      }
+      const viva = await attendiApp(n);
+      return { ok: true, app: n, confermata: viva, ...(viva ? {} : { nota: "lanciata ma non la vedo ancora in esecuzione" }) };
     }
+
     if (process.platform === "win32") {
       // 1) La scorciatoia nel menu Start è la via più affidabile (Win32 + Store).
       const lnk = cercaScorciatoiaWin(n);
       if (lnk) {
         const err = await shell.openPath(lnk);
-        if (!err) return { ok: true, app: n };
+        if (!err) {
+          const viva = await attendiApp(n);
+          return { ok: true, app: n, confermata: viva, come: "scorciatoia", ...(viva ? {} : { nota: "lanciata ma non la vedo ancora in esecuzione" }) };
+        }
       }
-      // 2) Start-Process gestisce gli eseguibili nel PATH / registro App Paths
-      //    (chrome, msedge, spotify, winword, notepad, calc…).
-      spawn("powershell", ["-NoProfile", "-Command", `Start-Process "${n.replace(/"/g, "")}"`], { detached: true, stdio: "ignore" }).unref();
-      return { ok: true, app: n };
+      // 2) Start-Process: se l'app non esiste PowerShell esce con errore, e noi
+      //    lo sappiamo perché aspettiamo l'esito invece di sganciare il processo.
+      const ps = `$ErrorActionPreference='Stop'; Start-Process "${n.replace(/["'`$]/g, "")}"`;
+      const r = await lanciaEAspetta("powershell", ["-NoProfile", "-Command", ps]);
+      if (!r.ok) {
+        return { ok: false, app: n, errore: "app_non_trovata", dettaglio: r.stderr || `uscita ${r.codice}` };
+      }
+      const viva = await attendiApp(n);
+      return { ok: true, app: n, confermata: viva, ...(viva ? {} : { nota: "lanciata ma non la vedo ancora in esecuzione" }) };
     }
-    spawn("xdg-open", [n], { detached: true, stdio: "ignore" }).unref();
-    return { ok: true, app: n };
+
+    const r = await lanciaEAspetta("xdg-open", [n]);
+    return r.ok ? { ok: true, app: n, confermata: true } : { ok: false, app: n, errore: "app_non_trovata", dettaglio: r.stderr };
   } catch (err) {
     return { ok: false, errore: String(err) };
   }

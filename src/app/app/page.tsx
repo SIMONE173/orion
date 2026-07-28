@@ -267,6 +267,16 @@ type OrionDesktop = {
   apriFile: (q: string) => Promise<EsitoOS>;
   cestina: (q: string) => Promise<EsitoOS>;
   apriApp: (n: string) => Promise<EsitoOS>;
+  // IL BUONGIORNO: apre gli strumenti del professionista e li dispone ordinati
+  // sullo schermo, ciascuno nel suo riquadro (Mac e Windows).
+  scrivaniaOrdinata?: (d: { strumenti: { nome: string; apertura: string }[]; spazioOrion?: boolean }) => Promise<{
+    ok: boolean;
+    aperti?: number;
+    sistemate?: number;
+    totale?: number;
+    errore?: string;
+    esiti?: { nome: string; aperto: boolean; confermata?: boolean; sistemata?: boolean; motivo?: string }[];
+  }>;
   chiudiApp?: (n: string) => Promise<EsitoOS>;
   crea?: (d: { nome: string; tipo: string; posizione?: string }) => Promise<EsitoOS>;
   rinomina?: (d: { da: string; a: string }) => Promise<EsitoOS>;
@@ -657,6 +667,33 @@ export default function Home() {
         d.cestina(a.query).then((r) => {
           speakRef.current?.(r.ok ? `Fatto, ho spostato ${r.nome} nel cestino.` : `Non ho trovato ${a.query}.`);
         });
+        break;
+      }
+      // ── IL BUONGIORNO: la scrivania si apparecchia da sola ──
+      // Arriva col briefing (Desktop). L'app apre gli strumenti e li dispone a
+      // griglia; l'esito VERO — anche i fallimenti — torna a ORION, che lo
+      // racconta con sincerità invece di dare per scontato che sia filato tutto.
+      case "scrivania": {
+        const d = desktopBridge();
+        if (!d?.scrivaniaOrdinata) break;
+        void (async () => {
+          try {
+            const r = await d.scrivaniaOrdinata!({ strumenti: a.strumenti, spazioOrion: true });
+            const dett = (r.esiti ?? [])
+              .map((e) =>
+                !e.aperto
+                  ? `${e.nome}: NON aperto (${e.motivo ?? "non trovato sul computer"})`
+                  : e.sistemata
+                    ? `${e.nome}: aperto e messo a posto`
+                    : `${e.nome}: aperto (non sono riuscito a sistemarlo nella griglia)`
+              )
+              .join("; ");
+            inviaAOrionRef.current?.(
+              `[Sistema] Scrivania del mattino: ${r.aperti ?? 0} strumenti aperti su ${r.totale ?? 0}, ${r.sistemate ?? 0} disposti ordinati. Dettaglio — ${dett}. Riferisci in UNA frase con verità: se qualcosa non si è aperto dillo e proponi di sistemarlo (magari il nome dell'app è diverso: chiediglielo e lo salvo).`, false, undefined, true);
+          } catch {
+            inviaAOrionRef.current?.("[Sistema] Non sono riuscito ad apparecchiare la scrivania. Dillo con semplicità e vai avanti col briefing.", false, undefined, true);
+          }
+        })();
         break;
       }
       case "mano": {

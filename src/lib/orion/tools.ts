@@ -138,6 +138,8 @@ export type TurnoContext = {
   // servono a impedire che il giro avanzi lasciando in sospeso una richiesta.
   ultimaRichiesta?: string;
   strumentiUsati?: string[];
+  // Siamo nell'app desktop? (serve al briefing per apparecchiare la scrivania)
+  desktop?: boolean;
 };
 
 // «Rispondile tu», «spostalo», «stampa»: quando l'utente CHIEDE un'azione, il
@@ -3267,6 +3269,33 @@ const handlers: Record<string, Handler> = {
             : {}),
         },
         vista: { tipo: "briefing", dati },
+      };
+    }
+    // ── IL BUONGIORNO ───────────────────────────────────────────────────
+    // Su Desktop la scrivania si apparecchia DA SOLA insieme al briefing: non
+    // dipende dal fatto che il modello si ricordi di aprire i programmi. L'app
+    // apre gli strumenti registrati e li dispone a griglia, ciascuno nel suo
+    // riquadro; poi ORION racconta la giornata con tutto già davanti.
+    const strumentiScrivania =
+      ctx.desktop && !inDemo
+        ? listConnessioni()
+            .filter((c) => c.attivo)
+            .slice(0, 4)
+            .map((c) => ({ nome: c.nome, apertura: c.apertura || c.nome }))
+        : [];
+    if (strumentiScrivania.length) {
+      return {
+        result: {
+          ...dati,
+          ...extra,
+          ...notaDemo,
+          scrivania:
+            "STO GIÀ APRENDO i suoi strumenti e li sto disponendo ordinati sullo schermo (" +
+            strumentiScrivania.map((s) => s.nome).join(", ") +
+            "). Diglielo in mezza frase («ti ho aperto tutto, guarda») e RACCONTA la giornata: l'esito preciso di ogni apertura ti arriverà come messaggio [Sistema] — se qualcosa non si è aperto lo dirai allora, con sincerità.",
+        },
+        vista: { tipo: "briefing", dati },
+        azione: { tipo: "scrivania", strumenti: strumentiScrivania },
       };
     }
     return { result: { ...dati, ...extra, ...notaDemo }, vista: { tipo: "briefing", dati } };

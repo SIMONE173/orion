@@ -265,6 +265,9 @@ export type Vista =
 // siti, entrare in modalità appunti, aprire/zoomare un documento, ecc.
 export type Azione =
   | { tipo: "apri_url"; url: string; etichetta?: string }
+  // IL BUONGIORNO: l'app apre gli strumenti del professionista e li dispone
+  // ordinati sullo schermo, ciascuno nel suo riquadro (solo Desktop).
+  | { tipo: "scrivania"; strumenti: { nome: string; apertura: string }[] }
   | { tipo: "modalita_appunti"; titolo?: string; cliente_id?: number | null }
   | { tipo: "apri_documento"; documento_id: number; cerca?: string }
   | { tipo: "zoom_documento"; verso: "avvicina" | "allontana" | "reset" }
