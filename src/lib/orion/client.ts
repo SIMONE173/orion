@@ -9,6 +9,15 @@ import { tenantIdCorrente } from "../tenant";
 import { registraConsumo } from "../consumi";
 import { emailDemo } from "../demo";
 import { anticipa, type Schermo } from "./anticipo";
+import {
+  promemoriaPrimoGiro,
+  statoPrimoGiro,
+  avanza as avanzaPrimoGiro,
+  esciDalGiro,
+  VUOLE_AVANTI as PG_AVANTI,
+  VUOLE_SALTARE as PG_SALTA,
+  VUOLE_USCIRE as PG_ESCI,
+} from "./primogiro";
 import type { Vista, Azione, RisultatoConversazione } from "./views";
 import type { Utente } from "../auth";
 
@@ -214,8 +223,33 @@ export async function runConversation(
       }
     }
 
+    // ── IL PRIMO GIRO ────────────────────────────────────────────────
+    // Il tutorial della versione COMPLETA, subito dopo la Chiamata 0. Come per
+    // la demo, «avanti» e «salta» li esegue l'APP: se aspettassimo che sia il
+    // modello a ricordarsene, il giro si incepperebbe — è già successo.
+    let primoGiroNota = "";
+    if (!inDemo && onboardingCompleto) {
+      const st = statoPrimoGiro();
+      if (!st.finito && !st.uscito) {
+        const ult = ctx.ultimaRichiesta ?? "";
+        if (ult && PG_ESCI.test(ult)) {
+          esciDalGiro();
+          primoGiroNota =
+            "[Sistema · PRIMO GIRO] L'utente ha chiesto di smettere: il giro è CHIUSO e non si ripropone. Salutalo in una riga, senza insistere, e mettiti a lavorare con lui su quello che ti chiede.";
+        } else if (ult && (PG_SALTA.test(ult) || PG_AVANTI.test(ult))) {
+          const e = avanzaPrimoGiro(desktop, { saltando: PG_SALTA.test(ult) });
+          primoGiroNota = e.finito
+            ? "[Sistema · PRIMO GIRO] Era l'ultima tappa: il giro è FINITO. Chiudi con una frase sola e da adesso lavorate normalmente."
+            : `[Sistema · PRIMO GIRO] La tappa è GIÀ scattata: sei sulla tappa NUOVA. Presentala adesso — non ripetere quella di prima e non richiamare primo_giro azione='avanti'.\n${promemoriaPrimoGiro(desktop)}`;
+        } else {
+          primoGiroNota = promemoriaPrimoGiro(desktop);
+        }
+      }
+    }
+
     const coda = [
       anticipoNota,
+      primoGiroNota,
       inDemo ? promemoriaTutorial(onboardingCompleto) : "",
       appenaAvanzato
         ? "[Sistema] L'utente ha detto di andare avanti e la tappa è GIÀ scattata: sei sulla tappa NUOVA qui sopra. Presentala adesso — non ripetere quella di prima e non richiamare tappa_completata."

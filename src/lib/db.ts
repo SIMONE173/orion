@@ -779,6 +779,9 @@ function migrate(d: Database.Database) {
     "ALTER TABLE abbonamenti ADD COLUMN piano TEXT",
     // ORION DEMO: lo stato del tutorial guidato (JSON), per tenant demo.
     "ALTER TABLE profili ADD COLUMN tutorial TEXT",
+    // IL PRIMO GIRO: il tutorial guidato della versione completa (stato nel
+    // database, così sopravvive a riavvii e rilasci — non in memoria).
+    "ALTER TABLE profili ADD COLUMN primo_giro TEXT",
   ];
   for (const sql of alters) {
     try {

@@ -220,7 +220,7 @@ export type Vista =
         indice: number;
         totale: number;
         finito: boolean;
-        tappe: { id: string; titolo: string; icona: string; fatta: boolean; corrente: boolean }[];
+        tappe: { id: string; titolo: string; icona: string; fatta: boolean; corrente: boolean; saltata?: boolean }[];
         palco:
           | {
               titolo: string;

@@ -16,6 +16,14 @@ import {
   salvaFeedbackTutorial,
   simulaPostaDemo,
 } from "./tutorial";
+import {
+  statoPrimoGiro,
+  tappaCorrente as tappaPrimoGiro,
+  avanza as avanzaPrimoGiro,
+  segnaProvata,
+  esciDalGiro,
+  riepilogoPrimoGiro,
+} from "./primogiro";
 import { eseguiImport } from "../importa";
 import {
   getProfilo,
@@ -1709,6 +1717,18 @@ export const TOOLS: Anthropic.Tool[] = [
         etichetta: { type: "string", description: "Breve descrizione di cosa fa il comando (per l'utente)" },
       },
       required: ["comando"],
+    },
+  },
+  {
+    name: "primo_giro",
+    description:
+      "IL PRIMO GIRO — il tutorial guidato che accompagna il professionista SUBITO DOPO la Chiamata 0, la prima volta che entra in ORION. NON è una demo: è il suo computer, i suoi clienti, il suo lavoro, e ogni tappa lascia dietro qualcosa di vero (gli strumenti registrati, i clienti dentro, la segreteria accesa, un appuntamento scritto nel suo gestionale). Azioni: 'avanti' (chiude la tappa corrente e ti dà la successiva — chiamala SOLO quando il risultato vero della tappa è stato ottenuto, o quando l\'utente dice di proseguire), 'salta' (l\'utente non vuole fare questa tappa adesso: si segna e si va oltre, senza insistere), 'fatto' (segna come consegnata una tappa che non lascia traccia nel database, tipo il referto), 'esci' (l\'utente vuole smettere: il giro si chiude e non si ripropone più), 'stato' (dove siamo).",
+    input_schema: {
+      type: "object",
+      properties: {
+        azione: { type: "string", enum: ["avanti", "salta", "fatto", "esci", "stato"] },
+      },
+      required: ["azione"],
     },
   },
   {
@@ -4594,6 +4614,71 @@ const handlers: Record<string, Handler> = {
       riporta: true,
     },
   }),
+
+  // ── IL PRIMO GIRO: il timone del tutorial della versione COMPLETA ────────
+  primo_giro: (input, ctx) => {
+    const desktop = Boolean(ctx.desktop);
+    const azione = String(input.azione ?? "stato");
+    const vistaBinario = (): Vista => {
+      const r = riepilogoPrimoGiro(desktop);
+      const s = statoPrimoGiro();
+      const t = tappaPrimoGiro(desktop);
+      return {
+        tipo: "tutorial",
+        dati: {
+          percorso: "primo_giro",
+          indice: s.indice,
+          totale: r.tappe.length,
+          finito: s.finito || Boolean(s.uscito),
+          tappe: r.tappe,
+          palco: t
+            ? {
+                titolo: t.titolo,
+                icona: t.icona,
+                numero: s.indice + 1,
+                totale: r.tappe.length,
+                sottotitolo: t.palco.sottotitolo,
+                cosa: t.palco.cosa,
+                perche: t.palco.perche,
+                prova: t.palco.prova,
+              }
+            : null,
+        },
+      };
+    };
+
+    switch (azione) {
+      case "avanti":
+      case "salta": {
+        const e = avanzaPrimoGiro(desktop, { saltando: azione === "salta" });
+        return {
+          result: {
+            ok: true,
+            finito: e.finito,
+            ...(e.tappa ? { tappa: { titolo: e.tappa.titolo, guida: e.tappa.guida } } : {}),
+            nota: e.finito
+              ? "Il primo giro è finito. Da adesso lavori normalmente: niente più tappe, niente più spiegazioni."
+              : "Presenta la tappa nuova e portala a termine DAVVERO prima di andare oltre.",
+          },
+          vista: vistaBinario(),
+        };
+      }
+      case "fatto": {
+        // Per le tappe che non lasciano una traccia nel database (il referto).
+        const t = tappaPrimoGiro(desktop);
+        if (t) segnaProvata(t.id);
+        return { result: { ok: true, nota: "Segnata come consegnata. Ora puoi chiamare primo_giro azione='avanti'." }, vista: vistaBinario() };
+      }
+      case "esci":
+        esciDalGiro();
+        return {
+          result: { ok: true, nota: "Il giro è chiuso e non si ripropone. Salutalo in una riga e mettiti a lavorare con lui." },
+          vista: vistaBinario(),
+        };
+      default:
+        return { result: { ok: true, stato: statoPrimoGiro(), tappe: riepilogoPrimoGiro(desktop).tappe }, vista: vistaBinario() };
+    }
+  },
 
   // ── ORION DEMO: il timone del giro guidato ────────────────────────────────
   tutorial: (input, ctx) => {
