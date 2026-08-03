@@ -3,7 +3,7 @@ import { TOOLS, dispatch, type TurnoContext } from "./tools";
 import { buildSystem, DIRETTIVA_AVVIO, regoleDoro } from "./system";
 import { consolidaSeNecessario } from "./memoria";
 import { suggerimentiPerViste, estraiSuggerimenti } from "./suggerimenti";
-import { salvaMessaggio } from "../data";
+import { salvaMessaggio, messaggiRecenti } from "../data";
 import { tenantIdCorrente } from "../tenant";
 import { registraConsumo } from "../consumi";
 import { anticipa, type Schermo } from "./anticipo";
@@ -74,6 +74,22 @@ export async function runConversation(
   }
 
   const client = new Anthropic({ apiKey });
+
+  // ── NON RIPETERE LA DOMANDA CHE È GIÀ A SCHERMO ──────────────────────────
+  // Durante la Chiamata 0, ogni apertura dell'app mandava un nuovo saluto:
+  // chi apriva ORION cinque volte senza rispondere si ritrovava cinque volte
+  // lo stesso «ciao, dimmi la prima cosa». Se l'ultima parola è la nostra e
+  // lui non ha ancora risposto, non si riparte da capo: la domanda è lì.
+  if (avvio && utente && utente.onboarding_completo !== 1) {
+    try {
+      const ultimi = messaggiRecenti(1);
+      if (ultimi.length && ultimi[ultimi.length - 1].ruolo === "assistant") {
+        return { testo: "", viste: [], azioni: [], suggerimenti: undefined, consumo: undefined };
+      }
+    } catch {
+      /* storico illeggibile: si prosegue e si saluta, non è un danno */
+    }
+  }
 
 
   // All'avvio della giornata: consolidazione PIGRA della memoria (1 sola volta/

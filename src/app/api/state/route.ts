@@ -6,6 +6,19 @@ import { lanciato, eccezioneLancio } from "@/lib/lancio";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/** «14:22» se è di oggi, «ieri 19:23», «28/07 19:23» se è più vecchio. */
+function oraInChat(iso: string): string {
+  const d = new Date(iso);
+  const gg = (x: Date) => new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Rome" }).format(x);
+  const ora = d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Rome" });
+  const oggi = gg(new Date());
+  const suo = gg(d);
+  if (suo === oggi) return ora;
+  const ieri = gg(new Date(Date.now() - 86_400_000));
+  if (suo === ieri) return `ieri ${ora}`;
+  return `${suo.slice(8, 10)}/${suo.slice(5, 7)} ${ora}`;
+}
+
 export async function GET() {
   const r = await conTenant((u) => {
     const profilo = getProfilo();
@@ -34,7 +47,10 @@ export async function GET() {
       storico: messaggiRecenti(40).map((m) => ({
         role: m.ruolo,
         content: m.contenuto,
-        ora: new Date(m.created_at).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Rome" }),
+        // Solo l'ora, su una conversazione lunga giorni, sembra scombinata
+        // (le 19:23 di ieri finiscono in mezzo alle 14:22 di oggi). Se il
+        // messaggio non è di oggi, si dice anche il giorno.
+        ora: oraInChat(m.created_at),
       })),
     };
   });
