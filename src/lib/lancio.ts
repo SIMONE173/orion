@@ -37,6 +37,8 @@ const ACCESSI_GRATIS_PERMANENTI = new Set<string>([
 // NON è un regalo a vita (per quello c'è ACCESSI_GRATIS_PERMANENTI): quando il
 // lancio apre, questa corsia si chiude da sola e tornano utenti normali.
 const OSPITI_INVITATI = new Set<string>([
+  "simone07intake@gmail.com", // il titolare
+  "simone07intake+prova@gmail.com", // il suo account di prova, per vedere il primo giro da zero
   "andrea.porce@gmail.com", // prova della versione completa su Windows — 28/07/2026
 ]);
 
