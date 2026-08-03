@@ -60,3 +60,10 @@ stress/rapporti/
 PIANO.md
 MERCATO.md
 tsconfig.tsbuildinfo   # cache di TypeScript: cambia a ogni compilazione
+
+# Il rendering del trailer: gli script restano, le sue dipendenze e l'audio no.
+# 99 MB di node_modules e wav nel repository facevano scaricare a Railway un
+# progetto enorme prima ancora di cominciare a costruire.
+/trailer-render/node_modules/
+/trailer-render/*.wav
+/trailer-render/out/
