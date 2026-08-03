@@ -10,13 +10,6 @@ const whisper = require("./whisper");
 // la variabile ORION_URL (utile per puntare al localhost in sviluppo).
 const ORION_URL = process.env.ORION_URL || "https://orionvision.it";
 
-// ORION DEMO: stessa app, veste demo — la si riconosce dal nome prodotto
-// impostato in build ("ORION Demo", script dist:demo). In demo:
-//  - lo user agent porta il contrassegno ORIONDemo/<versione>: l'ingresso demo
-//    del server accetta solo l'app (dal browser si scarica, non si prova);
-//  - la finestra parte dall'ingresso /demo (un bottone e si comincia).
-const DEMO = app.getName().includes("Demo") || process.env.ORION_DEMO === "1";
-if (DEMO) app.userAgentFallback = `${app.userAgentFallback} ORIONDemo/${app.getVersion()}`;
 
 // Cartelle in cui cercare i file dell'utente (no scansione dell'intero disco).
 const CARTELLE = [
@@ -35,7 +28,7 @@ function creaFinestra() {
     height: 760,
     minWidth: 420,
     backgroundColor: "#05070d",
-    title: DEMO ? "ORION Demo" : "ORION",
+    title: "ORION",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -68,8 +61,7 @@ function creaFinestra() {
 
   // Carica DIRETTAMENTE l'app (la radice del sito è la vetrina di marketing).
   // In demo si parte dall'ingresso /demo, con la finestra già bella grande.
-  win.loadURL(DEMO ? `${ORION_URL}/demo` : `${ORION_URL}/app`);
-  if (DEMO) win.maximize();
+  win.loadURL(`${ORION_URL}/app`);
   return win;
 }
 
@@ -988,7 +980,7 @@ ipcMain.handle("os:scrivaniaOrdinata", async (_e, d) => {
 // con il link per scaricare. Il giorno in cui l'app sarà firmata, questa parte
 // diventa automatica cambiando una riga.
 // ═══════════════════════════════════════════════════════════════════════════
-const URL_AGGIORNAMENTI = `${ORION_URL}/api/aggiorna${DEMO ? "/demo" : ""}`;
+const URL_AGGIORNAMENTI = `${ORION_URL}/api/aggiorna`;
 
 function versionePiuNuova(a, b) {
   const p = (v) => String(v || "0").split(/[.-]/).map((x) => parseInt(x, 10) || 0);
@@ -1023,7 +1015,7 @@ async function avvisaSeCèDiNuovo() {
         versione: nuova,
         attuale: app.getVersion(),
         automatico: false,
-        dove: `${ORION_URL}${DEMO ? "/demo" : ""}`,
+        dove: ORION_URL,
       });
     }
   } catch {}

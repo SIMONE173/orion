@@ -6,15 +6,13 @@ import { S3Client } from "@aws-sdk/client-s3";
 // desktop e parte da solo) — non più uno zip da scompattare a mano.
 
 export const FILE_DOWNLOAD: Record<string, string> = {
-  mac: "download/ORION-1.1.0-arm64.dmg",
-  win: "download/ORION-1.1.0-win.exe",
-  // ORION DEMO: l'assaggio scaricabile — LIBERO anche a lancio chiuso.
-  demo_mac: "download/ORION-Demo-1.1.0-arm64.dmg",
-  demo_win: "download/ORION-Demo-1.1.0-win.exe",
+  mac: "download/ORION-1.2.0-arm64.dmg",
+  win: "download/ORION-1.2.0-win.exe",
 };
 
-// Le varianti demo non passano dal lucchetto del lancio.
-export const DOWNLOAD_LIBERI = new Set(["demo_mac", "demo_win"]);
+// Nessun download è libero prima dell'apertura: passano il proprietario, i
+// tester e gli ospiti invitati (vedi eccezioneLancio).
+export const DOWNLOAD_LIBERI = new Set<string>([]);
 
 export function clientR2(): S3Client | null {
   if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY) return null;

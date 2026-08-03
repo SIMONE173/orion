@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { conTenant } from "@/lib/sessione";
-import { emailDemo } from "@/lib/demo";
 import { pianoSincronia, spuntaRighe, obiettivoPerLaMano, daQuanto } from "@/lib/sincronia";
 
 export const runtime = "nodejs";
@@ -13,8 +12,7 @@ export const dynamic = "force-dynamic";
  * toccare il computer di nessuno.
  */
 export async function GET() {
-  const r = await conTenant(async (utente) => {
-    if (emailDemo(utente.email)) return { voci: [], daFare: 0, sistemi: [], demo: true };
+  const r = await conTenant(async () => {
     const piano = pianoSincronia();
     // Nate e morte mentre eri via: nel gestionale non sono mai esistite.
     if (piano.daSpuntareSubito.length) spuntaRighe(piano.daSpuntareSubito);

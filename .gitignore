@@ -46,3 +46,17 @@ data/backups/
 
 # Rapporti degli stress test (contengono trascrizioni)
 stress/rapporti/
+
+# ── ROBA CHE NON DEVE MAI FINIRE NEL REPOSITORY ──────────────────────────────
+# Il 3/8/2026 un «git add -A» ha trascinato dentro una chiave API vera, i video
+# della campagna e perfino un node_modules. GitHub ha bloccato il push. Perché
+# non possa succedere di nuovo, queste porte restano chiuse per costruzione.
+/_recupero/            # archivi di recupero: contengono file di ambiente veri
+/campagna-demo/        # video, audio e materiali della campagna (pesanti)
+/desktop/dist/         # gli installer costruiti
+.carica-installer.mjs  # script di servizio con accesso al deposito
+.check-crediti.mjs
+.collaudo-demo.ts
+PIANO.md
+MERCATO.md
+tsconfig.tsbuildinfo   # cache di TypeScript: cambia a ogni compilazione

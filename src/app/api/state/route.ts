@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { getProfilo, statoAbbonamento, messaggiRecenti } from "@/lib/data";
 import { conTenant } from "@/lib/sessione";
 import { lanciato, eccezioneLancio } from "@/lib/lancio";
-import { emailDemo } from "@/lib/demo";
-import { riepilogoTutorial } from "@/lib/orion/tutorial";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,9 +20,7 @@ export async function GET() {
       // Collaudo pre-lancio: per i tester la vetrina sblocca anche i download.
       tester: !lanciato() && eccezioneLancio(u.email),
       // ORION DEMO: il client accende binario tutorial, badge e limiti demo.
-      demo: emailDemo(u.email),
       // Il binario del tutorial sopravvive al ricaricamento della pagina.
-      tutorial: emailDemo(u.email) ? riepilogoTutorial() : null,
       // ORION su misura: il tema estetico dell'utente (segue l'account ovunque).
       tema: (() => {
         try {

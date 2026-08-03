@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { OrionCore, type CoreState } from "@/components/OrionCore";
 import { PanelStage } from "@/components/PanelStage";
-import { PalcoDemo, PalcoApertura } from "@/components/PalcoDemo";
+import { Palco, PalcoApertura } from "@/components/Palco";
 import { CameraCapture } from "@/components/CameraCapture";
 import { VisioneMode, type VisioneHandle } from "@/components/VisioneMode";
 import dynamic from "next/dynamic";
@@ -104,7 +104,11 @@ function LogoWhatsApp({ size = 16 }: { size?: number }) {
 // gli elementi fissi) + una vena di animazione per la tappa corrente.
 type BinarioTutorial = Extract<Vista, { tipo: "tutorial" }>["dati"];
 
-function BinarioDemo({ t }: { t: BinarioTutorial | null }) {
+function Binario({ t }: { t: BinarioTutorial | null }) {
+  // Il binario è lo stesso per il PRIMO GIRO della versione completa e per il
+  // giro guidato: cambia solo l'etichetta.
+  const primoGiro = t?.percorso === "primo_giro";
+  const etichetta = primoGiro ? "Primo giro" : "Demo";
   // Prima che il giro parta (chiamata 0 in corso) il binario c'è comunque:
   // mostra la tappa d'accoglienza, così si CAPISCE subito che è un tutorial.
   const conosciamoci = !t || !t.percorso;
@@ -117,7 +121,7 @@ function BinarioDemo({ t }: { t: BinarioTutorial | null }) {
         <style>{`@keyframes binario-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(103,232,249,0.35); } 50% { box-shadow: 0 0 10px 2px rgba(103,232,249,0.25); } }`}</style>
         <div className="mb-1 flex items-center gap-1.5">
           <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-cyan-200">
-            Demo
+            {etichetta}
           </span>
           <span className="text-[11px] font-semibold text-slate-200">Giro guidato</span>
         </div>
@@ -147,7 +151,7 @@ function BinarioDemo({ t }: { t: BinarioTutorial | null }) {
       <style>{`@keyframes binario-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(103,232,249,0.35); } 50% { box-shadow: 0 0 10px 2px rgba(103,232,249,0.25); } }`}</style>
       <div className="mb-1 flex items-center gap-1.5">
         <span className="rounded bg-cyan-400/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-cyan-200">
-          Demo
+          {etichetta}
         </span>
         <span className="text-[11px] font-semibold text-slate-200">Giro guidato</span>
       </div>
@@ -180,6 +184,9 @@ function BinarioDemo({ t }: { t: BinarioTutorial | null }) {
           </div>
         ))}
       </div>
+      {t.palco && !t.finito && (
+        <p className="mt-2 border-t border-white/5 pt-2 text-[10px] leading-snug text-slate-500">{t.palco.sottotitolo}</p>
+      )}
     </div>
   );
 }
@@ -2085,7 +2092,7 @@ export default function Home() {
             // spiega ogni tappa (o l'apertura durante la Chiamata 0). I pannelli
             // veri restano quelli di sempre e si aprono a parte.
             tutorial && tutorial.palco ? (
-              <PalcoDemo c={tutorial.palco} />
+              <Palco c={tutorial.palco} />
             ) : tutorial && tutorial.percorso ? (
               <div className="grid h-full place-items-center">
                 <p className="max-w-md px-6 text-center text-sm text-slate-600">Un attimo…</p>
@@ -2346,7 +2353,7 @@ export default function Home() {
 
       {/* ORION DEMO: il binario del giro guidato, visibile DALLA PRIMA PAROLA
           (durante la chiamata 0 mostra la tappa d'accoglienza «Conosciamoci»). */}
-      {demo && autenticato && <BinarioDemo t={tutorial} />}
+      {autenticato && (demo || (tutorial?.percorso === "primo_giro" && !tutorial.finito)) && <Binario t={tutorial} />}
 
       {/* L'ANNUNCIO della posta: «È arrivato un messaggio da X, vuoi aprirlo?» */}
       {annuncio.length > 0 && !rispostaA && (

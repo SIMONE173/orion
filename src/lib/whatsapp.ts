@@ -1,7 +1,6 @@
 import { tenantIdOpzionale } from "./tenant";
 import { getWhatsappAccountByTenant } from "./data";
 import { decifra } from "./crypto";
-import { tenantDemo } from "./demo";
 
 // ──────────────────────────────────────────────────────────────────────────
 // Adapter WhatsApp (Meta Cloud API).
@@ -56,7 +55,6 @@ export async function inviaMessaggioWhatsApp(to: string, testo: string): Promise
   // ORION DEMO: MAI toccare l'API Meta reale — sempre simulato (lo studio è di
   // prova). Senza questo, in produzione la demo sbatte contro il token scaduto.
   const tn = tenantIdOpzionale();
-  if (tn !== null && tenantDemo(tn)) return { ok: true, simulato: true };
   const cred = credenziali();
   if (!cred) return { ok: true, simulato: true };
 

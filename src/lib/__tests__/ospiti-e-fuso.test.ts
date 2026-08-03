@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { runWithTenant } from "../tenant";
 import { db } from "../db";
 import { eccezioneLancio, accessoGratuitoPermanente, ospiteInvitato } from "../lancio";
-import { oggiRoma, statoAbbonamento, briefingOggi } from "../data";
-import { seminaStudioDiProva } from "../orion/tutorial";
+import { oggiRoma, statoAbbonamento, briefingOggi, creaCliente, creaAppuntamento } from "../data";
 
 // Due cose piccole che, sbagliate, si pagano care.
 
@@ -56,10 +55,12 @@ test("«oggi» è il giorno di chi usa ORION, non quello del server", () => {
   assert.equal(oggiRoma(), atteso);
 });
 
-test("lo studio di prova non è MAI vuoto, nemmeno all'una di notte", async () => {
+test("l'agenda di OGGI è quella italiana, anche all'una di notte", async () => {
+  // Il caso che rompeva tutto: alle 00:30 italiane il server (UTC) è ancora a
+  // ieri. Un appuntamento di oggi deve comunque comparire nel briefing.
   const TEN = 990075;
   const pulisci = () => {
-    for (const t of ["appuntamenti", "clienti", "documenti", "pagamenti", "promemoria", "lista_attesa"]) {
+    for (const t of ["appuntamenti", "clienti"]) {
       try {
         db().prepare(`DELETE FROM ${t} WHERE tenant_id = ?`).run(TEN);
       } catch {
@@ -70,10 +71,11 @@ test("lo studio di prova non è MAI vuoto, nemmeno all'una di notte", async () =
   pulisci();
   try {
     await runWithTenant(TEN, async () => {
-      seminaStudioDiProva("professionista", { nome: "Seduta", durataMin: 45 });
-      const b = briefingOggi() as unknown as { appuntamenti: unknown[]; daConfermare: number };
-      assert.equal(b.appuntamenti.length, 3, "tre appuntamenti oggi: il primo colpo d'occhio non può essere un'agenda vuota");
-      assert.equal(b.daConfermare, 1);
+      const c = creaCliente({ nome: "Prova Fuso", telefono: "3331230000" });
+      const oggi = oggiRoma();
+      creaAppuntamento({ cliente_id: c.id, titolo: "Seduta — Prova Fuso", inizio: `${oggi}T10:00`, fine: `${oggi}T10:45` });
+      const b = briefingOggi() as unknown as { appuntamenti: unknown[] };
+      assert.equal(b.appuntamenti.length, 1, "il briefing guarda il giorno ITALIANO, non quello del server");
     });
   } finally {
     pulisci();

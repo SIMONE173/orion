@@ -2,20 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import type { Vista, Azione } from "./views";
 import type { Cliente } from "../data";
 import { tenantIdCorrente } from "../tenant";
-import { tenantDemo } from "../demo";
-import {
-  type StatoTutorial,
-  statoTutorial,
-  tappaAppenaPresentata,
-  salvaStatoTutorial,
-  tappaCorrente,
-  tappeDi,
-  riepilogoTutorial,
-  avviaTutorial,
-  avanzaTutorial,
-  salvaFeedbackTutorial,
-  simulaPostaDemo,
-} from "./tutorial";
+import { calcolaReferto } from "../referto";
 import {
   statoPrimoGiro,
   tappaCorrente as tappaPrimoGiro,
@@ -1720,6 +1707,12 @@ export const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "referto",
+    description:
+      "IL REFERTO — «cosa ti sta scappando». Conta sui SUOI dati veri le tre cose che un professionista riconosce subito come soldi propri: il lavoro fatto e mai incassato, le persone che non tornano da mesi (con quanto varrebbero sul suo scontrino medio), e le fasce di agenda che restano vuote sempre. Apre il pannello e ti restituisce i numeri da leggere ad alta voce. USALO nella tappa «Cosa ti sta scappando» del primo giro, e ogni volta che l'utente chiede come sta andando o cosa può recuperare. SE I DATI SONO POCHI il referto te lo dice: in quel caso NON inventare cifre, leggi solo quello che c'è e dillo con semplicità.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "primo_giro",
     description:
       "IL PRIMO GIRO — il tutorial guidato che accompagna il professionista SUBITO DOPO la Chiamata 0, la prima volta che entra in ORION. NON è una demo: è il suo computer, i suoi clienti, il suo lavoro, e ogni tappa lascia dietro qualcosa di vero (gli strumenti registrati, i clienti dentro, la segreteria accesa, un appuntamento scritto nel suo gestionale). Azioni: 'avanti' (chiude la tappa corrente e ti dà la successiva — chiamala SOLO quando il risultato vero della tappa è stato ottenuto, o quando l\'utente dice di proseguire), 'salta' (l\'utente non vuole fare questa tappa adesso: si segna e si va oltre, senza insistere), 'fatto' (segna come consegnata una tappa che non lascia traccia nel database, tipo il referto), 'esci' (l\'utente vuole smettere: il giro si chiude e non si ripropone più), 'stato' (dove siamo).",
@@ -1727,30 +1720,6 @@ export const TOOLS: Anthropic.Tool[] = [
       type: "object",
       properties: {
         azione: { type: "string", enum: ["avanti", "salta", "fatto", "esci", "stato"] },
-      },
-      required: ["azione"],
-    },
-  },
-  {
-    name: "tutorial",
-    description:
-      "SOLO IN ORION DEMO — il timone del giro guidato. Azioni: 'avvia' (dopo la Chiamata 0: sceglie il percorso, prepara lo studio di prova e ti dà la prima tappa), 'tappa_completata' (chiude la tappa corrente e ti dà la guida della successiva: chiamala quando la tappa è stata VISSUTA o l'utente dice di andare avanti), 'stato' (dove siamo), 'apri_telefono' (apre il telefono finto del cliente per la tappa WhatsApp), 'apri_software' (apre una FINESTRA DI PROVA del software che l'utente usa — Calendar o gestionale, col suo nome — e ORION la opera col cursore scrivendo un appuntamento: per la tappa «Il tuo software»), 'simula_posta' (fa arrivare le email di prova per la tappa posta), 'feedback' (registra piaciuto/utile nel finale), 'finale' (apre il sito di ORION nel browser dell'utente: solo alla chiusura del giro).",
-    input_schema: {
-      type: "object",
-      properties: {
-        azione: {
-          type: "string",
-          enum: ["avvia", "tappa_completata", "stato", "apri_telefono", "apri_software", "simula_posta", "feedback", "finale"],
-        },
-        prestazione: {
-          type: "string",
-          description:
-            "Per azione=avvia (e utile anche per apri_software): come si chiama UN appuntamento nel mestiere dell'utente (tu lo sai da qualsiasi professione): es. avvocato→'Udienza', medico/nutrizionista→'Visita', parrucchiere→'Appuntamento', consulente→'Sessione', idraulico→'Sopralluogo', fotografo→'Servizio'. Se non sai il mestiere, ometti.",
-        },
-        durata_min: { type: "integer", description: "Solo per azione=avvia. Durata tipica in minuti di quell'appuntamento (es. 30, 45, 60)." },
-        software: { type: "string", description: "Solo per azione=apri_software. Il nome del software che l'utente ha detto di usare (es. 'Google Calendar', 'Dentalink', 'il tuo gestionale')." },
-        piaciuto: { type: "boolean", description: "Solo per azione=feedback" },
-        utile: { type: "boolean", description: "Solo per azione=feedback" },
       },
       required: ["azione"],
     },
@@ -3244,18 +3213,6 @@ const handlers: Record<string, Handler> = {
 
   briefing: (_input, ctx) => {
     let dati = briefingOggi();
-    // DEMO: i clienti sono di esempio. Il pannello lo dichiara a schermo (badge),
-    // e QUI dentro al risultato c'è l'ordine di dirlo anche a voce — letto
-    // nell'istante in cui ORION apre l'agenda, quindi molto più difficile da
-    // ignorare di una riga persa nel prompt di sistema.
-    const inDemo = tenantDemo(tenantIdCorrente());
-    if (inDemo) dati = { ...dati, studioDiProva: true };
-    const notaDemo = inDemo
-      ? {
-          nota_studio_di_prova:
-            "APRI LA FRASE DICENDOLO: questa giornata l'hai riempita TU con clienti di PROVA, non sono suoi. Esempio: «Ti faccio vedere la tua giornata — te l'ho riempita con dei clienti di prova, così vedi com'è.» Poi racconta gli appuntamenti. Se non lo dici, chi guarda crede che siano dati veri: è un errore.",
-        }
-      : {};
     // IL MATTINO DELLA SEGRETARIA: le modifiche accumulate (notte/PC spento)
     // per il gestionale entrano nel briefing (solo per il modello: il pannello
     // resta invariato) — su Desktop le allinea LEI, subito, con la Mano.
@@ -3272,7 +3229,7 @@ const handlers: Record<string, Handler> = {
     }
     // IL BUONGIORNO: su Desktop la scrivania si apparecchia DA SOLA insieme al
     // primo briefing del giorno — vale anche per gli account azienda.
-    const strumentiScrivania = scrivaniaDelMattino(ctx, inDemo);
+    const strumentiScrivania = scrivaniaDelMattino(ctx, false);
     const nota_scrivania = strumentiScrivania.length
       ? {
           scrivania:
@@ -3308,7 +3265,6 @@ const handlers: Record<string, Handler> = {
         result: {
           ...dati,
           ...extra,
-          ...notaDemo,
           azienda: az,
           messaggi_team: messaggi.map((m) => ({ da: m.da_nome, testo: m.testo, urgente: m.urgente === 1, quando: m.created_at })),
           approvazioni_da_decidere: daApprovare.map((a) => ({ id: a.id, da: a.da_nome, richiesta: a.richiesta, urgente: a.urgente === 1 })),
@@ -3332,12 +3288,12 @@ const handlers: Record<string, Handler> = {
     // riquadro; poi ORION racconta la giornata con tutto già davanti.
     if (strumentiScrivania.length) {
       return {
-        result: { ...dati, ...extra, ...notaDemo, ...nota_scrivania },
+        result: { ...dati, ...extra, ...nota_scrivania },
         vista: { tipo: "briefing", dati },
         ...azione_scrivania,
       };
     }
-    return { result: { ...dati, ...extra, ...notaDemo }, vista: { tipo: "briefing", dati } };
+    return { result: { ...dati, ...extra }, vista: { tipo: "briefing", dati } };
   },
 
   analisi_proattiva: (_input, ctx) => {
@@ -4508,22 +4464,10 @@ const handlers: Record<string, Handler> = {
   // recuperare il contenuto: documento → visore, agenda → mostra_agenda.
   stampa: async (input, ctx) => {
     const cosa = String(input.cosa ?? "").toLowerCase();
-    // DEMO: stampare si può (la prova della stampa è una tappa del tutorial), ma
-    // esce l'ANTEPRIMA, non la carta — e i file del computer non si toccano.
-    const anteprimaDemo = tenantDemo(tenantIdCorrente());
 
     if (cosa === "file") {
       const nome = String(input.nome ?? "").trim();
       if (!nome) return { result: { ok: false, errore: "serve il nome del file da stampare" } };
-      if (anteprimaDemo) {
-        return {
-          result: {
-            ok: false,
-            errore: "non_disponibile_in_demo",
-            nota: "Nella prova non tocco i file del suo computer: dillo con leggerezza e offri di stampare l'agenda o un documento tuo.",
-          },
-        };
-      }
       return {
         result: { ok: true, invio: "stampante", nota: "Sto mandando il file alla stampante; se qualcosa non va lo dico a voce." },
         azione: { tipo: "stampa_file", query: nome },
@@ -4544,12 +4488,11 @@ const handlers: Record<string, Handler> = {
       const fine = String(input.data_a ?? giorno);
       const titolo = fine !== giorno ? `Agenda ${giorno} → ${fine}` : `Agenda di ${giorno}`;
       return {
-        result: { ok: true, appuntamenti: righe.length, invio: anteprimaDemo ? "anteprima" : "stampante" },
+        result: { ok: true, appuntamenti: righe.length, invio: "stampante" },
         azione: {
           tipo: "stampa_contenuto",
           titolo,
           testo: righe.length ? righe.join("\n") : "Nessun appuntamento.",
-          ...(anteprimaDemo ? { anteprima: true } : {}),
         },
       };
     }
@@ -4560,8 +4503,8 @@ const handlers: Record<string, Handler> = {
       if (!esito.vista || esito.vista.tipo !== "documento") return { result: esito.result };
       const documento = (esito.vista.dati as Extract<Vista, { tipo: "documento" }>["dati"]).documento;
       return {
-        result: { ok: true, stampa: documento.titolo, invio: anteprimaDemo ? "anteprima" : "stampante" },
-        azione: { tipo: "stampa_contenuto", titolo: documento.titolo, documento, ...(anteprimaDemo ? { anteprima: true } : {}) },
+        result: { ok: true, stampa: documento.titolo, invio: "stampante" },
+        azione: { tipo: "stampa_contenuto", titolo: documento.titolo, documento },
       };
     }
 
@@ -4569,12 +4512,11 @@ const handlers: Record<string, Handler> = {
     const testo = String(input.testo ?? "").trim();
     if (!testo) return { result: { ok: false, errore: "serve il testo da stampare (o indica cosa: documento/agenda/file)" } };
     return {
-      result: { ok: true, invio: anteprimaDemo ? "anteprima" : "stampante" },
+      result: { ok: true, invio: "stampante" },
       azione: {
         tipo: "stampa_contenuto",
         titolo: String(input.titolo ?? "Documento ORION"),
         testo,
-        ...(anteprimaDemo ? { anteprima: true } : {}),
       },
     };
   },
@@ -4614,6 +4556,35 @@ const handlers: Record<string, Handler> = {
       riporta: true,
     },
   }),
+
+  referto: () => {
+    const r = calcolaReferto();
+    const nome = getProfilo()?.nome ?? null;
+    return {
+      result: {
+        ok: true,
+        voci: r.voci.map((v) => ({ titolo: v.titolo, valore: v.valore, dettaglio: v.dettaglio })),
+        totale_euro: r.totaleEuro,
+        storico_disponibile: r.base,
+        ...(r.avvertenza ? { avvertenza: r.avvertenza } : {}),
+        nota:
+          "Leggi le voci in TRE righe secche, in euro, senza giri di parole. " +
+          (r.avvertenza
+            ? "ATTENZIONE: c'è un'avvertenza — leggila com'è scritta e NON aggiungere numeri tuoi."
+            : "Chiudi con l'offerta concreta: «vuoi che li richiami io, uno per uno, con un messaggio scritto come parli tu?» (prepara_richiami).") +
+          " Il totale è una STIMA PRUDENTE sui suoi numeri: dillo come stima, mai come promessa.",
+      },
+      vista: {
+        tipo: "referto",
+        dati: {
+          voci: r.voci.map((v) => ({ chiave: v.chiave, titolo: v.titolo, valore: v.valore, dettaglio: v.dettaglio, euro: v.euro })),
+          totaleEuro: r.totaleEuro,
+          avvertenza: r.avvertenza,
+          studio: nome,
+        },
+      },
+    };
+  },
 
   // ── IL PRIMO GIRO: il timone del tutorial della versione COMPLETA ────────
   primo_giro: (input, ctx) => {
@@ -4680,165 +4651,7 @@ const handlers: Record<string, Handler> = {
     }
   },
 
-  // ── ORION DEMO: il timone del giro guidato ────────────────────────────────
-  tutorial: (input, ctx) => {
-    if (!tenantDemo(tenantIdCorrente())) {
-      return { result: { ok: false, errore: "Il tutorial esiste solo nella demo di ORION." } };
-    }
-    const azione = String(input.azione ?? "stato");
-    const conBinario = (s: StatoTutorial, extra: Record<string, unknown> = {}): Esito => {
-      const tappa = tappaCorrente(s);
-      return {
-        result: {
-          ok: true,
-          percorso: s.percorso,
-          finito: s.finito,
-          ...(tappa
-            ? { tappa: { numero: s.indice + 1, di: s.percorso ? tappeDi(s.percorso).length : 0, titolo: tappa.titolo, guida: tappa.guida } }
-            : {}),
-          ...extra,
-        },
-        vista: { tipo: "tutorial", dati: riepilogoTutorial(s) },
-      };
-    };
-    switch (azione) {
-      case "avvia":
-        return conBinario(
-          avviaTutorial(
-            typeof input.prestazione === "string" ? input.prestazione : undefined,
-            typeof input.durata_min === "number" ? input.durata_min : undefined
-          ),
-          { nota: "Studio di prova pronto. Il palco al centro mostra la prima tappa: seguila e accompagnala." }
-        );
-      case "tappa_completata":
-        if (!ctx?.tappaGiaAvanzata && tappaAppenaPresentata()) {
-          // La tappa è stata presentata in QUESTO turno: non si chiude subito,
-          // o il giro va fuori sincrono e l'utente non riesce mai a provarla.
-          return {
-            result: {
-              ok: false,
-              errore: "tappa_appena_iniziata",
-              nota: "Questa tappa l'hai appena presentata: lascia che l'utente la provi. Fermati qui e aspetta la sua reazione — la chiuderai al prossimo turno (o scatterà da sola se dice «avanti»).",
-            },
-          };
-        }
-        {
-          const chiesto = ctx?.ultimaRichiesta ?? "";
-          const fatto = (ctx?.strumentiUsati ?? []).some((n) => STRUMENTI_OPERATIVI.has(n));
-          if (chiesto && RE_RICHIESTA_OPERATIVA.test(chiesto) && !fatto) {
-            return {
-              result: {
-                ok: false,
-                errore: "richiesta_in_sospeso",
-                nota: `Un momento: l'utente ti ha appena chiesto «${chiesto.slice(0, 120)}». PRIMA fai quello che ti ha chiesto (con lo strumento giusto) e digli com'è andata. Il giro va avanti dopo — lasciarlo a metà sembra non ascoltarlo.`,
-              },
-            };
-          }
-        }
-        if (ctx?.tappaGiaAvanzata) {
-          // La tappa è GIÀ scattata in questo turno (l'utente ha detto "avanti"):
-          // non avanzare di nuovo, o si salta una tappa.
-          return conBinario(statoTutorial(), { nota: "La tappa era già stata chiusa in questo turno: sei sulla tappa corrente qui sopra. Presentala e basta." });
-        }
-        return conBinario(avanzaTutorial(), { nota: "Tappa chiusa. Prosegui con la guida della nuova tappa (se il giro è finito, saluta secondo la tappa finale)." });
-      case "apri_telefono":
-        return {
-          result: {
-            ok: true,
-            nota: "Telefono del cliente aperto: l'utente scrive come Giulia Marchetti, la segreteria automatica risponde DA SOLA (tu non rispondere al posto suo).",
-          },
-          vista: { tipo: "telefono", dati: { cliente: "Giulia Marchetti", telefono: "+393901000001" } },
-        };
-      case "apri_software": {
-        const nomeSw = (typeof input.software === "string" && input.software.trim()) || "il tuo gestionale";
-        const skin: "calendar" | "gestionale" = /calendar|google|calendario/i.test(nomeSw) ? "calendar" : "gestionale";
-        const prest = (typeof input.prestazione === "string" && input.prestazione.trim()) || "Appuntamento";
-        return {
-          result: {
-            ok: true,
-            nota: `Finestra di prova di "${nomeSw}" aperta: ORION la sta operando col cursore e ci scrive un appuntamento (la vede l'utente). Mentre parte, SPIEGA il meccanismo: non un collegamento magico — guardi lo schermo e usi il software come una persona, ecco perché funzioni con QUALSIASI software solo sapendone il nome. Poi ricorda che nella versione completa apri il suo ${nomeSw} VERO.`,
-          },
-          vista: {
-            tipo: "software_prova",
-            dati: { nome: nomeSw, skin, cliente: "Giulia Marchetti", prestazione: prest, quando: "domani 09:00" },
-          },
-        };
-      }
-      case "simula_posta": {
-        const esito = simulaPostaDemo();
-        // La mail che conta si APRE DA SOLA in chat (col corpo intero): la scena
-        // della posta si vive per intero — arriva, si apre, si può rispondere —
-        // senza dipendere dal fatto che il modello ricordi di chiamare apri_messaggio.
-        const com = esito.importante_id ? getComunicazione(esito.importante_id) : undefined;
-        if (com) {
-          segnaComunicazioniLette([com.id]);
-          return {
-            result: {
-              ok: true,
-              ...esito,
-              aperta: { da: com.cliente_nome ?? com.mittente, oggetto: com.oggetto },
-              nota: "Le email sono arrivate e quella che CONTA è già aperta in chat (l'app l'ha mostrata da sola). Ora: di' in due frasi di chi è e cosa chiede, di' quante ne hai silenziate, e OFFRIGLI di rispondere tu ('vuoi che le risponda io?'). Se detta la risposta, usa rispondi_email (invio simulato: dillo leggero).",
-            },
-            azione: {
-              tipo: "apri_messaggio",
-              arrivo: {
-                id: com.id,
-                canale: "email" as const,
-                cliente: com.cliente_nome ?? null,
-                cliente_id: com.cliente_id,
-                telefono: com.telefono ?? null,
-                mittente: com.mittente ?? null,
-                oggetto: com.oggetto ?? null,
-                tipo: com.tipo,
-                contenuto: com.contenuto,
-                allegato_url: com.allegato_url,
-                allegato_nome: com.allegato_nome,
-                quando: com.created_at,
-              },
-            },
-          };
-        }
-        return {
-          result: {
-            ok: true,
-            ...esito,
-            nota: "Posta in arrivo: 1 email importante (verrà annunciata DA SOLA dall'app a momenti) e 2 silenziate nel digest.",
-          },
-        };
-      }
-      case "feedback":
-        return conBinario(
-          salvaFeedbackTutorial({
-            ...(typeof input.piaciuto === "boolean" ? { piaciuto: input.piaciuto } : {}),
-            ...(typeof input.utile === "boolean" ? { utile: input.utile } : {}),
-          }),
-          { nota: "Feedback registrato." }
-        );
-      case "finale": {
-        // Il gran finale chiude anche il binario: tutte le tappe spuntate.
-        const s = statoTutorial();
-        if (s.percorso && !s.finito) {
-          const corrente = tappaCorrente(s);
-          if (corrente) s.completate = [...s.completate.filter((id) => id !== corrente.id), corrente.id];
-          s.indice = tappeDi(s.percorso).length;
-          s.finito = true;
-          salvaStatoTutorial(s);
-        }
-        return {
-          result: { ok: true, nota: "Sito aperto nel browser dell'utente. Saluta come da guida." },
-          azione: { tipo: "apri_url", url: "https://www.orionvision.it", etichetta: "orionvision.it" },
-          vista: { tipo: "tutorial", dati: riepilogoTutorial(s) },
-        };
-      }
-      default:
-        return conBinario(statoTutorial());
-    }
-  },
-
   presentazione: (input) => {
-    if (!tenantDemo(tenantIdCorrente())) {
-      return { result: { ok: false, errore: "La presentazione esiste solo nella demo di ORION." } };
-    }
     const punti = (Array.isArray(input.punti) ? input.punti : [])
       .filter((p: unknown): p is { icona: string; titolo: string; testo: string } => {
         const x = p as Record<string, unknown>;
@@ -4881,15 +4694,6 @@ const AREA_DI_TOOL: Record<string, AreaPermessi> = {
 // altrui (spesso di un potenziale cliente) e non deve MAI minimizzarsi e mettersi
 // a cliccare da solo, né lanciare app, né cestinare file. La Mano è la funzione
 // più potente che abbiamo: si mostra nella versione completa, guidati, con lo
-// STOP a portata di mano — non a sorpresa sul portatile di un ospite.
-const SPENTI_IN_DEMO = new Set([
-  "collega_whatsapp", "collega_email", "collega_calendario", "importa_dati", "esegui_import",
-  // ── mani e occhi sul computer altrui ──
-  "usa_computer", "esegui_comando", "guarda_schermo",
-  "apri_app", "chiudi_app", "chiudi_finestra",
-  "apri_file_locale", "crea_file_locale", "rinomina_file_locale", "elimina_file_locale",
-  "scrivi_file", "attiva_gesti",
-]);
 
 export async function dispatch(
   name: string,
@@ -4899,16 +4703,6 @@ export async function dispatch(
   const h = handlers[name];
   if (!h) return { result: { ok: false, errore: `Strumento sconosciuto: ${name}` } };
   if (ctx.strumentiUsati) ctx.strumentiUsati.push(name);
-  if (SPENTI_IN_DEMO.has(name) && tenantDemo(tenantIdCorrente())) {
-    return {
-      result: {
-        ok: false,
-        errore: "non_disponibile_in_demo",
-        nota:
-          "Nella demo non tocco il computer di chi sta provando (né file, né app, né clic) e i collegamenti veri restano fuori: questo è uno studio di prova. Spiegalo con leggerezza e RACCONTA cosa faresti nella versione completa — dove le mani sul computer ci sono davvero, guidati e con lo stop sempre a portata di mano.",
-      },
-    };
-  }
   const area = AREA_DI_TOOL[name];
   if (area) {
     const p = permessoArea(area, ctx.utenteId);

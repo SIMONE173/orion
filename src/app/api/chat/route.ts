@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { runConversation, type MessaggioStorico } from "@/lib/orion/client";
 import { conTenant } from "@/lib/sessione";
 import { lanciato, eccezioneLancio, quandoInParole } from "@/lib/lancio";
-import { emailDemo, demoEsaurita } from "@/lib/demo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,22 +25,11 @@ export async function POST(req: NextRequest) {
           }
         : undefined;
 
-    // Lucchetto del lancio: vale anche per sessioni già aperte (tranne
-    // eccezioni e DEMO — la demo è proprio la porta d'assaggio pre-lancio).
+    // Lucchetto del lancio: vale anche per sessioni già aperte. Passano il
+    // proprietario, i tester e gli ospiti invitati (eccezioneLancio).
     const r = await conTenant(async (utente) => {
-      const demo = emailDemo(utente.email);
-      if (!lanciato() && !eccezioneLancio(utente.email) && !demo) {
+      if (!lanciato() && !eccezioneLancio(utente.email)) {
         return { testo: `ORION apre ${quandoInParole()}. Ci vediamo lì! 🚀`, viste: [], errore: "lancio" };
-      }
-      // Tetto della demo: quando i crediti del tutorial finiscono, si saluta
-      // con garbo e si indica la strada (nessuna chiamata AI parte più).
-      if (demo && demoEsaurita(utente.tenant_id)) {
-        return {
-          testo:
-            "La demo ti ha dato tutto quello che aveva! 🎬 Ti è piaciuto lavorare così? Nella versione completa questo è solo l'inizio: vai su orionvision.it e ci rimettiamo al lavoro insieme.",
-          viste: [],
-          errore: "demo_esaurita",
-        };
       }
       return runConversation(storico, avvio, allegato, desktop, utente, schermo);
     });

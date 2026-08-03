@@ -5,6 +5,9 @@
 export type Novita = { data: string; testo: string };
 
 export const NOVITA: Novita[] = [
+  { data: "2026-07-29", testo: "Via la demo con i clienti finti: adesso la prima volta che entri è ORION in persona ad accompagnarti dentro il TUO ORION — registra i programmi che apri ogni mattina e te li mette in ordine sullo schermo, porta dentro i tuoi clienti veri, e scrive un appuntamento nel tuo gestionale muovendo il mouse davanti a te" },
+  { data: "2026-07-29", testo: "«Cosa ti sta scappando»: ORION guarda il tuo storico e ti dice quanto hai fatto e mai incassato, quante persone non si vedono da mesi e quanto varrebbero, quali fasce della settimana ti restano vuote sempre. Se lo storico è poco te lo dice — numeri inventati mai" },
+  { data: "2026-07-29", testo: "«Oggi» adesso è il tuo giorno, non quello del server: dopo mezzanotte l'agenda non è più quella di ieri, i promemoria scattano quando devono e le fatture portano la data giusta" },
   { data: "2026-07-28", testo: "ORION si aggiorna da solo: su Windows scarica la versione nuova in silenzio e la installa quando chiudi — la riapri ed è già aggiornato, senza fare niente. Su Mac ti avvisa che c'è del nuovo, col link pronto" },
   { data: "2026-07-28", testo: "Windows si installa come si deve: al posto dello zip da scompattare a mano c'è un installer vero — apri, avanti, fatto: ORION finisce nel menu Start, col collegamento sul desktop, e si avvia da solo" },
   { data: "2026-07-28", testo: "Riaccendi il computer e ORION ha già rimesso in ordine i tuoi programmi: quello che è successo mentre eri via viene riportato nel gestionale — e le cose prese e disdette durante la notte le salta, perché lì dentro non sono mai esistite" },

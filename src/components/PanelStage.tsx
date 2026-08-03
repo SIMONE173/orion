@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { Vista } from "@/lib/orion/views";
 import { AgendaPanel } from "./panels/AgendaPanel";
+import { RefertoPanel } from "./panels/RefertoPanel";
 import { ClientePanel } from "./panels/ClientePanel";
 import { ClientiPanel } from "./panels/ClientiPanel";
 import { NotePanel } from "./panels/NotePanel";
@@ -83,6 +84,8 @@ export function renderPanel(v: Vista) {
       return <SportPanel dati={v.dati} />;
     case "briefing":
       return <BriefingPanel dati={v.dati} />;
+    case "referto":
+      return <RefertoPanel dati={v.dati} />;
     case "fattura":
       return <FatturaPanel dati={v.dati} />;
     case "promemoria":

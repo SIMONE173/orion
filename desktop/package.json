@@ -1,6 +1,6 @@
 {
   "name": "orion-desktop",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "ORION Desktop — il tuo assistente, con le mani sul computer",
   "main": "main.js",
   "author": "ORION",
@@ -9,9 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --publish never",
-    "dist:demo": "electron-builder --publish never -c.productName='ORION Demo' -c.appId=app.orion.demo -c.artifactName='ORION-Demo-${version}-${arch}.${ext}' -c.extraMetadata.productName='ORION Demo' -c.publish.url=https://orionvision.it/api/aggiorna/demo",
-    "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "dist:demo:win": "electron-builder --win nsis --x64 --publish never -c.productName='ORION Demo' -c.appId=app.orion.demo -c.extraMetadata.productName='ORION Demo' -c.win.artifactName='ORION-Demo-${version}-win.${ext}' -c.nsis.shortcutName='ORION Demo' -c.publish.url=https://orionvision.it/api/aggiorna/demo"
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.3.3",

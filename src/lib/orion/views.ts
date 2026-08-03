@@ -114,6 +114,16 @@ export type Vista =
     }
   | { tipo: "promemoria"; dati: { promemoria: Promemoria[] } }
   | { tipo: "documenti"; dati: { documenti: Documento[] } }
+  // IL REFERTO: i soldi per terra di QUESTO studio, contati sui dati veri.
+  | {
+      tipo: "referto";
+      dati: {
+        voci: { chiave: string; titolo: string; valore: string; dettaglio: string; euro: number }[];
+        totaleEuro: number;
+        avvertenza: string | null;
+        studio?: string | null;
+      };
+    }
   | { tipo: "documento"; dati: { documento: Documento } }
   | { tipo: "attesa"; dati: { voci: VoceAttesa[] } }
   | { tipo: "proattiva"; dati: { segnalazioni: Segnalazione[] } }

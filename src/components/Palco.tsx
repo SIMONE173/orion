@@ -95,7 +95,7 @@ export function PalcoApertura() {
 }
 
 // Il palco di una tappa: cos'è → perché → prova tu. Ri-animato a ogni tappa.
-export function PalcoDemo({ c }: { c: PalcoContenuto }) {
+export function Palco({ c }: { c: PalcoContenuto }) {
   return (
     <div key={c.numero} className="relative flex h-full w-full items-center justify-center px-6">
       <style>{STILE}</style>
