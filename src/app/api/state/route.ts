@@ -6,6 +6,20 @@ import { lanciato, eccezioneLancio } from "@/lib/lancio";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * SE NON HA MAI PARLATO, NON C'È UNA CONVERSAZIONE DA MOSTRARE.
+ * Chi apriva ORION più volte senza rispondere si ritrovava a schermo una
+ * colonna di saluti identici, uno per apertura, con le date di settimane
+ * diverse: sembrava che ORION facesse dieci domande di fila. Se fra i
+ * messaggi non c'è UNA sola parola dell'utente, si tiene solo l'ultima
+ * domanda — che è l'unica ancora in piedi. Non si cancella niente: si mostra
+ * quello che ha senso.
+ */
+function soloConversazioneVera<T extends { ruolo: string }>(righe: T[]): T[] {
+  if (righe.some((m) => m.ruolo === "user")) return righe;
+  return righe.slice(-1);
+}
+
 /** «14:22» se è di oggi, «ieri 19:23», «28/07 19:23» se è più vecchio. */
 function oraInChat(iso: string): string {
   const d = new Date(iso);
@@ -44,7 +58,7 @@ export async function GET() {
       })(),
       // Continuità: ultimi messaggi per ripopolare la conversazione al reload
       // (con l'ORARIO di ciascuno, come in ogni chat che si rispetti).
-      storico: messaggiRecenti(40).map((m) => ({
+      storico: soloConversazioneVera(messaggiRecenti(40)).map((m) => ({
         role: m.ruolo,
         content: m.contenuto,
         // Solo l'ora, su una conversazione lunga giorni, sembra scombinata

@@ -57,6 +57,32 @@ test("dopo che l'utente ha risposto, la conversazione riprende normalmente", asy
   });
 });
 
+/** La stessa regola dell'API: se non ha mai parlato, resta solo l'ultima domanda. */
+function soloConversazioneVera<T extends { ruolo: string }>(righe: T[]): T[] {
+  if (righe.some((m) => m.ruolo === "user")) return righe;
+  return righe.slice(-1);
+}
+
+test("i saluti già accumulati non sporcano più lo schermo", () => {
+  // Il caso vero visto dal fondatore: cinque saluti su tre settimane, nessuna
+  // sua parola in mezzo. A schermo deve restare UNA domanda.
+  const soloSaluti = [
+    { ruolo: "assistant", contenuto: "Ciao! …" },
+    { ruolo: "assistant", contenuto: "Ciao, benvenuto! …" },
+    { ruolo: "assistant", contenuto: "Ciao, il tuo nuovo assistente …" },
+  ];
+  assert.equal(soloConversazioneVera(soloSaluti).length, 1);
+  assert.equal(soloConversazioneVera(soloSaluti)[0].contenuto, "Ciao, il tuo nuovo assistente …", "resta l'ultima, quella in piedi");
+
+  // Ma appena c'è una conversazione vera, non si tocca NIENTE.
+  const vera = [
+    { ruolo: "assistant", contenuto: "Ciao!" },
+    { ruolo: "user", contenuto: "per il lavoro" },
+    { ruolo: "assistant", contenuto: "Perfetto, di cosa ti occupi?" },
+  ];
+  assert.equal(soloConversazioneVera(vera).length, 3);
+});
+
 test("a Chiamata 0 finita la regola non si applica: il briefing del mattino ci vuole", async () => {
   await runWithTenant(TEN, async () => {
     salvaMessaggio("assistant", "Ecco la tua giornata di ieri.");
